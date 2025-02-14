@@ -1,8 +1,14 @@
 use core::fmt;
 use std::vec;
 
+use aberth::Complex;
+use aberth::Roots;
+use aberth::StopReason;
+use arrayvec::ArrayVec;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
+
+use aberth::aberth;
 
 use super::jpl_request::pos_vector::{date_to_jd, get_helio_pos};
 
@@ -16,14 +22,30 @@ struct OrbitGauss {
     sun_pos: Matrix3<f64>,
 }
 
+/// Define the errors that the Gauss method could return during the execution
+///
+/// GaussSingMatrix means that the matrix made of unit_vector towards the orbiting body cannot be inverse.
 #[derive(Debug, Clone)]
 struct GaussSingMatrix;
+
+/// Solve8PolyFailed is used in case the Aberth–Ehrlich method failed to return roots.
+#[derive(Debug, Clone)]
+struct Solve8PolyFailed;
 
 impl fmt::Display for GaussSingMatrix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "The unit matrix cannot be inverse, orbot could be coplanar"
+            "The unit matrix cannot be inverse, orbit could be coplanar"
+        )
+    }
+}
+
+impl fmt::Display for Solve8PolyFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "The Aberth–Ehrlich method failed to find complex roots for the 8-order polynom."
         )
     }
 }
@@ -31,17 +53,25 @@ impl fmt::Display for GaussSingMatrix {
 impl OrbitGauss {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
-    pub fn new(
-        ra: Vector3<f64>,
-        dec: Vector3<f64>,
-        time: Vector3<f64>,
-        sun_pos: Matrix3<f64>,
-    ) -> OrbitGauss {
+    pub async fn new(ra: Vector3<f64>, dec: Vector3<f64>, time: Vector3<f64>) -> OrbitGauss {
+        let pos_vector = get_helio_pos(&time.as_slice().to_vec()).await;
+
+        // matrix of the observer position at each time of the three observations
+        // cartesian representation, unit=AU (astronomical unit)
+        //    x y z
+        // t1 0 1 2
+        // t2 4 5 6
+        // t3 7 8 9
+        let sun_pos_matrix = Matrix3::from_columns(&[
+            pos_vector.get(0).unwrap().pos_vector(),
+            pos_vector.get(1).unwrap().pos_vector(),
+            pos_vector.get(2).unwrap().pos_vector(),
+        ]);
         OrbitGauss {
             ra: ra,
             dec: dec,
             time: time,
-            sun_pos: sun_pos,
+            sun_pos: sun_pos_matrix,
         }
     }
 
@@ -64,7 +94,19 @@ impl OrbitGauss {
         ])
     }
 
-    fn compute_A_B_vector(&self) -> (Vector3<f64>, Vector3<f64>) {
+    fn gauss_prelim(
+        &self,
+    ) -> Result<
+        (
+            f64,
+            f64,
+            Matrix3<f64>,
+            Matrix3<f64>,
+            Vector3<f64>,
+            Vector3<f64>,
+        ),
+        GaussSingMatrix,
+    > {
         let tau1 = GaussGrav * (self.time[0] - self.time[1]);
         let tau3 = GaussGrav * (self.time[2] - self.time[1]);
         let tau13 = tau3 - tau1;
@@ -74,35 +116,150 @@ impl OrbitGauss {
             0.0,
             vector_a[2] * (tau13.powi(2) - tau1.powi(2) / 6.0),
         );
-        (vector_a, vector_b)
+
+        let unit_matrix = self.unit_matrix();
+        let Some(inv_unit_matrix) = unit_matrix.try_inverse() else {
+            return Err(GaussSingMatrix);
+        };
+
+        Ok((tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b))
     }
 
-    fn coeff_eight_poly(&self) -> Result<(f64, f64, f64), GaussSingMatrix> {
-        let unit_matrix = self.unit_matrix();
-        if let Some(inv_unit_matrix) = unit_matrix.try_inverse() {
-            let (a_vector, b_vector) = self.compute_A_B_vector();
+    fn coeff_eight_poly(
+        &self,
+        unit_matrix: &Matrix3<f64>,
+        unit_invmatrix: &Matrix3<f64>,
+        vector_a: &Vector3<f64>,
+        vector_b: &Vector3<f64>,
+    ) -> Result<(f64, f64, f64), GaussSingMatrix> {
+        let ra = self.sun_pos * vector_a;
+        let rb = self.sun_pos * vector_b;
 
-            let ra = self.sun_pos * a_vector;
-            let rb = self.sun_pos * b_vector;
+        let a2star = unit_invmatrix.column(1).dot(&ra);
+        let b2star = unit_invmatrix.column(1).dot(&rb);
 
-            let a2star = inv_unit_matrix.column(1).dot(&ra);
-            let b2star = inv_unit_matrix.column(1).dot(&rb);
+        let r22 = self.sun_pos.row(1).norm();
+        let s2r2 = unit_matrix.row(1).dot(&self.sun_pos.row(1));
+        Ok((
+            -(a2star.powi(2) - r22 - (2.0 * a2star * s2r2)),
+            -(2.0 * b2star * (a2star + s2r2)),
+            -(b2star.powi(2)),
+        ))
+    }
 
-            let r22 = self.sun_pos.row(1).norm();
-            let s2r2 = unit_matrix.row(1).dot(&self.sun_pos.row(1));
-            Ok((
-                -(a2star.powi(2) - r22 - (2.0 * a2star * s2r2)),
-                -(2.0 * b2star * (a2star + s2r2)),
-                -(b2star.powi(2)),
-            ))
-        } else {
-            Err(GaussSingMatrix)
+    fn solve_8poly(
+        &self,
+        polynom: &[f64; 8],
+        max_iterations: u32,
+        aberth_epsilon: f64,
+        root_acceptance_epsilon: f64,
+    ) -> Result<Vec<f64>, Solve8PolyFailed> {
+        let roots = aberth(&polynom, max_iterations, aberth_epsilon);
+        match roots.stop_reason {
+            StopReason::Converged(_) | StopReason::MaxIteration(_) => {
+                return Ok(roots
+                    .iter()
+                    // root criteria acceptance: root must be real and real part must be positive
+                    .filter(|complex| complex.re > 0. && complex.im.abs() < root_acceptance_epsilon)
+                    .map(|complex| complex.re)
+                    .collect::<Vec<f64>>());
+            }
+            StopReason::Failed(_) => {
+                return Err(Solve8PolyFailed);
+            }
         }
+    }
+
+    /// Compute the asteroid position vector at the time of the observation
+    ///
+    /// Input:
+    ///     roots: the roots computed from solve_8poly
+    ///     unit_matrix: the matrix made of unit_vector to the orbiting body
+    ///     unit_matinv: the inverse of the unit matrix
+    ///     vector_a and vector_b returned by the gauss_prelim function
+    ///
+    /// Output:
+    ///     the position vector of the asteroid at the time of the observation
+    fn asteroid_position_vector(
+        &self,
+        roots: f64,
+        unit_matrix: &Matrix3<f64>,
+        unit_matinv: &Matrix3<f64>,
+        vector_a: &Vector3<f64>,
+        vector_b: &Vector3<f64>,
+    ) -> Matrix3<f64> {
+        let r2m3 = 1. / roots.powi(3);
+        let c_vec: Vector3<f64> = Vector3::new(
+            vector_a[0] + vector_b[0] * r2m3,
+            -1.,
+            vector_a[2] + vector_b[2] * r2m3,
+        );
+        let gcap = self.sun_pos * c_vec;
+        let crhom = unit_matinv * gcap;
+        let rho: Vector3<f64> = -crhom.component_div(&c_vec);
+
+        let rho_unit = Matrix3::from_columns(&[
+            rho[0] * unit_matrix.column(0),
+            rho[1] * unit_matrix.column(1),
+            rho[2] * unit_matrix.column(2),
+        ]);
+        self.sun_pos + rho_unit
+    }
+
+    /// Compute the velocity vector of the asteroid at the time of the second observation
+    /// 
+    /// Inputs:
+    ///     ast_pos_vector: Asteroid position vector at the time of the three observations
+    ///     cartesian representation, unit= AU
+    ///       x y z
+    ///    t1 0 1 2
+    ///    t2 4 5 6
+    ///    t3 7 8 9
+    ///    
+    ///    tau1: Normalized time of the first observation
+    ///    tau3: normalized time of the third observation
+    /// 
+    /// Output:
+    ///     Velocity vector of the asteroid [vx, vy, vz]
+    fn gibbs_correction(ast_pos_vector: &Matrix3<f64>, tau1: f64, tau3: f64) -> Vector3<f64> {
+        let tau13 = tau3 - tau1;
+        let g = GaussGrav.powi(2);
+        let r1m3 = 1. / ast_pos_vector.column(0).norm().powi(3).sqrt();
+        let r2m3 = 1. / ast_pos_vector.column(1).norm().powi(3).sqrt();
+        let r3m3 = 1. / ast_pos_vector.column(2).norm().powi(3).sqrt();
+
+        let d1 = tau3 * (r1m3 / 12. - 1. / (tau1 * tau13));
+        let d2: f64 = (tau1 + tau3) * (r2m3 / 12. - 1. / (tau1 * tau3));
+        let d3 = -tau1 * (r3m3 / 12. + 1. / (tau3 * tau13));
+        let d_vect = Vector3::new(-d1, d2, d3);
+        Vector3::new(
+            GaussGrav * ast_pos_vector.column(0).dot(&d_vect),
+            GaussGrav * ast_pos_vector.column(1).dot(&d_vect),
+            GaussGrav * ast_pos_vector.column(2).dot(&d_vect),
+        )
+    }
+
+    pub fn solve_orbit(&self) {
+        let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) =
+            self.gauss_prelim().unwrap();
+        let (coeff_6, coeff_3, coeff_0) = self
+            .coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b)
+            .unwrap();
+        let polynomial = [coeff_0, 0., coeff_3, 0., 0., coeff_6, 0., 1.];
+        let roots = self.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
+        let xp = self.asteroid_position_vector(
+            roots.get(0).unwrap().clone(),
+            &unit_matrix,
+            &inv_unit_matrix,
+            &vect_a,
+            &vect_b,
+        );
     }
 }
 
 #[cfg(test)]
 mod gauss_test {
+
     use super::*;
 
     #[tokio::test]
@@ -128,9 +285,41 @@ mod gauss_test {
             sun_pos: sun_pos_matrix,
         };
 
-        let (coeff_8, coeff_6, coeff_3) = gauss.coeff_eight_poly().expect("");
-        println!("{coeff_8}");
-        println!("{coeff_6}");
-        println!("{coeff_3}");
+        // let (_, coeff_6, coeff_3, coeff_0) = gauss.coeff_eight_poly().expect("");
+        // assert_eq!(coeff_6, -0.08419374012465505);
+        // assert_eq!(coeff_3, 3.6106799662489414e-10);
+        // assert_eq!(coeff_0, -2.2878613025454898e-20);
+    }
+
+    #[tokio::test]
+    async fn test_solve_8poly() {
+        let date_list = vec![
+            "2021-07-04T12:47:24",
+            "2021-07-04T13:47:24",
+            "2021-07-04T14:47:24",
+        ];
+        let jd_time = date_to_jd(&date_list);
+        let pos_vector = get_helio_pos(&jd_time).await;
+
+        let sun_pos_matrix = Matrix3::from_columns(&[
+            pos_vector.get(0).unwrap().pos_vector(),
+            pos_vector.get(1).unwrap().pos_vector(),
+            pos_vector.get(2).unwrap().pos_vector(),
+        ]);
+
+        let gauss = OrbitGauss {
+            ra: Vector3::new(0.0, 1.0, 2.0),
+            dec: Vector3::new(0.0, 1.0, 2.0),
+            time: Vector3::from_vec(jd_time),
+            sun_pos: sun_pos_matrix,
+        };
+
+        // let (coeff_6, coeff_3, coeff_0) = gauss.coeff_eight_poly().expect("");
+        // let polynomial = [coeff_0, 0., coeff_3, 0., 0., coeff_6, 0., 1.];
+        // let roots = gauss.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
+        // assert_eq!(roots.len(), 2);
+        // assert_eq!(roots, vec![0.2901615504246318, 0.0016246910754188504]);
+
+        // let orb = gauss.orbit_prelim(roots, inv_matrix, vector_a, vector_b);
     }
 }

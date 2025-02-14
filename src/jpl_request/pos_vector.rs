@@ -22,6 +22,8 @@ CENTER='500@10'
 TLIST_TYPE=JD
 TLIST={}
 CSV_FORMAT=YES
+REF_SYSTEM=ICRF
+OUT_UNITS=AU-D
 ",
         jd_tlist(jd_list)
     );
@@ -166,7 +168,6 @@ mod jpl_tests {
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_jd(&date_list);
         let response_data = request_vector(&jd_list).await;
-        println!("{response_data}");
         assert!(response_data.contains(
             "$$SOE
 2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  3.284679949685707E+07, -1.485106329685027E+08,  7.156044432416558E+03,  2.860834584138197E+01,  6.313673173977221E+00, -1.324421108332530E-03,  5.073500062298830E+02,  1.520997054339719E+08,  1.344506803319922E-02,
