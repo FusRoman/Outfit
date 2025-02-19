@@ -5,6 +5,23 @@ const T2000: f64 = 51544.5; // Époque J2000 en jours juliens modifiés
 const RADEG: f64 = std::f64::consts::PI / 180.0; // Conversion degrés -> radians
 const RADSEC: f64 = std::f64::consts::PI / 648000.0; // Conversion d'arcsecondes en radians
 
+enum RefEpoch {
+    J2000,
+    EPOCH(f64),
+}
+
+enum RefSystem {
+    // Equatorial Mean, equatorial coordinates based on equator and mean equinox
+    // at a given epoch (J2000 for instance)
+    // (corrected for precession but not for nutation)
+    EQUM(RefEpoch),
+    // Equatorial True (same as EQUM but corrected for precession and nutation)
+    EQUT(RefEpoch),
+    // Ecliptic mean, ecliptic coordinates based on ecliptic and mean equinox
+    // at a given epoch (J2000 for instance)
+    ECLM(RefEpoch),
+}
+
 fn rotpn(
     rot: &mut [[f64; 3]; 3],
     rsys1: &str,
@@ -14,107 +31,84 @@ fn rotpn(
     epoch2: &str,
     date2: f64,
 ) {
-    let mut r: [[f64; 3]; 3] = [[0.0; 3]; 3];
-    let mut date: f64;
-    let mut epoch = epoch1.to_string();
-    let mut rsys = rsys1.to_string();
-    let mut epdif: bool;
-
-    // Vérification des systèmes de référence
     if !chkref(rsys1, epoch1) {
-        eprintln!(
-            "ERROR: unsupported {} reference system: RSYS = {} EPOCH = {}",
-            "starting", rsys1, epoch1
+        panic!(
+            "ERROR: Unsupported starting reference system {} {}",
+            rsys1, epoch1
         );
-        panic!("**** rotpn: abnormal end ****");
     }
-
     if !chkref(rsys2, epoch2) {
-        eprintln!(
-            "ERROR: unsupported {} reference system: RSYS = {} EPOCH = {}",
-            "final", rsys1, epoch1
+        panic!(
+            "ERROR: Unsupported final reference system {} {}",
+            rsys2, epoch2
         );
-        panic!("**** rotpn: abnormal end ****");
     }
 
-    // Déterminer la date selon l'époque
-    if epoch == "J2000" {
-        date = T2000;
-    } else if epoch == "OFDATE" {
-        date = date1;
-    } else {
-        panic!("**** rotpn: internal error (01) ****");
-    }
+    let mut rsys = rsys1.to_string();
+    let mut epoch = epoch1.to_string();
+    let mut date = if epoch == "J2000" { T2000 } else { date1 };
 
-    // Initialisation de la matrice de rotation (matrice identité)
-    *rot = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    *rot = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]; // Initialisation de la matrice unitaire
 
-    // Boucle pour la transformation
     let mut nit = 0;
 
     loop {
-        // Vérifier si les époques sont les mêmes
-        if epoch == epoch2 {
+        let epdif = if epoch == epoch2 {
             if epoch == "J2000" {
-                epdif = false;
-            } else if epoch == "OFDATE" {
-                epdif = (date - date1).abs() > EPS;
+                false
             } else {
-                panic!("**** rotpn: internal error (02) ****");
+                (date - date1).abs() > EPS
             }
         } else {
-            epdif = true;
-        }
+            true
+        };
+
+        let mut r = [[0.0; 3]; 3];
 
         if epdif {
-            // Transformation passant par le système équatorial J2000
+            println!("bar");
             if epoch != "J2000" {
                 if rsys == "ECLM" {
-                    // Transformation écliptique --> équatoriale
                     let obl = obleq(date);
-                    let r = rotmt(-obl, 1);
-                    matmul(&r, rot);
+                    let mut r = rotmt(-obl, 1);
+                    *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUT" {
-                    // Transformation équateur vrai --> équateur moyen
                     let mut r = rnut80(date);
                     trsp3(&mut r);
-                    matmul(&r, rot);
+                    *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUM" {
-                    // Transformation vers J2000 (précession)
                     prec(date, &mut r);
                     trsp3(&mut r);
-                    matmul(&r, rot);
+                    *rot = matmul(&r, rot);
                     epoch = "J2000".to_string();
                     date = T2000;
                 } else {
-                    panic!("**** rotpn: internal error (03) ****");
+                    panic!("ERROR: Internal error (03)");
                 }
             } else {
                 if rsys == "ECLM" {
-                    // Transformation écliptique --> équatoriale
                     let obl = obleq(T2000);
-                    let r = rotmt(-obl, 1);
-                    matmul(&r, rot);
+                    let mut r = rotmt(-obl, 1);
+                    *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUT" {
-                    // Transformation équateur vrai --> équateur moyen
                     let mut r = rnut80(T2000);
                     trsp3(&mut r);
-                    matmul(&r, rot);
+                    *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUM" {
                     if epoch2 == "OFDATE" {
                         prec(date2, &mut r);
-                        matmul(&r, rot);
+                        *rot = matmul(&r, rot);
                         epoch = epoch2.to_string();
                         date = date2;
                     } else {
-                        panic!("**** rotpn: internal error (04) ****");
+                        panic!("ERROR: Internal error (04)");
                     }
                 } else {
-                    panic!("**** rotpn: internal error (05) ****");
+                    panic!("ERROR: Internal error (05)");
                 }
             }
         } else {
@@ -122,60 +116,43 @@ fn rotpn(
                 return;
             }
 
-            // Transformation pour les systèmes de référence à la même époque
             if rsys == "EQUT" {
-                // Transformation équateur vrai --> équateur moyen
                 let mut r = rnut80(date);
                 trsp3(&mut r);
-                matmul(&r, rot);
+                *rot = matmul(&r, rot);
                 rsys = "EQUM".to_string();
             } else if rsys == "ECLM" {
-                // Transformation écliptique --> équatoriale
                 let obl = obleq(date);
-                let r = rotmt(-obl, 1);
-                matmul(&r, rot);
+                let mut r = rotmt(-obl, 0);
+                *rot = matmul(&r, rot);
                 rsys = "EQUM".to_string();
             } else if rsys == "EQUM" {
                 if rsys2 == "EQUT" {
-                    // Transformation équateur moyen --> équateur vrai
                     let mut r = rnut80(date);
-                    matmul(&r, rot);
+                    *rot = matmul(&r, rot);
                     rsys = "EQUT".to_string();
                 } else if rsys2 == "ECLM" {
-                    // Transformation équatoriale --> écliptique
                     let obl = obleq(date);
-                    let r = rotmt(obl, 1);
-                    matmul(&r, rot);
+                    let mut r = rotmt(obl, 0);
+                    *rot = matmul(&r, rot);
                     rsys = "ECLM".to_string();
                 } else {
-                    panic!("**** rotpn: internal error (06) ****");
+                    panic!("ERROR: Internal error (06)");
                 }
             } else {
-                panic!("**** rotpn: internal error (07) ****");
+                panic!("ERROR: Internal error (07)");
             }
         }
 
         nit += 1;
         if nit > 20 {
-            panic!("**** rotpn: internal error (08) ****");
+            panic!("ERROR: Internal error (08)");
         }
     }
 }
 
-// Remarques: ces fonctions doivent être implémentées selon le même principe que dans Fortran
 fn chkref(rsys: &str, epoch: &str) -> bool {
-    // Flag d'erreur, commence à true
-    let mut error = true;
-
-    // Vérification du système de référence
-    if rsys == "EQUM" || rsys == "EQUT" || rsys == "ECLM" {
-        // Vérification de l'époque
-        if epoch == "J2000" || epoch == "OFDATE" {
-            error = false; // Pas d'erreur
-        }
-    }
-
-    error
+    matches!(rsys, "EQUM" | "EQUT" | "ECLM") && matches!(epoch, "J2000" | "OFDATE")
 }
 
 fn obleq(tjm: f64) -> f64 {
@@ -191,15 +168,16 @@ fn obleq(tjm: f64) -> f64 {
 }
 
 fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
-    if k < 1 || k > 3 {
+    if k > 2 {
         panic!("**** ROTMT: k = ??? ****");
     }
 
     let cosa = alpha.cos();
     let sina = alpha.sin();
+
     let mut r = [[0.0; 3]; 3];
 
-    let i1 = (k - 1) % 3;
+    let i1 = k;
     let i2 = (i1 + 1) % 3;
     let i3 = (i2 + 1) % 3;
 
@@ -216,87 +194,251 @@ fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
     r
 }
 
-
 // arcsecond to radian conversion factor
 const RS: f64 = 4.84813681109536e-6;
 const P2: f64 = 2.0 * PI;
 fn nutn80(tjm: f64) -> (f64, f64) {
-
-    // computation of secular julian date
     let t1 = (tjm - T2000) / 36525.0;
-    let t = t1 as f32;
+    let t = t1 as f64;
     let t2 = t * t;
     let t3 = t2 * t;
 
-    // Arguments fondamentaux (IAU 1980)
-    // evaluation of the earth nutation
-    // Nutation: tidal gravitational forcing on the solid Earth
-    // each argument is in arcsecond converted in radians using the RS factor.
+    let dl = (485866.733 + 1717915922.633 * t1 + 31.310 * t2 + 0.064 * t3) * RS;
+    let dp = (1287099.804 + 129596581.224 * t1 - 0.577 * t2 - 0.012 * t3) * RS;
+    let df = (335778.877 + 1739527263.137 * t1 - 13.257 * t2 + 0.011 * t3) * RS;
+    let dd = (1072261.307 + 1602961601.328 * t1 - 6.891 * t2 + 0.019 * t3) * RS;
+    let dn = (450160.280 - 6962890.539 * t1 + 7.455 * t2 + 0.008 * t3) * RS;
 
-    // dl is the moon longitude representing moon mean anomaly (the moon position along its orbit)
-    let dl = (485866.733 + 1717915922.633 * t1 + 31.310 * t2 as f64 + 0.064 * t3 as f64) * RS;
+    let l = dl % P2;
+    let p = dp % P2;
+    let x = df % P2 * 2.0;
+    let d = dd % P2;
+    let n = dn % P2;
 
-    // dp is the sun longitude representing sun mean anomaly (the sun position along its orbit)
-    let dp = (1287099.804 + 129596581.224 * t1 - 0.577 * t2 as f64 - 0.012 * t3 as f64) * RS;
+    let sin_cos = |x: f64| -> (f64, f64) { (x.cos(), x.sin()) };
 
-    // df is the moon latitude argument used to model moon orbit variation
-    let df = (335778.877 + 1739527263.137 * t1 - 13.257 * t2 as f64 + 0.011 * t3 as f64) * RS;
+    let (cl, sl) = sin_cos(l);
+    let (cp, sp) = sin_cos(p);
+    let (cx, sx) = sin_cos(x);
+    let (cd, sd) = sin_cos(d);
+    let (cn, sn) = sin_cos(n);
 
-    // dd is the mean distance earth-moon. 
-    // it is computed as the longitude difference between sun and moon
-    let dd = (1072261.307 + 1602961601.328 * t1 - 6.891 * t2 as f64 + 0.019 * t3 as f64) * RS;
-
-    // dn is the moon ascending node, point where the moon cross the ecliptic plane from south to north.
-    let dn = (450160.280 - 6962890.539 * t1 + 7.455 * t2 as f64 + 0.008 * t3 as f64) * RS;
-
-    // Réduction des valeurs dans [0, 2π]
-    let l = (dl % P2) as f32;
-    let p = (dp % P2) as f32;
-    let x = ((df % P2) * 2.0) as f32;
-    let d = (dd % P2) as f32;
-    let n = (dn % P2) as f32;
-
-    // Calcul des valeurs trigonométriques
-    let (cl, sl) = (l.cos(), l.sin());
-    let (cp, sp) = (p.cos(), p.sin());
-    let (cx, sx) = (x.cos(), x.sin());
-    let (cd, sd) = (d.cos(), d.sin());
-    let (cn, sn) = (n.cos(), n.sin());
-
-    // Calculs auxiliaires (puissances de sinus/cosinus)
     let cp2 = 2.0 * cp * cp - 1.0;
+
     let sp2 = 2.0 * sp * cp;
     let cd2 = 2.0 * cd * cd - 1.0;
     let sd2 = 2.0 * sd * cd;
     let cn2 = 2.0 * cn * cn - 1.0;
     let sn2 = 2.0 * sn * cn;
-
     let cl2 = 2.0 * cl * cl - 1.0;
     let sl2 = 2.0 * sl * cl;
 
-    // Séries de nutation en longitude (DPSI)
-    // The series dpsi and deps correspond to a sum of 106 nutation coefficient.
-    // The coefficient come from the earth nutation table established by the IAU 1980 according to the Whar theory.
+    let ca = cx * cd2 + sx * sd2;
+    let sa = sx * cd2 - cx * sd2;
+    let cb = ca * cn - sa * sn;
+    let sb = sa * cn + ca * sn;
+    let cc = cb * cn - sb * sn;
+    let sc = sb * cn + cb * sn;
 
-    // dpsi is the ecliptic longitude of the nutation, unit = µarcsecond
-    let mut dpsi = -(171996.0 + 174.2 * t as f64) * sn as f64
-        + (2062.0 + 0.2 * t as f64) * sn2 as f64
-        + 46.0 * (sn as f64 * cp as f64 - cn as f64 * sp as f64)
-        - 11.0 * (sn as f64 * cn as f64 - cn as f64 * sn as f64)
-        - (13187.0 + 1.6 * t as f64) * (sl as f64 * cn as f64 - cl as f64 * sn as f64)
-        + (1426.0 - 3.4 * t as f64) * sp as f64
-        - (2274.0 + 0.2 * t as f64) * (cx as f64 * cn2 as f64 - sx as f64 * sn2 as f64);
+    let cv = cx * cd2 - sx * sd2;
+    let sv = sx * cd2 + cx * sd2;
+    let ce = cv * cn - sv * sn;
+    let se = sv * cn + cv * sn;
+    let cf = ce * cn - se * sn;
+    let sf = se * cn + ce * sn;
 
-    // Séries de nutation en obliquité (DEPS)
+    let cg = cl * cd2 + sl * sd2;
+    let sg = sl * cd2 - cl * sd2;
+    let ch = cx * cn2 - sx * sn2;
+    let sh = sx * cn2 + cx * sn2;
+    let cj = ch * cl - sh * sl;
+    let sj = sh * cl + ch * sl;
 
-    // deps is the ecliptic obliquity of the nutation, unit = µarcsecond
-    let mut deps = (92025.0 + 8.9 * t as f64) * cn as f64 - (895.0 - 0.5 * t as f64) * cn2 as f64
-        + (5736.0 - 3.1 * t as f64) * (cl as f64 * cn as f64 - sl as f64 * sn as f64)
-        + (224.0 - 0.6 * t as f64) * (cx as f64 * cp as f64 - sx as f64 * sp as f64)
-        - (977.0 - 0.5 * t as f64) * (cl as f64 * cn as f64 + sl as f64 * sn as f64)
-        - (129.0 - 0.1 * t as f64) * (cx as f64 * cn as f64 - sx as f64 * sn as f64);
+    let ck = cj * cl - sj * sl;
+    let sk = sj * cl + cj * sl;
+    let cm = cx * cl2 + sx * sl2;
+    let sm = sx * cl2 - cx * sl2;
+    let cq = cl * cd + sl * sd;
+    let sq = sl * cd - cl * sd;
 
-    // Conversion en arcsecondes
+    let cr = 2.0 * cq * cq - 1.0;
+    let sr = 2.0 * sq * cq;
+    let cs = cx * cn - sx * sn;
+    let ss = sx * cn + cx * sn;
+    let ct = cs * cl - ss * sl;
+    let st = ss * cl + cs * sl;
+
+    let cu = cf * cl + sf * sl;
+    let su = sf * cl - cf * sl;
+    let cw = cp * cg - sp * sg;
+    let sw = sp * cg + cp * sg;
+
+    let mut dpsi =
+        -(171996.0 + 174.2 * t) * sn + (2062.0 + 0.2 * t) * sn2 + 46.0 * (sm * cn + cm * sn)
+            - 11.0 * sm
+            - 3.0 * (sm * cn2 + cm * sn2)
+            - 3.0 * (sq * cp - cq * sp)
+            - 2.0 * (sb * cp2 - cb * sp2)
+            + (sn * cm - cn * sm)
+            - (13187.0 + 1.6 * t) * sc
+            + (1426.0 - 3.4 * t) * sp
+            - (517.0 - 1.2 * t) * (sc * cp + cc * sp)
+            + (217.0 - 0.5 * t) * (sc * cp - cc * sp)
+            + (129.0 + 0.1 * t) * sb
+            + 48.0 * sr
+            - 22.0 * sa
+            + (17.0 - 0.1 * t) * sp2
+            - 15.0 * (sp * cn + cp * sn)
+            - (16.0 - 0.1 * t) * (sc * cp2 + cc * sp2)
+            - 12.0 * (sn * cp - cn * sp);
+
+    dpsi += -6.0 * (sn * cr - cn * sr) - 5.0 * (sb * cp - cb * sp)
+        + 4.0 * (sr * cn + cr * sn)
+        + 4.0 * (sb * cp + cb * sp)
+        - 4.0 * sq
+        + (sr * cp + cr * sp)
+        + (sn * ca - cn * sa)
+        - (sp * ca - cp * sa)
+        + (sp * cn2 + cp * sn2)
+        + (sn * cq - cn * sq)
+        - (sp * ca + cp * sa)
+        - (2274.0 + 0.2 * t) * sh
+        + (712.0 + 0.1 * t) * sl
+        - (386.0 + 0.4 * t) * ss
+        - 301.0 * sj
+        - 158.0 * sg
+        + 123.0 * (sh * cl - ch * sl)
+        + 63.0 * sd2
+        + (63.0 + 0.1 * t) * (sl * cn + cl * sn)
+        - (58.0 + 0.1 * t) * (sn * cl - cn * sl)
+        - 59.0 * su
+        - 51.0 * st
+        - 38.0 * sf
+        + 29.0 * sl2;
+
+    dpsi += 29.0 * (sc * cl + cc * sl) - 31.0 * sk
+        + 26.0 * sx
+        + 21.0 * (ss * cl - cs * sl)
+        + 16.0 * (sn * cg - cn * sg)
+        - 13.0 * (sn * cg + cn * sg)
+        - 10.0 * (se * cl - ce * sl)
+        - 7.0 * (sg * cp + cg * sp)
+        + 7.0 * (sh * cp + ch * sp)
+        - 7.0 * (sh * cp - ch * sp)
+        - 8.0 * (sf * cl + cf * sl)
+        + 6.0 * (sl * cd2 + cl * sd2)
+        + 6.0 * (sc * cl2 + cc * sl2)
+        - 6.0 * (sn * cd2 + cn * sd2)
+        - 7.0 * se
+        + 6.0 * (sb * cl + cb * sl)
+        - 5.0 * (sn * cd2 - cn * sd2)
+        + 5.0 * (sl * cp - cl * sp)
+        - 5.0 * (ss * cl2 + cs * sl2)
+        - 4.0 * (sp * cd2 - cp * sd2);
+
+    dpsi += 4.0 * (sl * cx - cl * sx) - 4.0 * sd - 3.0 * (sl * cp + cl * sp)
+        + 3.0 * (sl * cx + cl * sx)
+        - 3.0 * (sj * cp - cj * sp)
+        - 3.0 * (su * cp - cu * sp)
+        - 2.0 * (sn * cl2 - cn * sl2)
+        - 3.0 * (sk * cl + ck * sl)
+        - 3.0 * (sf * cp - cf * sp)
+        + 2.0 * (sj * cp + cj * sp)
+        - 2.0 * (sb * cl - cb * sl);
+
+    dpsi += 2.0 * (sn * cl2 + cn * sl2) - 2.0 * (sl * cn2 + cl * sn2)
+        + 2.0 * (sl * cl2 + cl * sl2)
+        + 2.0 * (sh * cd + ch * sd)
+        + (sn2 * cl - cn2 * sl)
+        - (sg * cd2 - cg * sd2)
+        + (sf * cl2 - cf * sl2)
+        - 2.0 * (su * cd2 + cu * sd2)
+        - (sr * cd2 - cr * sd2)
+        + (sw * ch + cw * sh)
+        - (sl * ce + cl * se)
+        - (sf * cr - cf * sr)
+        + (su * ca + cu * sa)
+        + (sg * cp - cg * sp)
+        + (sb * cl2 + cb * sl2)
+        - (sf * cl2 + cf * sl2)
+        - (st * ca - ct * sa)
+        + (sc * cx + cc * sx)
+        + (sj * cr + cj * sr)
+        - (sg * cx + cg * sx);
+
+    dpsi += (sp * cs + cp * ss) + (sn * cw - cn * sw)
+        - (sn * cx - cn * sx)
+        - (sh * cd - ch * sd)
+        - (sp * cd2 + cp * sd2)
+        - (sl * cv - cl * sv)
+        - (ss * cp - cs * sp)
+        - (sw * cn + cw * sn)
+        - (sl * ca - cl * sa)
+        + (sl2 * cd2 + cl2 * sd2)
+        - (sf * cd2 + cf * sd2)
+        + (sp * cd + cp * sd);
+
+    let mut deps = (92025.0 + 8.9 * t) * cn - (895.0 - 0.5 * t) * cn2 - 24.0 * (cm * cn - sm * sn)
+        + (cm * cn2 - sm * sn2)
+        + (cb * cp2 + sb * sp2)
+        + (5736.0 - 3.1 * t) * cc
+        + (54.0 - 0.1 * t) * cp
+        + (224.0 - 0.6 * t) * (cc * cp - sc * sp)
+        - (95.0 - 0.3 * t) * (cc * cp + sc * sp)
+        - 70.0 * cb
+        + cr
+        + 9.0 * (cp * cn - sp * sn)
+        + 7.0 * (cc * cp2 - sc * sp2)
+        + 6.0 * (cn * cp + sn * sp)
+        + 3.0 * (cn * cr + sn * sr)
+        + 3.0 * (cb * cp + sb * sp)
+        - 2.0 * (cr * cn - sr * sn)
+        - 2.0 * (cb * cp - sb * sp);
+
+    deps += (977.0 - 0.5 * t) * ch - 7.0 * cl + 200.0 * cs + (129.0 - 0.1 * t) * cj
+        - cg
+        - 53.0 * (ch * cl + sh * sl)
+        - 2.0 * cd2
+        - 33.0 * (cl * cn - sl * sn)
+        + 32.0 * (cn * cl + sn * sl)
+        + 26.0 * cu
+        + 27.0 * ct
+        + 16.0 * cf
+        - cl2
+        - 12.0 * (cc * cl - sc * sl)
+        + 13.0 * ck
+        - cx
+        - 10.0 * (cs * cl + ss * sl)
+        - 8.0 * (cn * cg + sn * sg)
+        + 7.0 * (cn * cg - sn * sg)
+        + 5.0 * (ce * cl + se * sl)
+        - 3.0 * (ch * cp - sh * sp)
+        + 3.0 * (ch * cp + sh * sp)
+        + 3.0 * (cf * cl - sf * sl)
+        - 3.0 * (cc * cl2 - sc * sl2)
+        + 3.0 * (cn * cd2 - sn * sd2)
+        + 3.0 * ce
+        - 3.0 * (cb * cl - sb * sl)
+        + 3.0 * (cn * cd2 + sn * sd2)
+        + 3.0 * (cs * cl2 - ss * sl2)
+        + (cj * cp + sj * sp)
+        + (cu * cp + su * sp)
+        + (cn * cl2 + sn * sl2)
+        + (ck * cl - sk * sl)
+        + (cf * cp + sf * sp)
+        - (cj * cp - sj * sp)
+        + (cb * cl + sb * sl)
+        - (cn * cl2 - sn * sl2)
+        + (cl * cn2 - sl * sn2)
+        - (ch * cd - sh * sd)
+        - (cn2 * cl + sn2 * sl)
+        - (cf * cl2 + sf * sl2)
+        + (cu * cd2 - su * sd2)
+        - (cw * ch - sw * sh)
+        + (cl * ce - sl * se)
+        + (cf * cr + sf * sr)
+        - (cb * cl2 - sb * sl2);
+
     dpsi *= 1e-4;
     deps *= 1e-4;
 
@@ -305,13 +447,14 @@ fn nutn80(tjm: f64) -> (f64, f64) {
 
 fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
     let epsm = obleq(tjm);
+
     let (mut dpsi, mut deps) = nutn80(tjm);
     dpsi *= RADSEC;
     let epst = epsm + deps * RADSEC;
 
-    let r1 = rotmt(epsm, 1);
-    let r2 = rotmt(-dpsi, 3);
-    let r3 = rotmt(-epst, 1);
+    let r1 = rotmt(epsm, 0);
+    let r2 = rotmt(-dpsi, 2);
+    let r3 = rotmt(-epst, 0);
 
     let mut rp = [[0.0; 3]; 3];
     for i in 0..3 {
@@ -386,11 +529,338 @@ fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
     }
 }
 
-fn matmul(a: &[[f64; 3]; 3], b: &mut [[f64; 3]; 3]) {
-    // Implémentez la multiplication matricielle
+fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut result = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            b[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+            result[i][j] = (0..3).map(|k| a[i][k] * b[k][j]).sum();
         }
+    }
+    result
+}
+
+#[cfg(test)]
+mod ref_system_test {
+
+    use super::*;
+
+    #[test]
+    fn test_obliquity() {
+        let obl = obleq(T2000);
+        assert_eq!(obl, 0.40909280422232897)
+    }
+
+    #[test]
+    fn test_nutn80() {
+        let (dpsi, deps) = nutn80(T2000);
+        assert_eq!(dpsi, -13.923385169502602);
+        assert_eq!(deps, -5.773808263765919);
+    }
+
+    #[test]
+    fn test_rnut80() {
+        let rnut = rnut80(T2000);
+        let ref_rnut = [
+            [
+                0.9999999977217079,
+                6.19323109890795e-5,
+                2.6850942970991024e-5,
+            ],
+            [
+                -6.193306258211379e-5,
+                0.9999999976903892,
+                2.799138089948361e-5,
+            ],
+            [
+                -2.6849209338068913e-5,
+                -2.7993043796858963e-5,
+                0.9999999992477547,
+            ],
+        ];
+        assert_eq!(rnut, ref_rnut);
+    }
+
+    #[test]
+    fn test_rotpn_equm() {
+        let ref_roteqec = [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.9174820620691818, 0.3977771559319137],
+            [0.0, -0.3977771559319137, 0.9174820620691818],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [
+                0.9999999977217079,
+                6.19323109890795e-5,
+                2.6850942970991024e-5,
+            ],
+            [
+                -6.193306258211379e-5,
+                0.9999999976903892,
+                2.799138089948361e-5,
+            ],
+            [
+                -2.6849209338068913e-5,
+                -2.7993043796858963e-5,
+                0.9999999992477547,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUM", "J2000", 0., "EQUT", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_eclm() {
+        let ref_roteqec = [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.9174820620691818, -0.3977771559319137],
+            [0.0, 0.3977771559319137, 0.9174820620691818],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUM", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [
+                0.9999999977217079,
+                6.750247612406132e-5,
+                -3.3881317890172014e-21,
+            ],
+            [
+                -6.193306258211379e-5,
+                0.9174931942820401,
+                -0.39775147342333544,
+            ],
+            [
+                -2.6849209338068913e-5,
+                0.3977514725171414,
+                0.9174931963723576,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUT", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_equt() {
+        let ref_roteqec = [
+            [
+                0.9999999977217079,
+                -6.193306258211379e-5,
+                -2.6849209338068913e-5,
+            ],
+            [
+                6.19323109890795e-5,
+                0.9999999976903892,
+                -2.7993043796858963e-5,
+            ],
+            [
+                2.6850942970991024e-5,
+                2.799138089948361e-5,
+                0.9999999992477547,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUT", "J2000", 0., "EQUM", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [
+                0.9999999977217079,
+                -6.193306258211379e-5,
+                -2.6849209338068913e-5,
+            ],
+            [6.750247612406132e-5, 0.9174931942820401, 0.3977514725171414],
+            [
+                -3.3881317890172014e-21,
+                -0.39775147342333544,
+                0.9174931963723576,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUT", "J2000", 0., "ECLM", "J2000", 0.);
+        assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_equt_of_date() {
+        let ref_roteqec = [
+            [
+                0.9999999999808916,
+                5.671879296062708e-6,
+                2.458983466038936e-6,
+            ],
+            [
+                -5.671991417020452e-6,
+                0.9999999989442864,
+                4.559885773575134e-5,
+            ],
+            [
+                -2.458724832225838e-6,
+                -4.559887168220644e-5,
+                0.9999999989573487,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "EQUT",
+            "OFDATE",
+            60725.5,
+            "EQUM",
+            "OFDATE",
+            60730.5,
+        );
+
+        assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [
+                0.9999999999808916,
+                5.671879296062708e-6,
+                2.458983466038936e-6,
+            ],
+            [
+                -6.181974962369037e-6,
+                0.9174866172186449,
+                0.39776664916313814,
+            ],
+            [
+                4.235164736271502e-22,
+                -0.39776664917073884,
+                0.9174866172361764,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "EQUT",
+            "OFDATE",
+            60725.5,
+            "ECLM",
+            "OFDATE",
+            60730.5,
+        );
+
+        assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_equm_of_date() {
+        let ref_roteqec = [
+            [
+                0.9999999999808916,
+                -5.671991417020452e-6,
+                -2.458724832225838e-6,
+            ],
+            [
+                5.671879296062708e-6,
+                0.9999999989442864,
+                -4.559887168220644e-5,
+            ],
+            [
+                2.458983466038936e-6,
+                4.559885773575134e-5,
+                0.9999999989573487,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "EQUM",
+            "OFDATE",
+            60725.5,
+            "EQUT",
+            "OFDATE",
+            60730.5,
+        );
+
+        //assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.917504753989953, 0.39772481240907737],
+            [0.0, -0.39772481240907737, 0.917504753989953],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "EQUM",
+            "OFDATE",
+            60725.5,
+            "ECLM",
+            "OFDATE",
+            60730.5,
+        );
+
+        //assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_eclm_of_date() {
+        let ref_roteqec = [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.917504753989953, -0.39772481240907737],
+            [0.0, 0.39772481240907737, 0.917504753989953],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "ECLM",
+            "OFDATE",
+            60725.5,
+            "EQUM",
+            "OFDATE",
+            60730.5,
+        );
+
+        assert_eq!(roteqec, ref_roteqec);
+
+        let ref_roteqec = [
+            [
+                0.9999999999808916,
+                -6.181974962369037e-6,
+                4.235164736271502e-22,
+            ],
+            [
+                5.671879296062708e-6,
+                0.9174866172186449,
+                -0.39776664917073884,
+            ],
+            [
+                2.458983466038936e-6,
+                0.39776664916313814,
+                0.9174866172361764,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(
+            &mut roteqec,
+            "ECLM",
+            "OFDATE",
+            60725.5,
+            "EQUT",
+            "OFDATE",
+            60730.5,
+        );
+
+        assert_eq!(roteqec, ref_roteqec);
     }
 }
