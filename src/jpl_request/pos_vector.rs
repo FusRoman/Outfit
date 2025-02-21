@@ -24,6 +24,8 @@ TLIST={}
 CSV_FORMAT=YES
 REF_SYSTEM=ICRF
 OUT_UNITS=AU-D
+REF_PLANE=FRAME
+VEC_TABLE=1
 ",
         jd_tlist(jd_list)
     );
@@ -40,13 +42,9 @@ OUT_UNITS=AU-D
 }
 
 /// Contains the informations from the JPL Horizons vector state query
-/// x,y,z are the components of the sun position vector at the time contained in the jd and date field
-/// vx,vy,vz are the components of the sun velocity vector
-/// light_time is the one-way newtonian light-time to the target
-/// range is the distance to the target
-/// range_rate is the radial velocity with respect to the coordinate center
+/// x,y,z are the components of the position vector at the time contained in the jd and date field
 #[derive(Debug, serde::Deserialize, PartialEq)]
-pub struct HelioRecord {
+pub struct PosRecord {
     #[serde(rename = "JDTDB")]
     jd: f64,
     #[serde(rename = "CalendarDate(TDB)")]
@@ -57,35 +55,19 @@ pub struct HelioRecord {
     y: f64, // km
     #[serde(rename = "Z")]
     z: f64, // km
-    #[serde(rename = "VX")]
-    vx: f64, // km/sec
-    #[serde(rename = "VY")]
-    vy: f64, // km/sec
-    #[serde(rename = "VZ")]
-    vz: f64, //km/sec
-    #[serde(rename = "LT")]
-    light_time: f64, //sec
-    #[serde(rename = "RG")]
-    range: f64, //km
-    #[serde(rename = "RR")]
-    range_rate: f64, //km/sec
 }
 
-impl HelioRecord {
+impl PosRecord {
     pub fn pos_vector(&self) -> Vector3<f64> {
         Vector3::new(self.x, self.y, self.z)
     }
-
-    pub fn vel_vector(&self) -> Vector3<f64> {
-        Vector3::new(self.vx, self.vy, self.vz)
-    }
 }
 
-fn deserialize_vector(jpl_response: &String) -> Vec<HelioRecord> {
+fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
     // regex to match the data part of the jpl horizon response
     let data_regex = Regex::new(r"\$\$SOE\n([^]]*),\n\$\$EOE").unwrap();
     // regex to match the header part of the jpl horizon response
-    let header_regex = Regex::new(r"J2000\.0\n\*{79}([^]]*)\*{266}\n\$\$SOE").unwrap();
+    let header_regex = Regex::new(r"ICRF\n\*{79}([^]]*)\*{122}\n\$\$SOE").unwrap();
 
     let error_msg_data = format!(
         "JPL deserializer: Error when matching the data regex\njpl_response:\n{}",
@@ -121,24 +103,24 @@ fn deserialize_vector(jpl_response: &String) -> Vec<HelioRecord> {
     // reconstruct the csv string by adding the header above the data.
     let data = format!("{}\n{}", match_header, match_data);
 
-    // Use serde to deserialize the string into a vector of HelioRecord.
+    // Use serde to deserialize the string into a vector of PosRecord.
     let mut csv_reader = csv::Reader::from_reader(data.as_bytes());
-    let record_it = csv_reader.deserialize::<HelioRecord>();
+    let record_it = csv_reader.deserialize::<PosRecord>();
     record_it
         .map(|x| {
             x.expect(
-                "JPL deserializer: Error during the csv iterator mapping into a Vec<HelioRecord>",
+                "JPL deserializer: Error during the csv iterator mapping into a Vec<PosRecord>",
             )
         })
         .collect()
 }
 
-/// Request the JPL Horizon API to get vector state of the sun
-/// at different time.
+/// Request the JPL Horizon API to get the position vector of Earth
+/// with respect to the Sun at different time.
 ///
 /// Argument: a vector of date in Julian Date format
-/// Return: a vector of HelioRecord
-pub async fn get_helio_pos(jd_list: &Vec<f64>) -> Vec<HelioRecord> {
+/// Return: a vector of PosRecord
+pub async fn get_earth_position(jd_list: &Vec<f64>) -> Vec<PosRecord> {
     let response_data = request_vector(jd_list).await;
     deserialize_vector(&response_data)
 }
@@ -151,6 +133,14 @@ pub fn date_to_jd(date: &Vec<&str>) -> Vec<f64> {
                 .to_jd()
         })
         .collect::<Vec<f64>>()
+}
+
+/// Transformation from modified julian date (MJD) in julian date (JD)
+///
+/// Argument: a vector of MJD
+/// Return: a vector of jd
+pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
+    mjd.iter().map(|mjd| mjd + 2_400_000.5).collect()
 }
 
 #[cfg(test)]
@@ -170,8 +160,8 @@ mod jpl_tests {
         let response_data = request_vector(&jd_list).await;
         assert!(response_data.contains(
             "$$SOE
-2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  3.284679949685707E+07, -1.485106329685027E+08,  7.156044432416558E+03,  2.860834584138197E+01,  6.313673173977221E+00, -1.324421108332530E-03,  5.073500062298830E+02,  1.520997054339719E+08,  1.344506803319922E-02,
-2460672.574629629, A.D. 2024-Dec-28 01:47:28.0000, -1.657137550043441E+07,  1.461839130215131E+08, -7.788453816257417E+03, -3.009513750045504E+01, -3.462277804314375E+00,  8.254731385908265E-04,  4.907400928461101E+02,  1.471201786734835E+08, -5.037717899031938E-02,
+2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  2.195672929244244E-01, -9.108330730147444E-01, -3.948423288985838E-01,
+2460672.574629629, A.D. 2024-Dec-28 01:47:28.0000, -1.107728032684787E-01,  8.965650072539966E-01,  3.886517577153460E-01,
 $$EOE"
         ));
     }
@@ -179,85 +169,95 @@ $$EOE"
     #[test]
     fn test_deserialize_vector() {
         let fake_jpl = "
-Reference frame : Ecliptic of J2000.0
+Reference frame : ICRF
 *******************************************************************************
-            JDTDB,            Calendar Date (TDB),                      X,                      Y,                      Z,                     VX,                     VY,                     VZ,                     LT,                     RG,                     RR,
-**************************************************************************************************************************************************************************************************************************************************************************
+            JDTDB,            Calendar Date (TDB),                      X,                      Y,                      Z,
+**************************************************************************************************************************
 $$SOE
-2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000, -3.285213437722069E+07,  1.485094907917824E+08, -1.045064456634223E+04, -2.862749646371449E+01, -6.670100246343959E+00,  1.559012932249821E-01,  5.073501301870917E+02,  1.520997425954083E+08, -3.293921397855185E-01,
-2460672.574629629, A.D. 2024-Dec-28 01:47:28.0000,  1.656606640874423E+07, -1.461858433966990E+08,  4.837673705182970E+03,  3.013868677111592E+01,  3.107607789780265E+00,  1.528420680554570E-01,  4.907444960886756E+02,  1.471214987323954E+08,  3.058149938328106E-01,
+2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  2.195672929244244E-01, -9.108330730147444E-01, -3.948423288985838E-01,
+2460672.574629629, A.D. 2024-Dec-28 01:47:28.0000, -1.107728032684787E-01,  8.965650072539966E-01,  3.886517577153460E-01,
 $$EOE
-**************************************************************************************************************************************************************************************************************************************************************************
+**************************************************************************************************************************
 ";
-        let vec_helio = deserialize_vector(&fake_jpl.into());
+        let vec_earth = deserialize_vector(&fake_jpl.into());
         assert_eq!(
-            vec_helio,
+            vec_earth,
             vec![
-                HelioRecord {
+                PosRecord {
                     jd: 2459400.032916666,
                     date: "A.D.2021-Jul-0412:47:24.0000".into(),
-                    x: -32852134.37722069,
-                    y: 148509490.7917824,
-                    z: -10450.64456634223,
-                    vx: -28.62749646371449,
-                    vy: -6.670100246343959,
-                    vz: 0.1559012932249821,
-                    light_time: 507.3501301870917,
-                    range: 152099742.5954083,
-                    range_rate: -0.3293921397855185
+                    x: 0.2195672929244244,
+                    y: -0.9108330730147444,
+                    z: -0.3948423288985838
                 },
-                HelioRecord {
+                PosRecord {
                     jd: 2460672.574629629,
                     date: "A.D.2024-Dec-2801:47:28.0000".into(),
-                    x: 16566066.40874423,
-                    y: -146185843.396699,
-                    z: 4837.67370518297,
-                    vx: 30.13868677111592,
-                    vy: 3.107607789780265,
-                    vz: 0.152842068055457,
-                    light_time: 490.7444960886756,
-                    range: 147121498.7323954,
-                    range_rate: 0.3058149938328106
+                    x: -0.1107728032684787,
+                    y: 0.8965650072539966,
+                    z: 0.388651757715346
                 }
             ]
         );
     }
 
     #[tokio::test]
-    async fn test_get_helio_pos() {
+    async fn test_get_earth_pos() {
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_jd(&date_list);
-        let helio_vector = get_helio_pos(&jd_list).await;
+        println!("{jd_list:?}");
+        let earth_vector = get_earth_position(&jd_list).await;
         assert_eq!(
-            helio_vector,
+            earth_vector,
             vec![
-                HelioRecord {
+                PosRecord {
                     jd: 2459400.032916666,
                     date: "A.D.2021-Jul-0412:47:24.0000".into(),
-                    x: 32846799.49685707,
-                    y: -148510632.9685027,
-                    z: 7156.044432416558,
-                    vx: 28.60834584138197,
-                    vy: 6.313673173977221,
-                    vz: -0.00132442110833253,
-                    light_time: 507.350006229883,
-                    range: 152099705.4339719,
-                    range_rate: 0.01344506803319922
+                    x: 0.2195672929244244,
+                    y: -0.9108330730147444,
+                    z: -0.3948423288985838
                 },
-                HelioRecord {
+                PosRecord {
                     jd: 2460672.574629629,
                     date: "A.D.2024-Dec-2801:47:28.0000".into(),
-                    x: -16571375.50043441,
-                    y: 146183913.0215131,
-                    z: -7788.453816257417,
-                    vx: -30.09513750045504,
-                    vy: -3.462277804314375,
-                    vz: 0.0008254731385908265,
-                    light_time: 490.7400928461101,
-                    range: 147120178.6734835,
-                    range_rate: -0.05037717899031938
+                    x: -0.1107728032684787,
+                    y: 0.8965650072539966,
+                    z: 0.388651757715346
                 }
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_earth_pos_with_mjd() {
+        let test_date = [57028.479297592596, 57049.245147592592, 57063.977117592593];
+        let test_jd: Vec<f64> = mjd_to_jd(&test_date.into());
+        let earth_vector = get_earth_position(&test_jd).await;
+        assert_eq!(
+            earth_vector,
+            vec![
+                PosRecord {
+                    jd: 2457028.979297593,
+                    date: "A.D.2015-Jan-0611:30:11.3120".into(),
+                    x: -0.2645457550344549,
+                    y: 0.8689011473732227,
+                    z: 0.3766846006816814
+                },
+                PosRecord {
+                    jd: 2457049.745147592,
+                    date: "A.D.2015-Jan-2705:53:00.7520".into(),
+                    x: -0.5891845254244624,
+                    y: 0.7238535049311241,
+                    z: 0.3138036934121133
+                },
+                PosRecord {
+                    jd: 2457064.477117592,
+                    date: "A.D.2015-Feb-1023:27:02.9600".into(),
+                    x: -0.7743644470250609,
+                    y: 0.5612696626811766,
+                    z: 0.2433192212445796
+                }
+            ]
+        )
     }
 }

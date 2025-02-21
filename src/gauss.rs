@@ -10,11 +10,19 @@ use nalgebra::Vector3;
 
 use aberth::aberth;
 
-use super::jpl_request::pos_vector::{date_to_jd, get_helio_pos};
+use super::jpl_request::pos_vector::{date_to_jd, get_earth_position};
+use super::orb_elem::ccek1;
+use super::ref_system::rotpn;
 
 /// Gaussian gravitational constant
-const GaussGrav: f64 = 0.0172020989484;
+pub const GaussGrav: f64 = 0.01720209895;
+pub const GaussGravSquared: f64 = GaussGrav * GaussGrav;
 
+/// Gauss struct data
+/// ra is right ascension in degree
+/// dec is declination in degree
+/// time is the observation time in modified julian date (MJD
+/// sun_pos 
 struct OrbitGauss {
     ra: Vector3<f64>,
     dec: Vector3<f64>,
@@ -54,7 +62,7 @@ impl OrbitGauss {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
     pub async fn new(ra: Vector3<f64>, dec: Vector3<f64>, time: Vector3<f64>) -> OrbitGauss {
-        let pos_vector = get_helio_pos(&time.as_slice().to_vec()).await;
+        let pos_vector = get_earth_position(&time.as_slice().to_vec()).await;
 
         // matrix of the observer position at each time of the three observations
         // cartesian representation, unit=AU (astronomical unit)
@@ -110,11 +118,11 @@ impl OrbitGauss {
         let tau1 = GaussGrav * (self.time[0] - self.time[1]);
         let tau3 = GaussGrav * (self.time[2] - self.time[1]);
         let tau13 = tau3 - tau1;
-        let vector_a = Vector3::new(tau3 / tau13, -1.0, tau1 / tau13);
+        let vector_a = Vector3::new(tau3 / tau13, -1.0, -(tau1 / tau13));
         let vector_b = Vector3::new(
-            vector_a[0] * (tau13.powi(2) - tau3.powi(2) / 6.0),
+            vector_a[0] * (tau13.powi(2) - tau3.powi(2)) / 6.0,
             0.0,
-            vector_a[2] * (tau13.powi(2) - tau1.powi(2) / 6.0),
+            vector_a[2] * (tau13.powi(2) - tau1.powi(2)) / 6.0,
         );
 
         let unit_matrix = self.unit_matrix();
@@ -207,7 +215,7 @@ impl OrbitGauss {
     }
 
     /// Compute the velocity vector of the asteroid at the time of the second observation
-    /// 
+    ///
     /// Inputs:
     ///     ast_pos_vector: Asteroid position vector at the time of the three observations
     ///     cartesian representation, unit= AU
@@ -218,12 +226,16 @@ impl OrbitGauss {
     ///    
     ///    tau1: Normalized time of the first observation
     ///    tau3: normalized time of the third observation
-    /// 
+    ///
     /// Output:
     ///     Velocity vector of the asteroid [vx, vy, vz]
-    fn gibbs_correction(ast_pos_vector: &Matrix3<f64>, tau1: f64, tau3: f64) -> Vector3<f64> {
+    fn gibbs_correction(
+        &self,
+        ast_pos_vector: &Matrix3<f64>,
+        tau1: f64,
+        tau3: f64,
+    ) -> Vector3<f64> {
         let tau13 = tau3 - tau1;
-        let g = GaussGrav.powi(2);
         let r1m3 = 1. / ast_pos_vector.column(0).norm().powi(3).sqrt();
         let r2m3 = 1. / ast_pos_vector.column(1).norm().powi(3).sqrt();
         let r3m3 = 1. / ast_pos_vector.column(2).norm().powi(3).sqrt();
@@ -247,13 +259,29 @@ impl OrbitGauss {
             .unwrap();
         let polynomial = [coeff_0, 0., coeff_3, 0., 0., coeff_6, 0., 1.];
         let roots = self.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
-        let xp = self.asteroid_position_vector(
+        let asteroid_pos = self.asteroid_position_vector(
             roots.get(0).unwrap().clone(),
             &unit_matrix,
             &inv_unit_matrix,
             &vect_a,
             &vect_b,
         );
+        let asteroid_vel = self.gibbs_correction(&asteroid_pos, tau1, tau3);
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+
+        let matrix_elc_transform = Matrix3::from(roteqec);
+        let ecl_pos = matrix_elc_transform * asteroid_pos.column(1);
+        let ecl_vel = matrix_elc_transform * asteroid_vel;
+
+        let ast_pos_vel: [f64; 6] = [
+            ecl_pos.x, ecl_pos.y, ecl_pos.z, ecl_vel.x, ecl_vel.y, ecl_vel.z,
+        ];
+
+        let mut elem = [0.0; 6];
+        let mut type_ = String::new();
+        ccek1(&mut elem, &mut type_, &ast_pos_vel);
     }
 }
 
@@ -262,33 +290,70 @@ mod gauss_test {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_unit_matrix() {
-        let date_list = vec![
-            "2021-07-04T12:47:24",
-            "2021-07-04T13:47:24",
-            "2021-07-04T14:47:24",
-        ];
-        let jd_time = date_to_jd(&date_list);
-        let pos_vector = get_helio_pos(&jd_time).await;
-
-        let sun_pos_matrix = Matrix3::from_columns(&[
-            pos_vector.get(0).unwrap().pos_vector(),
-            pos_vector.get(1).unwrap().pos_vector(),
-            pos_vector.get(2).unwrap().pos_vector(),
-        ]);
-
+    #[test]
+    fn test_gauss_prelim() {
         let gauss = OrbitGauss {
-            ra: Vector3::new(0.0, 1.0, 2.0),
-            dec: Vector3::new(0.0, 1.0, 2.0),
-            time: Vector3::from_vec(jd_time),
-            sun_pos: sun_pos_matrix,
+            ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            sun_pos: Matrix3::zeros(),
         };
 
-        // let (_, coeff_6, coeff_3, coeff_0) = gauss.coeff_eight_poly().expect("");
-        // assert_eq!(coeff_6, -0.08419374012465505);
-        // assert_eq!(coeff_3, 3.6106799662489414e-10);
-        // assert_eq!(coeff_0, -2.2878613025454898e-20);
+        let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
+            gauss.gauss_prelim().unwrap();
+
+        assert_eq!(tau1, -0.35721620648079105);
+        assert_eq!(tau3, 0.25342080566844405);
+
+        let unit_mat_array: [f64; 9] = unit_matrix
+            .as_slice()
+            .try_into()
+            .expect("Conversion failed");
+        assert_eq!(
+            unit_mat_array,
+            [
+                -0.05549934652247514,
+                0.46585594034226024,
+                0.8831183756345503,
+                -0.06972979004485365,
+                0.5827357012279389,
+                0.8096646582966821,
+                -0.12245931009139571,
+                0.6656387438390606,
+                0.7361581216507068
+            ]
+        );
+
+        let inv_unit_mat_array: [f64; 9] = inv_unit_matrix
+            .as_slice()
+            .try_into()
+            .expect("Conversion failed");
+        assert_eq!(
+            inv_unit_mat_array,
+            [
+                -18.774792915974594,
+                41.814279122702025,
+                -23.466669573973437,
+                -8.16479071034311,
+                11.489343729350427,
+                -2.8418335594428186,
+                4.259482782736117,
+                -3.432964304649723,
+                0.024345794753282718
+            ]
+        );
+
+        let vect_a_array: [f64; 3] = vector_a.as_slice().try_into().expect("Conversion failed");
+        assert_eq!(
+            vect_a_array,
+            [0.41501055557783634, -1.0, 0.5849894444221637]
+        );
+
+        let vect_b_array: [f64; 3] = vector_b.as_slice().try_into().expect("Conversion failed");
+        assert_eq!(
+            vect_b_array,
+            [0.021349212036493866, 0.0, 0.023913797385599792]
+        );
     }
 
     #[tokio::test]
@@ -299,7 +364,7 @@ mod gauss_test {
             "2021-07-04T14:47:24",
         ];
         let jd_time = date_to_jd(&date_list);
-        let pos_vector = get_helio_pos(&jd_time).await;
+        let pos_vector = get_earth_position(&jd_time).await;
 
         let sun_pos_matrix = Matrix3::from_columns(&[
             pos_vector.get(0).unwrap().pos_vector(),

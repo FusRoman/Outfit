@@ -22,7 +22,7 @@ enum RefSystem {
     ECLM(RefEpoch),
 }
 
-fn rotpn(
+pub fn rotpn(
     rot: &mut [[f64; 3]; 3],
     rsys1: &str,
     epoch1: &str,
@@ -167,7 +167,7 @@ fn obleq(tjm: f64) -> f64 {
     ((ob3 * t + ob2) * t + ob1) * t + ob0
 }
 
-fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
+pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
     if k > 2 {
         panic!("**** ROTMT: k = ??? ****");
     }
