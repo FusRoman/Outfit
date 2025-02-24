@@ -1,28 +1,21 @@
 use core::fmt;
-use std::vec;
-
-use aberth::Complex;
-use aberth::Roots;
 use aberth::StopReason;
-use arrayvec::ArrayVec;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
+use super::constants::GaussGrav;
+
 use aberth::aberth;
 
-use super::jpl_request::pos_vector::{date_to_jd, get_earth_position};
+use super::jpl_request::earth_pos::{get_earth_position, date_to_jd};
 use super::orb_elem::ccek1;
 use super::ref_system::rotpn;
-
-/// Gaussian gravitational constant
-pub const GaussGrav: f64 = 0.01720209895;
-pub const GaussGravSquared: f64 = GaussGrav * GaussGrav;
 
 /// Gauss struct data
 /// ra is right ascension in degree
 /// dec is declination in degree
 /// time is the observation time in modified julian date (MJD
-/// sun_pos 
+/// sun_pos
 struct OrbitGauss {
     ra: Vector3<f64>,
     dec: Vector3<f64>,

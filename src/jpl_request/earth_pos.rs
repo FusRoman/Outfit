@@ -10,6 +10,15 @@ fn jd_tlist(jd_list: &Vec<f64>) -> String {
     jd_list.iter().join(",")
 }
 
+/// Request the JPL HORIZON API to get the Earth position vector with respect to the Sun.
+/// 
+/// Argument
+/// --------
+///     jd_list: a list of date in julian date format
+/// 
+/// Return
+/// ------
+///     The JPL API raw response
 async fn request_vector(jd_list: &Vec<f64>) -> String {
     let requested_params = format!(
         "
@@ -63,6 +72,16 @@ impl PosRecord {
     }
 }
 
+/// Parse the JPL raw response and return a vector of PosRecord
+/// containg the vector component of the Earth position vector
+/// 
+/// Argument
+/// --------
+///     jpl_response: the raw JPL response from the API
+/// 
+/// Return
+/// ------
+///     a vector of PosRecord
 fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
     // regex to match the data part of the jpl horizon response
     let data_regex = Regex::new(r"\$\$SOE\n([^]]*),\n\$\$EOE").unwrap();
@@ -118,13 +137,27 @@ fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 /// Request the JPL Horizon API to get the position vector of Earth
 /// with respect to the Sun at different time.
 ///
-/// Argument: a vector of date in Julian Date format
-/// Return: a vector of PosRecord
+/// Argument
+/// --------
+///     jd_list: a vector of date in Julian Date format
+/// 
+/// Return
+/// ------
+///     a vector of PosRecord, the position vector component are in astronomical units
 pub async fn get_earth_position(jd_list: &Vec<f64>) -> Vec<PosRecord> {
     let response_data = request_vector(jd_list).await;
     deserialize_vector(&response_data)
 }
 
+/// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to julian date
+/// 
+/// Argument
+/// --------
+///     date: a vector of date in the format YYYY-MM-ddTHH:mm:ss
+/// 
+/// Return
+/// ------
+///     a vector of float representing the input date in julian date
 pub fn date_to_jd(date: &Vec<&str>) -> Vec<f64> {
     date.iter()
         .map(|x| {
@@ -137,14 +170,19 @@ pub fn date_to_jd(date: &Vec<&str>) -> Vec<f64> {
 
 /// Transformation from modified julian date (MJD) in julian date (JD)
 ///
-/// Argument: a vector of MJD
-/// Return: a vector of jd
+/// Argument
+/// --------
+///     mjd: a vector of MJD
+/// 
+/// Return
+/// ------
+///     a vector of jd
 pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
     mjd.iter().map(|mjd| mjd + 2_400_000.5).collect()
 }
 
 #[cfg(test)]
-mod jpl_tests {
+mod earth_pos_tests {
     use super::*;
 
     #[test]

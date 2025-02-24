@@ -1,4 +1,4 @@
-use super::gauss::GaussGravSquared;
+use super::constants::GaussGravSquared;
 use super::ref_system::rotmt;
 
 use std::f64;

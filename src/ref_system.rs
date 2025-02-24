@@ -1,9 +1,5 @@
+use super::constants::{EPS, RADEG, RADSEC, T2000};
 use std::f64::consts::PI;
-
-const EPS: f64 = 1e-6;
-const T2000: f64 = 51544.5; // Époque J2000 en jours juliens modifiés
-const RADEG: f64 = std::f64::consts::PI / 180.0; // Conversion degrés -> radians
-const RADSEC: f64 = std::f64::consts::PI / 648000.0; // Conversion d'arcsecondes en radians
 
 enum RefEpoch {
     J2000,
@@ -66,7 +62,6 @@ pub fn rotpn(
         let mut r = [[0.0; 3]; 3];
 
         if epdif {
-            println!("bar");
             if epoch != "J2000" {
                 if rsys == "ECLM" {
                     let obl = obleq(date);
@@ -155,7 +150,7 @@ fn chkref(rsys: &str, epoch: &str) -> bool {
     matches!(rsys, "EQUM" | "EQUT" | "ECLM") && matches!(epoch, "J2000" | "OFDATE")
 }
 
-fn obleq(tjm: f64) -> f64 {
+pub fn obleq(tjm: f64) -> f64 {
     // Coefficients d'obliquité
     let ob0 = ((23.0 * 3600.0 + 26.0 * 60.0) + 21.448) * RADSEC;
     let ob1 = -46.815 * RADSEC;
@@ -197,7 +192,7 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
 // arcsecond to radian conversion factor
 const RS: f64 = 4.84813681109536e-6;
 const P2: f64 = 2.0 * PI;
-fn nutn80(tjm: f64) -> (f64, f64) {
+pub fn nutn80(tjm: f64) -> (f64, f64) {
     let t1 = (tjm - T2000) / 36525.0;
     let t = t1 as f64;
     let t2 = t * t;
@@ -510,9 +505,9 @@ fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
     let theta = ((thddd * t + thdd) * t + thd) * t;
 
     // Calcul des matrices de rotation
-    let r1 = rotmt(-zeta, 3);
-    let r2 = rotmt(theta, 2);
-    let r3 = rotmt(-z, 3);
+    let r1 = rotmt(-zeta, 2);
+    let r2 = rotmt(theta, 1);
+    let r3 = rotmt(-z, 2);
 
     // Multiplication des matrices r1 et r2 pour obtenir rp
     for i in 0..3 {
@@ -860,6 +855,33 @@ mod ref_system_test {
             "OFDATE",
             60730.5,
         );
+
+        assert_eq!(roteqec, ref_roteqec);
+    }
+
+    #[test]
+    fn test_rotpn_equt_eclm_date() {
+        let ref_roteqec = [
+            [
+                0.9999932036120499,
+                0.003381495004957589,
+                0.0014690885747894438,
+            ],
+            [
+                -0.0036868307528666357,
+                0.9174941827437706,
+                0.3977321107357815,
+            ],
+            [
+                -2.9510755403679666e-6,
+                -0.3977348238749929,
+                0.917500414097138,
+            ],
+        ];
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        let tmjd = 57028.479297592596;
+        rotpn(&mut roteqec, "EQUT", "OFDATE", tmjd, "ECLM", "J2000", 0.);
 
         assert_eq!(roteqec, ref_roteqec);
     }
