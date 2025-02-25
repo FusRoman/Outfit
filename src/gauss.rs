@@ -1,5 +1,5 @@
-use core::fmt;
 use aberth::StopReason;
+use core::fmt;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
@@ -7,7 +7,8 @@ use super::constants::GaussGrav;
 
 use aberth::aberth;
 
-use super::jpl_request::earth_pos::{get_earth_position, date_to_mjd};
+use super::env_state::OrbitHunterState;
+use super::jpl_request::earth_pos::get_earth_position;
 use super::orb_elem::ccek1;
 use super::ref_system::rotpn;
 
@@ -55,7 +56,8 @@ impl OrbitGauss {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
     pub async fn new(ra: Vector3<f64>, dec: Vector3<f64>, time: Vector3<f64>) -> OrbitGauss {
-        let pos_vector = get_earth_position(&time.as_slice().to_vec()).await;
+        let state = OrbitHunterState::new().await;
+        let pos_vector = get_earth_position(&time.as_slice().to_vec(), &state.http_client).await;
 
         // matrix of the observer position at each time of the three observations
         // cartesian representation, unit=AU (astronomical unit)
@@ -281,6 +283,7 @@ impl OrbitGauss {
 #[cfg(test)]
 mod gauss_test {
 
+    use super::super::jpl_request::earth_pos::date_to_mjd;
     use super::*;
 
     #[test]
@@ -351,13 +354,14 @@ mod gauss_test {
 
     #[tokio::test]
     async fn test_solve_8poly() {
+        let state = OrbitHunterState::new().await;
         let date_list = vec![
             "2021-07-04T12:47:24",
             "2021-07-04T13:47:24",
             "2021-07-04T14:47:24",
         ];
         let jd_time = date_to_mjd(&date_list);
-        let pos_vector = get_earth_position(&jd_time).await;
+        let pos_vector = get_earth_position(&jd_time, &state.http_client).await;
 
         let sun_pos_matrix = Matrix3::from_columns(&[
             pos_vector.get(0).unwrap().pos_vector(),

@@ -1,6 +1,4 @@
-use chrono::NaiveDateTime;
 use std::str::FromStr;
-use julian_day_converter::JulianDay;
 
 enum StepUnit {
     Days,
@@ -47,21 +45,6 @@ impl IntervalTime {
             stop_time: stop_time,
             step: step,
         }
-    }
-
-    pub fn from_date(start_time: &str, stop_time: &str, step: Step) -> IntervalTime {
-        let (Ok(start_date_time), Ok(stop_date_time)) = (
-            NaiveDateTime::from_str(&start_time),
-            NaiveDateTime::from_str(&stop_time),
-        ) else {
-            panic!(
-                "Can't parse start_time={} or stop_time={} with NaiveDateTime::from_str",
-                start_time, stop_time
-            )
-        };
-        let jd_start = start_date_time.to_jd();
-        let jd_stop = stop_date_time.to_jd();
-        IntervalTime::new(jd_start, jd_stop, step)
     }
 }
 
@@ -113,13 +96,5 @@ mod jpl_ephem_tests {
         assert_eq!(interval1.start_time, 0.0);
         assert_eq!(interval1.stop_time, 10.0);
 
-        let interval2 = IntervalTime::from_date(
-            "2021-07-04T12:47:24",
-            "2024-10-07T01:24:46",
-            Step::new(5, StepUnit::Months),
-        );
-        assert_eq!(interval2.start_time, 2459400.0329166665);
-        assert_eq!(interval2.stop_time, 2460590.558865741);
-        assert_eq!(interval2.step.to_string(), "5mo");
     }
 }
