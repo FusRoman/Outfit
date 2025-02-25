@@ -7,7 +7,7 @@ use super::constants::GaussGrav;
 
 use aberth::aberth;
 
-use super::env_state::OrbitHunterState;
+use super::env_state::OutfitState;
 use super::jpl_request::earth_pos::get_earth_position;
 use super::orb_elem::ccek1;
 use super::ref_system::rotpn;
@@ -56,7 +56,7 @@ impl OrbitGauss {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
     pub async fn new(ra: Vector3<f64>, dec: Vector3<f64>, time: Vector3<f64>) -> OrbitGauss {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let pos_vector = get_earth_position(&time.as_slice().to_vec(), &state.http_client).await;
 
         // matrix of the observer position at each time of the three observations
@@ -354,7 +354,7 @@ mod gauss_test {
 
     #[tokio::test]
     async fn test_solve_8poly() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let date_list = vec![
             "2021-07-04T12:47:24",
             "2021-07-04T13:47:24",

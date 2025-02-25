@@ -179,7 +179,7 @@ pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
 
 #[cfg(test)]
 mod earth_pos_tests {
-    use super::super::super::env_state::OrbitHunterState;
+    use super::super::super::env_state::OutfitState;
     use super::*;
 
     #[test]
@@ -199,7 +199,7 @@ mod earth_pos_tests {
 
     #[tokio::test]
     async fn test_jplvector_request() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let mjd_list = date_to_mjd(&date_list);
         let response_data = request_vector(&mjd_list, &state.http_client).await;
@@ -248,7 +248,7 @@ $$EOE
 
     #[tokio::test]
     async fn test_get_earth_pos() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_mjd(&date_list);
         let earth_vector = get_earth_position(&jd_list, &state.http_client).await;
@@ -275,7 +275,7 @@ $$EOE
 
     #[tokio::test]
     async fn test_earth_pos_with_mjd() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
         let earth_vector = get_earth_position(&test_mjd, &state.http_client).await;
         assert_eq!(

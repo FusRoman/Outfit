@@ -2,7 +2,7 @@ use nalgebra::{Matrix3, Vector3};
 use reqwest::StatusCode;
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, ERAU, RADSEC, T2000};
-use super::super::env_state::OrbitHunterState;
+use super::super::env_state::OutfitState;
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
 use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
@@ -13,7 +13,7 @@ pub async fn helio_obs_pos(
     longitude: f64,
     latitude: f64,
     height: f64,
-    state: &OrbitHunterState,
+    state: &OutfitState,
 ) -> Matrix3<f64> {
     let position_obs_time = mjd_tt
         .iter()
@@ -221,7 +221,7 @@ fn body_fixed_coord(longitude: f64, latitude: f64, height: f64) -> Vector3<f64> 
 #[cfg(test)]
 mod observer_pos_tests {
 
-    use super::super::super::env_state::OrbitHunterState;
+    use super::super::super::env_state::OutfitState;
     use super::*;
 
     #[test]
@@ -260,7 +260,7 @@ mod observer_pos_tests {
 
     #[tokio::test]
     async fn pvobs_test() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let tmjd = 57028.479297592596;
         /// longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
@@ -287,14 +287,27 @@ mod observer_pos_tests {
 
     #[tokio::test]
     async fn test_helio_pos_obs() {
-        let state = OrbitHunterState::new().await;
+        let state = OutfitState::new().await;
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 
         /// longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
 
-        let xt = helio_obs_pos(&tmjd, lon, lat, h, &state).await;
-        println!("toto");
-        println!("xt (helio pos vector): {xt}");
+        let helio_pos = helio_obs_pos(&tmjd, lon, lat, h, &state).await;
+
+        assert_eq!(
+            helio_pos.as_slice(),
+            [
+                -0.26456678469889994,
+                0.8689350609363788,
+                0.3766996213519332,
+                -0.5891633520067185,
+                0.7238873564700253,
+                0.31381865190488956,
+                -0.7743279501475471,
+                0.5612534464162001,
+                0.24333415468923875
+            ]
+        )
     }
 }
