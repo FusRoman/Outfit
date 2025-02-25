@@ -7,7 +7,7 @@ use super::constants::GaussGrav;
 
 use aberth::aberth;
 
-use super::jpl_request::earth_pos::{get_earth_position, date_to_jd};
+use super::jpl_request::earth_pos::{get_earth_position, date_to_mjd};
 use super::orb_elem::ccek1;
 use super::ref_system::rotpn;
 
@@ -356,7 +356,7 @@ mod gauss_test {
             "2021-07-04T13:47:24",
             "2021-07-04T14:47:24",
         ];
-        let jd_time = date_to_jd(&date_list);
+        let jd_time = date_to_mjd(&date_list);
         let pos_vector = get_earth_position(&jd_time).await;
 
         let sun_pos_matrix = Matrix3::from_columns(&[

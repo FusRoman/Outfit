@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use hifitime::Epoch;
 use itertools::Itertools;
 use julian_day_converter::JulianDay;
 use nalgebra::Vector3;
@@ -6,20 +7,20 @@ use regex::Regex;
 use reqwest::Client;
 use std::str::FromStr;
 
-fn jd_tlist(jd_list: &Vec<f64>) -> String {
-    jd_list.iter().join(",")
+fn jd_tlist(mjd_list: &Vec<f64>) -> String {
+    mjd_list.iter().join(",")
 }
 
 /// Request the JPL HORIZON API to get the Earth position vector with respect to the Sun.
-/// 
+///
 /// Argument
 /// --------
 ///     jd_list: a list of date in julian date format
-/// 
+///
 /// Return
 /// ------
 ///     The JPL API raw response
-async fn request_vector(jd_list: &Vec<f64>) -> String {
+async fn request_vector(mjd_list: &Vec<f64>) -> String {
     let requested_params = format!(
         "
 !$$SOF
@@ -28,7 +29,7 @@ OBJ_DATA='NO'
 MAKE_EPHEM='YES'
 TABLE_TYPE='VECTORS'
 CENTER='500@10'
-TLIST_TYPE=JD
+TLIST_TYPE=MJD
 TLIST={}
 CSV_FORMAT=YES
 REF_SYSTEM=ICRF
@@ -36,7 +37,7 @@ OUT_UNITS=AU-D
 REF_PLANE=FRAME
 VEC_TABLE=1
 ",
-        jd_tlist(jd_list)
+        jd_tlist(mjd_list)
     );
     let client = Client::new();
     client
@@ -74,11 +75,11 @@ impl PosRecord {
 
 /// Parse the JPL raw response and return a vector of PosRecord
 /// containg the vector component of the Earth position vector
-/// 
+///
 /// Argument
 /// --------
 ///     jpl_response: the raw JPL response from the API
-/// 
+///
 /// Return
 /// ------
 ///     a vector of PosRecord
@@ -139,32 +140,28 @@ fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 ///
 /// Argument
 /// --------
-///     jd_list: a vector of date in Julian Date format
-/// 
+/// * jd_list: a vector of date in Julian Date format
+///
 /// Return
 /// ------
-///     a vector of PosRecord, the position vector component are in astronomical units
-pub async fn get_earth_position(jd_list: &Vec<f64>) -> Vec<PosRecord> {
-    let response_data = request_vector(jd_list).await;
+/// * a vector of PosRecord, the position vector component are in astronomical units
+pub async fn get_earth_position(mjd_list: &Vec<f64>) -> Vec<PosRecord> {
+    let response_data = request_vector(mjd_list).await;
     deserialize_vector(&response_data)
 }
 
-/// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to julian date
-/// 
+/// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to modified julian date (MJD)
+///
 /// Argument
 /// --------
-///     date: a vector of date in the format YYYY-MM-ddTHH:mm:ss
-/// 
+/// * date: a vector of date in the format YYYY-MM-ddTHH:mm:ss
+///
 /// Return
 /// ------
-///     a vector of float representing the input date in julian date
-pub fn date_to_jd(date: &Vec<&str>) -> Vec<f64> {
+/// * a vector of float representing the input date in modified julian date (MJD)
+pub fn date_to_mjd(date: &Vec<&str>) -> Vec<f64> {
     date.iter()
-        .map(|x| {
-            NaiveDateTime::from_str(&x)
-                .expect("Error while parsing date to jd")
-                .to_jd()
-        })
+        .map(|x| Epoch::from_str(x).unwrap().to_mjd_utc_days())
         .collect::<Vec<f64>>()
 }
 
@@ -172,13 +169,15 @@ pub fn date_to_jd(date: &Vec<&str>) -> Vec<f64> {
 ///
 /// Argument
 /// --------
-///     mjd: a vector of MJD
-/// 
+/// * mjd: a vector of MJD
+///
 /// Return
 /// ------
-///     a vector of jd
+/// * a vector of jd
 pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
-    mjd.iter().map(|mjd| mjd + 2_400_000.5).collect()
+    mjd.iter()
+        .map(|x| Epoch::from_mjd_utc(*x).to_jde_utc_days())
+        .collect()
 }
 
 #[cfg(test)]
@@ -191,11 +190,20 @@ mod earth_pos_tests {
         assert_eq!(jd_tlist(&jd_list), "0,1.5,2.6")
     }
 
+    #[test]
+    fn test_date_to_mjd() {
+        let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
+        let mjd_list = date_to_mjd(&date_list);
+        assert_eq!(mjd_list, vec![59399.53291666666, 60672.07462962963]);
+        let jd_list = mjd_to_jd(&mjd_list);
+        assert_eq!(jd_list, vec![2459400.0329166665, 2460672.5746296295])
+    }
+
     #[tokio::test]
     async fn test_jplvector_request() {
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
-        let jd_list = date_to_jd(&date_list);
-        let response_data = request_vector(&jd_list).await;
+        let mjd_list = date_to_mjd(&date_list);
+        let response_data = request_vector(&mjd_list).await;
         assert!(response_data.contains(
             "$$SOE
 2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  2.195672929244244E-01, -9.108330730147444E-01, -3.948423288985838E-01,
@@ -242,8 +250,7 @@ $$EOE
     #[tokio::test]
     async fn test_get_earth_pos() {
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
-        let jd_list = date_to_jd(&date_list);
-        println!("{jd_list:?}");
+        let jd_list = date_to_mjd(&date_list);
         let earth_vector = get_earth_position(&jd_list).await;
         assert_eq!(
             earth_vector,
@@ -268,9 +275,8 @@ $$EOE
 
     #[tokio::test]
     async fn test_earth_pos_with_mjd() {
-        let test_date = [57028.479297592596, 57049.245147592592, 57063.977117592593];
-        let test_jd: Vec<f64> = mjd_to_jd(&test_date.into());
-        let earth_vector = get_earth_position(&test_jd).await;
+        let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
+        let earth_vector = get_earth_position(&test_mjd).await;
         assert_eq!(
             earth_vector,
             vec![
@@ -284,9 +290,9 @@ $$EOE
                 PosRecord {
                     jd: 2457049.745147592,
                     date: "A.D.2015-Jan-2705:53:00.7520".into(),
-                    x: -0.5891845254244624,
-                    y: 0.7238535049311241,
-                    z: 0.3138036934121133
+                    x: -0.5891845254273143,
+                    y: 0.7238535049291953,
+                    z: 0.3138036934112774
                 },
                 PosRecord {
                     jd: 2457064.477117592,
