@@ -1,83 +1,73 @@
 use nalgebra::{Matrix3, Vector3};
 
-use super::super::constants::{
-    DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, ERAU, RADSEC, SECONDS_PER_DAY, T2000,
-};
+use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, ERAU, RADSEC, T2000};
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
+use hifitime::prelude::Epoch;
+use hifitime::ut1::Ut1Provider;
 
-// Structure pour stocker la position et la vitesse
-#[derive(Debug)]
-struct ObserverState {
-    position: Vector3<f64>,
-    velocity: Vector3<f64>,
-}
-
-// Fonction principale
-fn pvobs(tmjd: f64, longitude: f64, latitude: f64, height: f64) -> ObserverState {
+/// Get the observer position and velocity on the Earth 
+/// 
+/// Argument
+/// --------
+/// * tmjd: time of the observation in modified julian date (MJD)
+/// * longitude: observer longitude on Earth in degree
+/// * latitude: observer latitude on Earth in degree
+/// * height: observer height on Earth in degree
+/// 
+/// Return
+/// ------
+/// * dx: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
+/// * dy: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
+fn pvobs(tmjd: f64, longitude: f64, latitude: f64, height: f64) -> (Vector3<f64>, Vector3<f64>) {
     // Initialisation
     let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
     let mut dx = Vector3::zeros();
     let mut dv = Vector3::zeros();
 
-    // Récupération des coordonnées de l'observatoire
+    // Get the coordinates of the observer on Earth
     let dxbf = body_fixed_coord(longitude, latitude, height);
 
-    // Calcul de la vitesse due à la rotation terrestre
+    // Get the observer velocity due to Earth rotation
     let dvbf = omega.cross(&dxbf);
 
-    println!("dxbf: {dxbf}");
-    println!("dvbf: {dvbf}");
+    // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
+    // based on the hifitime crate
+    let epoch_mjd = Epoch::from_mjd_utc(tmjd);
+    let ut1_provider = Ut1Provider::download_short_from_jpl().unwrap();
+    let mjd_ut1 = epoch_mjd.to_ut1(ut1_provider);
+    let tut = mjd_ut1.to_mjd_utc_days();
 
-    // TODO: conversion from ET to UT1 not working here
-    // using the crate https://docs.rs/hifitime/latest/hifitime/index.html
-    // could resolve this problem
-
-    // see line 335 in reference_system.f90 
-    // and subroutine cnvtim in time_scale.f90 line 564
-    // in orbfit
-    let (mjd1, sec1) = (tmjd.floor(), (tmjd - tmjd.floor()) * SECONDS_PER_DAY);
-    let tut = (mjd1 + sec1 / SECONDS_PER_DAY) as f64;
-
-    // Calcul du temps sidéral apparent de Greenwich
+    // Compute the Greenwich sideral apparent time
     let gast = gmst(tut) + equequ(tmjd);
 
-    // Matrice de rotation de la Terre
+    // Earth rotation matrix
     let rot = rotmt(-gast, 2);
 
-    // Transformation vers le référentiel J2000
+    // Transformation in the ecliptic mean J2000
     let mut rot1 = [[0.; 3]; 3];
     rotpn(&mut rot1, "EQUT", "OFDATE", tmjd, "ECLM", "J2000", 0.);
-    let rotmat = Matrix3::from(rot1) * Matrix3::from(rot);
 
-    // Application des transformations
+    let rot1_mat = Matrix3::from(rot1).transpose();
+    let rot_mat = Matrix3::from(rot).transpose();
+
+    let rotmat = rot1_mat * rot_mat;
+
+    // Apply transformation to the observer position and velocity
     dx = rotmat * dxbf;
     dv = rotmat * dvbf;
 
-    println!("t: {tmjd}");
-    println!("omega: {omega}");
-    println!("dxbf: {dxbf}");
-    println!("dvbf: {dvbf}");
-    println!("mjd1: {mjd1}");
-    println!("sec1: {sec1}");
-    println!("tut: {tut}");
-    println!("gast: {gast}");
-    println!("rot: {rot:?}");
-    println!("rot1: {rot1:?}");
-    println!("rotmat: {rotmat}");
-
-    ObserverState {
-        position: dx,
-        velocity: dv,
-    }
+    (dx, dv)
 }
 
 /// Compute the Greenwich Mean Sidereal Time (GMST)
 /// in radians, for a modified julian date (UT1).
 ///
-/// # Arguments
+/// Arguments
+/// ---------
 /// * `tjm` - Modified Julian Date (MJD)
 ///
-/// # Retour
+/// Retour
+/// ------
 /// GMST in radians, in the [0, 2π) interval.
 fn gmst(tjm: f64) -> f64 {
     /// Coefficients du polynôme pour GMST à 0h UT1 (en secondes)
@@ -88,30 +78,37 @@ fn gmst(tjm: f64) -> f64 {
     /// Rapport entre jour sidéral et jour solaire
     const RAP: f64 = 1.00273790934;
 
-    // Partie entière de tjm correspondant à 0h UT1
     let itjm = tjm.floor();
-    // Nombre de siècles julien écoulés depuis J2000
     let t = (itjm - T2000) / 36525.0;
 
-    // GMST à 0h UT1 en secondes via le polynôme, converti en radians
-    let gmst0 = (((C3 * t + C2) * t + C1) * t + C0) * DPI / 86400.0;
+    // Calcul du temps sidéral moyen à 0h UT1
+    let mut gmst0 = ((C3 * t + C2) * t + C1) * t + C0;
 
-    // Incrément de GMST dû à la fraction de jour (convertie en radians)
-    let h = (tjm - itjm) * DPI;
+    gmst0 *= DPI / 86400.0;
 
-    // Calcul brut du GMST avec correction UT1
-    let raw_gmst = gmst0 + h * RAP;
+    // Incrément de GMST à partir de 0h
+    // let h = (57028.476562500000 - 57028.0) * DPI;
+    let h = tjm.fract() * DPI;
+    let mut gmst = gmst0 + h * RAP;
 
-    // Normalisation dans l'intervalle [0, 2π)
-    raw_gmst.rem_euclid(DPI)
+    // Ajustement pour rester dans [0, 2π]
+    let mut i: i64 = (gmst / DPI).floor() as i64;
+    if gmst < 0.0 {
+        i = i - 1;
+    }
+    gmst -= i as f64 * DPI;
+
+    gmst
 }
 
 /// Compute the equinox equation
 ///
-/// # Arguments
+/// Arguments
+/// ---------
 /// * `tjm`: Modified Julian Date (MJD)
 ///
-/// # Retour
+/// Retour
+/// ------
 /// * Equinox equation in radians
 fn equequ(tjm: f64) -> f64 {
     let oblm = obleq(tjm);
@@ -119,29 +116,7 @@ fn equequ(tjm: f64) -> f64 {
     RADSEC * dpsi * oblm.cos()
 }
 
-// Fonction de génération d'une matrice de rotation
-fn rotation_matrix(angle: f64, axis: usize) -> Matrix3<f64> {
-    let cos_a = angle.to_radians().cos();
-    let sin_a = angle.to_radians().sin();
-
-    match axis {
-        3 => Matrix3::new(cos_a, sin_a, 0.0, -sin_a, cos_a, 0.0, 0.0, 0.0, 1.0),
-        _ => Matrix3::identity(),
-    }
-}
-
-// Fonction de transformation de référentiel (simplifiée)
-fn transformation_matrix(
-    _from: &str,
-    _to: &str,
-    _t: f64,
-    _frame1: &str,
-    _frame2: &str,
-) -> Matrix3<f64> {
-    Matrix3::identity() // Placeholder
-}
-
-/// Convert latitude and height in parallax coordinates on the the Earth
+/// Convert latitude and height in parallax coordinates on the Earth
 ///
 /// Argument
 /// --------
@@ -233,14 +208,39 @@ mod observer_pos_tests {
     }
 
     #[test]
+    fn test_gmst() {
+        let tut = 57028.478514610404;
+        let res_gmst = gmst(tut);
+        assert_eq!(res_gmst, 4.851925725092499);
+
+        let tut = T2000;
+        let res_gmst = gmst(tut);
+        assert_eq!(res_gmst, 4.894961212789145);
+    }
+
+    #[test]
     fn pvobs_test() {
         let tmjd = 57028.479297592596;
         /// longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
 
-        let observer_state = pvobs(tmjd, lon, lat, h);
+        let (observer_position, observer_velocity) = pvobs(tmjd, lon, lat, h);
 
-        println!("Position (J2000 ecliptic): {:?}", observer_state.position);
-        println!("Velocity (J2000 ecliptic): {:?}", observer_state.velocity);
+        assert_eq!(
+            observer_position.as_slice(),
+            [
+                -2.1029664445055886e-5,
+                3.7089965349631534e-5,
+                2.911548164794497e-7
+            ]
+        );
+        assert_eq!(
+            observer_velocity.as_slice(),
+            [
+                -0.00021367298085517918,
+                -0.00012156695591212987,
+                5.304083328775301e-5
+            ]
+        );
     }
 }
