@@ -15,11 +15,11 @@ fn jd_tlist(mjd_list: &Vec<f64>) -> String {
 ///
 /// Argument
 /// --------
-///     jd_list: a list of date in julian date format
+/// * mjd_list: a list of date in modified julian date format (MJD)
 ///
 /// Return
 /// ------
-///     The JPL API raw response
+/// * The JPL API raw response
 async fn request_vector(mjd_list: &Vec<f64>) -> String {
     let requested_params = format!(
         "
@@ -78,11 +78,11 @@ impl PosRecord {
 ///
 /// Argument
 /// --------
-///     jpl_response: the raw JPL response from the API
+/// * jpl_response: the raw JPL response from the API
 ///
 /// Return
 /// ------
-///     a vector of PosRecord
+/// * a vector of PosRecord
 fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
     // regex to match the data part of the jpl horizon response
     let data_regex = Regex::new(r"\$\$SOE\n([^]]*),\n\$\$EOE").unwrap();
@@ -140,7 +140,7 @@ fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 ///
 /// Argument
 /// --------
-/// * jd_list: a vector of date in Julian Date format
+/// * mjd_list: a vector of date in modified julian date format (MJD)
 ///
 /// Return
 /// ------
