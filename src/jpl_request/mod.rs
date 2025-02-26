@@ -1,3 +1,3 @@
 pub mod earth_pos;
 mod jpl_ephem;
-mod observer_pos;
+pub mod observer_pos;

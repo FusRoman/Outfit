@@ -8,6 +8,21 @@ use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
 use hifitime::ut1::Ut1Provider;
 
+
+/// Get the matrix of the heliocentric position vector at the time of three observations
+/// 
+/// Argument
+/// --------
+/// * mjd_tt: vector of observation time in modified julian date (MJD)
+/// * longitude: observer longitude on Earth in degree
+/// * latitude: observer latitude on Earth in degree
+/// * height: observer height on Earth in degree
+/// * state: need the http_client and the ut1_provider
+/// 
+/// Return
+/// ------
+/// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three 
+///     observations (reference frame: Equatorial mean J2000, units: AU)
 pub async fn helio_obs_pos(
     mjd_tt: &Vector3<f64>,
     longitude: f64,
@@ -47,6 +62,7 @@ pub async fn helio_obs_pos(
 /// * longitude: observer longitude on Earth in degree
 /// * latitude: observer latitude on Earth in degree
 /// * height: observer height on Earth in degree
+/// * ut1_provider: the ut1 provider from hifitime containing the delta time in second between TAI and UT1 from the JPL
 ///
 /// Return
 /// ------
