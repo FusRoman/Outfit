@@ -138,7 +138,11 @@ impl OrbitGauss {
         let a2star = second_row_t.dot(&ra);
         let b2star = second_row_t.dot(&rb);
 
-        let r22 = self.sun_pos.row(1).component_mul(&self.sun_pos.row(1)).sum();
+        let r22 = self
+            .sun_pos
+            .row(1)
+            .component_mul(&self.sun_pos.row(1))
+            .sum();
         let s2r2 = unit_matrix.column(1).transpose().dot(&self.sun_pos.row(1));
 
         (
@@ -150,7 +154,7 @@ impl OrbitGauss {
 
     fn solve_8poly(
         &self,
-        polynom: &[f64; 8],
+        polynom: &[f64; 9],
         max_iterations: u32,
         aberth_epsilon: f64,
         root_acceptance_epsilon: f64,
@@ -249,7 +253,7 @@ impl OrbitGauss {
             self.gauss_prelim().unwrap();
         let (coeff_6, coeff_3, coeff_0) =
             self.coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b);
-        let polynomial = [coeff_0, 0., coeff_3, 0., 0., coeff_6, 0., 1.];
+        let polynomial = [coeff_0, 0., 0., coeff_3, 0., 0., coeff_6, 0., 1.];
         let roots = self.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
         let asteroid_pos = self.asteroid_position_vector(
             roots.get(0).unwrap().clone(),
@@ -379,6 +383,34 @@ mod gauss_test {
         assert_eq!(coeff_0, -0.4771346939201045);
     }
 
+    #[test]
+    fn test_solving_polynom() {
+        let gauss = OrbitGauss {
+            ra: Vector3::zeros(),
+            dec: Vector3::zeros(),
+            time: Vector3::zeros(),
+            sun_pos: Matrix3::zeros(),
+        };
+
+        let polynomial = [
+            -0.47713469392010482,
+            0.,
+            0.,
+            2.0305173353541064,
+            0.,
+            0.,
+            -2.6158037187590111,
+            0.,
+            1.,
+        ];
+
+        let roots = gauss.solve_8poly(&polynomial, 50, 1e-6, 1e-6).unwrap();
+
+        assert_eq!(
+            roots,
+            vec![1.3856312487504954, 0.7328107254669438, 0.9540135094917113]
+        );
+    }
     // #[tokio::test]
     // async fn test_solve_8poly() {
     //     let state = OutfitState::new().await;
