@@ -34,6 +34,10 @@ struct GaussSingMatrix;
 #[derive(Debug, Clone)]
 struct Solve8PolyFailed;
 
+/// Spurious root, root not accepted for orbital estimation
+#[derive(Debug, Clone)]
+struct SpuriousRoot;
+
 impl fmt::Display for GaussSingMatrix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -49,6 +53,12 @@ impl fmt::Display for Solve8PolyFailed {
             f,
             "The Aberth–Ehrlich method failed to find complex roots for the 8-order polynom."
         )
+    }
+}
+
+impl fmt::Display for SpuriousRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Spurious root detected for the orbital estimation")
     }
 }
 
@@ -192,7 +202,7 @@ impl OrbitGauss {
         unit_matinv: &Matrix3<f64>,
         vector_a: &Vector3<f64>,
         vector_b: &Vector3<f64>,
-    ) -> Matrix3<f64> {
+    ) -> Result<Matrix3<f64>, SpuriousRoot> {
         let r2m3 = 1. / poly_root.powi(3);
         let c_vec: Vector3<f64> = Vector3::new(
             vector_a[0] + vector_b[0] * r2m3,
@@ -202,14 +212,16 @@ impl OrbitGauss {
         let gcap = self.sun_pos * c_vec;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(&c_vec);
-
+        if rho[1] < 0.01 {
+            return Err(SpuriousRoot);
+        }
         let rho_unit = Matrix3::from_columns(&[
             rho[0] * unit_matrix.column(0),
             rho[1] * unit_matrix.column(1),
             rho[2] * unit_matrix.column(2),
         ]);
 
-        self.sun_pos + rho_unit
+        Ok(self.sun_pos + rho_unit)
     }
 
     /// Compute the velocity vector of the asteroid at the time of the second observation
@@ -234,18 +246,19 @@ impl OrbitGauss {
         tau3: f64,
     ) -> Vector3<f64> {
         let tau13 = tau3 - tau1;
-        let r1m3 = 1. / ast_pos_vector.column(0).norm().powi(3).sqrt();
-        let r2m3 = 1. / ast_pos_vector.column(1).norm().powi(3).sqrt();
-        let r3m3 = 1. / ast_pos_vector.column(2).norm().powi(3).sqrt();
+        let r1m3 = 1. / ast_pos_vector.column(0).norm().powi(3);
+        let r2m3 = 1. / ast_pos_vector.column(1).norm().powi(3);
+        let r3m3 = 1. / ast_pos_vector.column(2).norm().powi(3);
 
         let d1 = tau3 * (r1m3 / 12. - 1. / (tau1 * tau13));
         let d2: f64 = (tau1 + tau3) * (r2m3 / 12. - 1. / (tau1 * tau3));
         let d3 = -tau1 * (r3m3 / 12. + 1. / (tau3 * tau13));
         let d_vect = Vector3::new(-d1, d2, d3);
+
         Vector3::new(
-            GaussGrav * ast_pos_vector.column(0).dot(&d_vect),
-            GaussGrav * ast_pos_vector.column(1).dot(&d_vect),
-            GaussGrav * ast_pos_vector.column(2).dot(&d_vect),
+            GaussGrav * ast_pos_vector.row(0).dot(&d_vect.transpose()),
+            GaussGrav * ast_pos_vector.row(1).dot(&d_vect.transpose()),
+            GaussGrav * ast_pos_vector.row(2).dot(&d_vect.transpose()),
         )
     }
 
@@ -256,13 +269,15 @@ impl OrbitGauss {
             self.coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b);
         let polynomial = [coeff_0, 0., 0., coeff_3, 0., 0., coeff_6, 0., 1.];
         let roots = self.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
-        let asteroid_pos = self.asteroid_position_vector(
-            roots.get(0).unwrap().clone(),
-            &unit_matrix,
-            &inv_unit_matrix,
-            &vect_a,
-            &vect_b,
-        );
+        let asteroid_pos = self
+            .asteroid_position_vector(
+                roots.get(0).unwrap().clone(),
+                &unit_matrix,
+                &inv_unit_matrix,
+                &vect_a,
+                &vect_b,
+            )
+            .unwrap();
         let asteroid_vel = self.gibbs_correction(&asteroid_pos, tau1, tau3);
 
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
@@ -285,9 +300,6 @@ impl OrbitGauss {
 #[cfg(test)]
 mod gauss_test {
 
-    use itertools::assert_equal;
-
-    use super::super::jpl_request::earth_pos::date_to_mjd;
     use super::*;
 
     #[test]
@@ -435,7 +447,7 @@ mod gauss_test {
             .transpose(),
         };
 
-        let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
+        let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
             gauss.gauss_prelim().unwrap();
 
         let first_root = 0.73281072546694370;
@@ -446,6 +458,18 @@ mod gauss_test {
             &vector_a,
             &vector_b,
         );
+        assert!(ast_pos.is_err());
+
+        let second_root = 1.3856312487504951;
+        let ast_pos = gauss
+            .asteroid_position_vector(
+                second_root,
+                &unit_matrix,
+                &inv_unit_matrix,
+                &vector_a,
+                &vector_b,
+            )
+            .unwrap();
 
         let ast_pos_slice: [f64; 9] = ast_pos
             .as_slice()
@@ -455,15 +479,50 @@ mod gauss_test {
         assert_eq!(
             ast_pos_slice,
             [
-                -0.22134069846690135,
-                0.506101144656022,
-                -0.3111211457117762,
-                -0.5192600159296338,
-                0.13970261055598654,
-                -0.49785919276436796,
-                -0.6432655833097736,
-                -0.15143635529894628,
-                -0.5448829066900036
+                -0.28811969067349597,
+                1.06663729794052,
+                0.7514815481797275,
+                -0.6235500510031637,
+                1.0112601855976917,
+                0.713100363506241,
+                -0.8445850475187664,
+                0.9428539454255418,
+                0.6653391541170498
+            ]
+        )
+    }
+
+    #[test]
+    fn test_gibbs_correction() {
+        let gauss = OrbitGauss {
+            ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            sun_pos: Matrix3::zeros(),
+        };
+        let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
+
+        let ast_pos = Matrix3::new(
+            -0.28811969067349597,
+            1.06663729794052,
+            0.7514815481797275,
+            -0.6235500510031637,
+            1.0112601855976917,
+            0.713100363506241,
+            -0.8445850475187664,
+            0.9428539454255418,
+            0.6653391541170498,
+        )
+        .transpose();
+        let asteroid_velocity = gauss.gibbs_correction(&ast_pos, tau1, tau3);
+
+        let ast_vel_slice = asteroid_velocity.as_slice();
+        assert_eq!(
+            ast_vel_slice,
+            [
+                -0.015549845137774663,
+                -0.003876936109837664,
+                -0.0027014074002979886
             ]
         )
     }
