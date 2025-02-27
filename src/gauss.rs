@@ -187,13 +187,13 @@ impl OrbitGauss {
     ///     the position vector of the asteroid at the time of the observation
     fn asteroid_position_vector(
         &self,
-        roots: f64,
+        poly_root: f64,
         unit_matrix: &Matrix3<f64>,
         unit_matinv: &Matrix3<f64>,
         vector_a: &Vector3<f64>,
         vector_b: &Vector3<f64>,
     ) -> Matrix3<f64> {
-        let r2m3 = 1. / roots.powi(3);
+        let r2m3 = 1. / poly_root.powi(3);
         let c_vec: Vector3<f64> = Vector3::new(
             vector_a[0] + vector_b[0] * r2m3,
             -1.,
@@ -208,6 +208,7 @@ impl OrbitGauss {
             rho[1] * unit_matrix.column(1),
             rho[2] * unit_matrix.column(2),
         ]);
+
         self.sun_pos + rho_unit
     }
 
@@ -283,6 +284,8 @@ impl OrbitGauss {
 
 #[cfg(test)]
 mod gauss_test {
+
+    use itertools::assert_equal;
 
     use super::super::jpl_request::earth_pos::date_to_mjd;
     use super::*;
@@ -410,6 +413,59 @@ mod gauss_test {
             roots,
             vec![1.3856312487504954, 0.7328107254669438, 0.9540135094917113]
         );
+    }
+
+    #[test]
+    fn test_asteroid_position() {
+        let gauss = OrbitGauss {
+            ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            sun_pos: Matrix3::new(
+                -0.26456661713915464,
+                0.86893516436949503,
+                0.37669962110919220,
+                -0.58916318521741273,
+                0.72388725167947765,
+                0.31381865165245848,
+                -0.77438744379695956,
+                0.56128847092611645,
+                0.24334971075289916,
+            )
+            .transpose(),
+        };
+
+        let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
+            gauss.gauss_prelim().unwrap();
+
+        let first_root = 0.73281072546694370;
+        let ast_pos = gauss.asteroid_position_vector(
+            first_root,
+            &unit_matrix,
+            &inv_unit_matrix,
+            &vector_a,
+            &vector_b,
+        );
+
+        let ast_pos_slice: [f64; 9] = ast_pos
+            .as_slice()
+            .try_into()
+            .expect("test_asteroid_position result matrix into slice failed");
+
+        assert_eq!(
+            ast_pos_slice,
+            [
+                -0.22134069846690135,
+                0.506101144656022,
+                -0.3111211457117762,
+                -0.5192600159296338,
+                0.13970261055598654,
+                -0.49785919276436796,
+                -0.6432655833097736,
+                -0.15143635529894628,
+                -0.5448829066900036
+            ]
+        )
     }
     // #[tokio::test]
     // async fn test_solve_8poly() {
