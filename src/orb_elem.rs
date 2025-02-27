@@ -1,5 +1,6 @@
 use super::constants::GaussGravSquared;
 use super::ref_system::rotmt;
+use nalgebra::Vector3;
 
 use std::f64;
 use std::f64::consts::PI;
@@ -197,8 +198,39 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
     }
 }
 
+pub fn eccentricity_control(
+    asteroid_position: &Vector3<f64>,
+    asteroid_velocity: &Vector3<f64>,
+    peri_max: f64,
+    ecc_max: f64,
+) -> Option<(bool, f64, f64, f64)> {
+    let ast_vel_2 = asteroid_velocity.dot(&asteroid_velocity);
+    let distance_to_center = asteroid_position.norm();
+
+    let angular_momentum = asteroid_position.cross(&asteroid_velocity);
+
+    let angmom_norm = angular_momentum.dot(&angular_momentum);
+    if angmom_norm.sqrt() == 0. {
+        return None;
+    }
+
+    let lenz_prelim = asteroid_velocity.cross(&angular_momentum) * (1. / GaussGravSquared);
+    let lenz_factor = asteroid_position * (1. / distance_to_center);
+    let lenz_vector = lenz_prelim - lenz_factor;
+
+    let eccentricity = lenz_vector.norm();
+    let perihelie = angmom_norm / (GaussGravSquared * (1. + eccentricity));
+    let energy = ast_vel_2 / 2. - GaussGravSquared / distance_to_center;
+    Some((
+        eccentricity < ecc_max && perihelie < peri_max,
+        eccentricity,
+        perihelie,
+        energy,
+    ))
+}
+
 #[cfg(test)]
-mod gauss_test {
+mod orb_elem_test {
 
     use super::*;
 
@@ -227,5 +259,28 @@ mod gauss_test {
         ];
 
         assert_eq!(ref_elem, elem)
+    }
+
+    #[test]
+    fn test_eccentricity_control() {
+        let asteroid_position = Vector3::new(
+            -0.62355005100316385,
+            1.0112601855976919,
+            0.71310036350624140,
+        );
+
+        let asteroid_velocity = Vector3::new(
+            -1.5549845137774663E-002,
+            -3.8769361098376577E-003,
+            -2.7014074002979964E-003,
+        );
+
+        let (accept_ecc, ecc, peri, energy) =
+            eccentricity_control(&asteroid_position, &asteroid_velocity, 1e3, 2.).unwrap();
+
+        assert!(accept_ecc);
+        assert_eq!(ecc, 0.2892182648825829);
+        assert_eq!(peri, 1.2904453621438048);
+        assert_eq!(energy, -0.00008149473004352595);
     }
 }

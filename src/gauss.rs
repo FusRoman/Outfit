@@ -192,14 +192,16 @@ impl GaussObs {
 
     /// Compute the asteroid position vector at the time of the observation
     ///
-    /// Input:
-    ///     roots: the roots computed from solve_8poly
-    ///     unit_matrix: the matrix made of unit_vector to the orbiting body
-    ///     unit_matinv: the inverse of the unit matrix
-    ///     vector_a and vector_b returned by the gauss_prelim function
+    /// Argument
+    /// --------
+    /// * roots: the roots computed from solve_8poly
+    /// * unit_matrix: the matrix made of unit_vector to the orbiting body
+    /// * unit_matinv: the inverse of the unit matrix
+    /// * vector_a and vector_b returned by the gauss_prelim function
     ///
-    /// Output:
-    ///     the position vector of the asteroid at the time of the observation
+    /// Return
+    /// ------
+    /// * the position vector of the asteroid at the time of the observation
     fn asteroid_position_vector(
         &self,
         poly_root: f64,
