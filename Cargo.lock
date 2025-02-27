@@ -3,23 +3,6 @@
 version = 3
 
 [[package]]
-name = "Outfit"
-version = "0.1.0"
-dependencies = [
- "aberth",
- "csv",
- "hifitime",
- "itertools",
- "nalgebra",
- "once_cell",
- "rand",
- "regex",
- "reqwest",
- "serde",
- "tokio",
-]
-
-[[package]]
 name = "aberth"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -973,6 +956,23 @@ dependencies = [
  "openssl-src",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "outfit"
+version = "0.1.0"
+dependencies = [
+ "aberth",
+ "csv",
+ "hifitime",
+ "itertools",
+ "nalgebra",
+ "once_cell",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

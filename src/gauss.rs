@@ -9,6 +9,7 @@ use aberth::aberth;
 
 use super::env_state::OutfitState;
 use super::jpl_request::observer_pos::helio_obs_pos;
+use super::keplerian_orbit::KeplerianOrbit;
 use super::orb_elem::ccek1;
 use super::ref_system::rotpn;
 
@@ -16,12 +17,13 @@ use super::ref_system::rotpn;
 /// ra is right ascension in degree
 /// dec is declination in degree
 /// time is the observation time in modified julian date (MJD
-/// sun_pos
-struct OrbitGauss {
+/// observer_position is the position of the observer from where the observation have been taken.
+/// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
+struct GaussObs {
     ra: Vector3<f64>,
     dec: Vector3<f64>,
     time: Vector3<f64>,
-    sun_pos: Matrix3<f64>,
+    observer_position: Matrix3<f64>,
 }
 
 /// Define the errors that the Gauss method could return during the execution
@@ -62,7 +64,7 @@ impl fmt::Display for SpuriousRoot {
     }
 }
 
-impl OrbitGauss {
+impl GaussObs {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
     pub async fn new(
@@ -72,14 +74,14 @@ impl OrbitGauss {
         longitude: f64,
         latitude: f64,
         height: f64,
-    ) -> OrbitGauss {
+    ) -> GaussObs {
         let state = OutfitState::new().await;
 
-        OrbitGauss {
+        GaussObs {
             ra: ra,
             dec: dec,
             time: mjd_time,
-            sun_pos: helio_obs_pos(&mjd_time, longitude, latitude, height, &state).await,
+            observer_position: helio_obs_pos(&mjd_time, longitude, latitude, height, &state).await,
         }
     }
 
@@ -96,9 +98,9 @@ impl OrbitGauss {
     /// Compute the matrix containing the unit vector
     fn unit_matrix(&self) -> Matrix3<f64> {
         Matrix3::from_columns(&[
-            OrbitGauss::unit_vector(self.ra[0], self.dec[0], f64::cos(self.dec[0])),
-            OrbitGauss::unit_vector(self.ra[1], self.dec[1], f64::cos(self.dec[1])),
-            OrbitGauss::unit_vector(self.ra[2], self.dec[2], f64::cos(self.dec[2])),
+            GaussObs::unit_vector(self.ra[0], self.dec[0], f64::cos(self.dec[0])),
+            GaussObs::unit_vector(self.ra[1], self.dec[1], f64::cos(self.dec[1])),
+            GaussObs::unit_vector(self.ra[2], self.dec[2], f64::cos(self.dec[2])),
         ])
     }
 
@@ -140,20 +142,23 @@ impl OrbitGauss {
         vector_a: &Vector3<f64>,
         vector_b: &Vector3<f64>,
     ) -> (f64, f64, f64) {
-        let sun_pos_t = self.sun_pos.transpose();
-        let ra = sun_pos_t * vector_a;
-        let rb = sun_pos_t * vector_b;
+        let observer_position_t = self.observer_position.transpose();
+        let ra = observer_position_t * vector_a;
+        let rb = observer_position_t * vector_b;
 
         let second_row_t = unit_invmatrix.row(1).transpose();
         let a2star = second_row_t.dot(&ra);
         let b2star = second_row_t.dot(&rb);
 
         let r22 = self
-            .sun_pos
+            .observer_position
             .row(1)
-            .component_mul(&self.sun_pos.row(1))
+            .component_mul(&self.observer_position.row(1))
             .sum();
-        let s2r2 = unit_matrix.column(1).transpose().dot(&self.sun_pos.row(1));
+        let s2r2 = unit_matrix
+            .column(1)
+            .transpose()
+            .dot(&self.observer_position.row(1));
 
         (
             -(a2star.powi(2)) - r22 - (2.0 * a2star * s2r2),
@@ -209,7 +214,8 @@ impl OrbitGauss {
             -1.,
             vector_a[2] + vector_b[2] * r2m3,
         );
-        let gcap = self.sun_pos * c_vec;
+        let obs_pos_t = self.observer_position.transpose();
+        let gcap = obs_pos_t * c_vec;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(&c_vec);
         if rho[1] < 0.01 {
@@ -221,7 +227,7 @@ impl OrbitGauss {
             rho[2] * unit_matrix.column(2),
         ]);
 
-        Ok(self.sun_pos + rho_unit)
+        Ok(obs_pos_t + rho_unit)
     }
 
     /// Compute the velocity vector of the asteroid at the time of the second observation
@@ -262,28 +268,30 @@ impl OrbitGauss {
         )
     }
 
-    pub fn solve_orbit(&self) {
+    pub fn prelim_orbit(&self) -> Option<KeplerianOrbit> {
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) =
             self.gauss_prelim().unwrap();
+
         let (coeff_6, coeff_3, coeff_0) =
             self.coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b);
         let polynomial = [coeff_0, 0., 0., coeff_3, 0., 0., coeff_6, 0., 1.];
-        let roots = self.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
-        let asteroid_pos = self
-            .asteroid_position_vector(
-                roots.get(0).unwrap().clone(),
-                &unit_matrix,
-                &inv_unit_matrix,
-                &vect_a,
-                &vect_b,
-            )
-            .unwrap();
+
+        let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6).unwrap();
+        let first_ast_pos_vector = roots.into_iter().find_map(|root_el| {
+            self.asteroid_position_vector(root_el, &unit_matrix, &inv_unit_matrix, &vect_a, &vect_b)
+                .ok()
+        });
+
+        let Some(asteroid_pos) = first_ast_pos_vector else {
+            return None;
+        };
+
         let asteroid_vel = self.gibbs_correction(&asteroid_pos, tau1, tau3);
 
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
 
-        let matrix_elc_transform = Matrix3::from(roteqec);
+        let matrix_elc_transform = Matrix3::from(roteqec).transpose();
         let ecl_pos = matrix_elc_transform * asteroid_pos.column(1);
         let ecl_vel = matrix_elc_transform * asteroid_vel;
 
@@ -294,6 +302,14 @@ impl OrbitGauss {
         let mut elem = [0.0; 6];
         let mut type_ = String::new();
         ccek1(&mut elem, &mut type_, &ast_pos_vel);
+        Some(KeplerianOrbit {
+            semi_major_axis: elem[0],
+            eccentricity: elem[1],
+            inclination: elem[2],
+            ascending_node_longitude: elem[3],
+            periapsis_argument: elem[4],
+            mean_anomaly: elem[5],
+        })
     }
 }
 
@@ -304,11 +320,11 @@ mod gauss_test {
 
     #[test]
     fn test_gauss_prelim() {
-        let gauss = OrbitGauss {
+        let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            sun_pos: Matrix3::zeros(),
+            observer_position: Matrix3::zeros(),
         };
 
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
@@ -370,11 +386,11 @@ mod gauss_test {
 
     #[test]
     fn test_coeff_8poly() {
-        let gauss = OrbitGauss {
+        let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            sun_pos: Matrix3::new(
+            observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,
                 0.37669962110919220,
@@ -400,11 +416,11 @@ mod gauss_test {
 
     #[test]
     fn test_solving_polynom() {
-        let gauss = OrbitGauss {
+        let gauss = GaussObs {
             ra: Vector3::zeros(),
             dec: Vector3::zeros(),
             time: Vector3::zeros(),
-            sun_pos: Matrix3::zeros(),
+            observer_position: Matrix3::zeros(),
         };
 
         let polynomial = [
@@ -429,11 +445,11 @@ mod gauss_test {
 
     #[test]
     fn test_asteroid_position() {
-        let gauss = OrbitGauss {
+        let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            sun_pos: Matrix3::new(
+            observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,
                 0.37669962110919220,
@@ -443,8 +459,7 @@ mod gauss_test {
                 -0.77438744379695956,
                 0.56128847092611645,
                 0.24334971075289916,
-            )
-            .transpose(),
+            ),
         };
 
         let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
@@ -494,11 +509,11 @@ mod gauss_test {
 
     #[test]
     fn test_gibbs_correction() {
-        let gauss = OrbitGauss {
+        let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            sun_pos: Matrix3::zeros(),
+            observer_position: Matrix3::zeros(),
         };
         let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
 
@@ -526,36 +541,37 @@ mod gauss_test {
             ]
         )
     }
-    // #[tokio::test]
-    // async fn test_solve_8poly() {
-    //     let state = OutfitState::new().await;
-    //     let date_list = vec![
-    //         "2021-07-04T12:47:24",
-    //         "2021-07-04T13:47:24",
-    //         "2021-07-04T14:47:24",
-    //     ];
-    //     let jd_time = date_to_mjd(&date_list);
-    //     let pos_vector = get_earth_position(&jd_time, &state.http_client).await;
 
-    //     let sun_pos_matrix = Matrix3::from_columns(&[
-    //         pos_vector.get(0).unwrap().pos_vector(),
-    //         pos_vector.get(1).unwrap().pos_vector(),
-    //         pos_vector.get(2).unwrap().pos_vector(),
-    //     ]);
+    #[test]
+    fn test_solve_orbit() {
+        let gauss = GaussObs {
+            ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            observer_position: Matrix3::new(
+                -0.26456661713915464,
+                0.86893516436949503,
+                0.37669962110919220,
+                -0.58916318521741273,
+                0.72388725167947765,
+                0.31381865165245848,
+                -0.77438744379695956,
+                0.56128847092611645,
+                0.24334971075289916,
+            ),
+        };
 
-    //     let gauss = OrbitGauss {
-    //         ra: Vector3::new(0.0, 1.0, 2.0),
-    //         dec: Vector3::new(0.0, 1.0, 2.0),
-    //         time: Vector3::from_vec(jd_time),
-    //         sun_pos: sun_pos_matrix,
-    //     };
-
-    //     // let (coeff_6, coeff_3, coeff_0) = gauss.coeff_eight_poly().expect("");
-    //     // let polynomial = [coeff_0, 0., coeff_3, 0., 0., coeff_6, 0., 1.];
-    //     // let roots = gauss.solve_8poly(&polynomial, 30, 0.00001, 1e-12).unwrap();
-    //     // assert_eq!(roots.len(), 2);
-    //     // assert_eq!(roots, vec![0.2901615504246318, 0.0016246910754188504]);
-
-    //     // let orb = gauss.orbit_prelim(roots, inv_matrix, vector_a, vector_b);
-    // }
+        let prelim_orbit = gauss.prelim_orbit().unwrap();
+        assert_eq!(
+            prelim_orbit,
+            KeplerianOrbit {
+                semi_major_axis: 1.8155297166304307,
+                eccentricity: 0.289218264882585,
+                inclination: 0.20434785751953052,
+                ascending_node_longitude: 0.007289013369042698,
+                periapsis_argument: 1.2263737249473101,
+                mean_anomaly: 0.4455474295573425
+            }
+        )
+    }
 }
