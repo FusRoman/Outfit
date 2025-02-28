@@ -11,6 +11,7 @@ use super::env_state::OutfitState;
 use super::jpl_request::observer_pos::helio_obs_pos;
 use super::keplerian_orbit::KeplerianOrbit;
 use super::orb_elem::ccek1;
+use super::orb_elem::eccentricity_control;
 use super::ref_system::rotpn;
 
 /// Gauss struct data
@@ -270,6 +271,35 @@ impl GaussObs {
         )
     }
 
+    fn accept_root(
+        &self,
+        root: f64,
+        unit_matrix: &Matrix3<f64>,
+        inv_unit_matrix: &Matrix3<f64>,
+        vect_a: &Vector3<f64>,
+        vect_b: &Vector3<f64>,
+        tau1: f64,
+        tau3: f64,
+    ) -> Option<(Vector3<f64>, Vector3<f64>)> {
+        let Some(ast_pos_all_time) = self
+            .asteroid_position_vector(root, &unit_matrix, &inv_unit_matrix, &vect_a, &vect_b)
+            .ok()
+        else {
+            return None;
+        };
+        let ast_pos_second_time: Vector3<f64> = ast_pos_all_time.column(1).into();
+        let asteroid_vel = self.gibbs_correction(&ast_pos_all_time, tau1, tau3);
+        let Some((is_accepted, _, _, _)) =
+            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.)
+        else {
+            return None;
+        };
+        if is_accepted {
+            return Some((ast_pos_second_time, asteroid_vel));
+        }
+        return None;
+    }
+
     pub fn prelim_orbit(&self) -> Option<KeplerianOrbit> {
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) =
             self.gauss_prelim().unwrap();
@@ -279,22 +309,27 @@ impl GaussObs {
         let polynomial = [coeff_0, 0., 0., coeff_3, 0., 0., coeff_6, 0., 1.];
 
         let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6).unwrap();
-        let first_ast_pos_vector = roots.into_iter().find_map(|root_el| {
-            self.asteroid_position_vector(root_el, &unit_matrix, &inv_unit_matrix, &vect_a, &vect_b)
-                .ok()
-        });
 
-        let Some(asteroid_pos) = first_ast_pos_vector else {
+        // get the first accepted root and return the asteroid position and asteroid velocity
+        let Some((asteroid_pos, asteroid_vel)) = roots.into_iter().find_map(|root| {
+            self.accept_root(
+                root,
+                &unit_matrix,
+                &inv_unit_matrix,
+                &vect_a,
+                &vect_b,
+                tau1,
+                tau3,
+            )
+        }) else {
             return None;
         };
-
-        let asteroid_vel = self.gibbs_correction(&asteroid_pos, tau1, tau3);
 
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
 
         let matrix_elc_transform = Matrix3::from(roteqec).transpose();
-        let ecl_pos = matrix_elc_transform * asteroid_pos.column(1);
+        let ecl_pos = matrix_elc_transform * asteroid_pos;
         let ecl_vel = matrix_elc_transform * asteroid_vel;
 
         let ast_pos_vel: [f64; 6] = [
