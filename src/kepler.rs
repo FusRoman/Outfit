@@ -1,5 +1,10 @@
+use super::constants::GaussGrav;
 use super::constants::DPI;
+use super::orb_elem::eccentricity_control;
+use core::fmt;
+use nalgebra::Vector3;
 use std::f64::consts::PI;
+use std::f64::EPSILON;
 
 fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
     const JMAX: usize = 70;
@@ -222,10 +227,10 @@ fn solve_kepuni(
     mu: f64,
     alpha: f64,
     e0: f64,
+    convergency: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     const JMAX: usize = 100;
-    let epsilon = f64::EPSILON;
-    let contr = 100.0 * epsilon;
+    let contr = convergency.unwrap_or(100.0 * EPSILON);
 
     let Some((mut psi, alpha)) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr) else {
         return None;
@@ -240,7 +245,7 @@ fn solve_kepuni(
 
         let dpsi = -fun / funp;
 
-        if s3.abs() > 1e-2 / epsilon {
+        if s3.abs() > 1e-2 / EPSILON {
             return None; // Problème de convergence
         }
 
@@ -253,6 +258,52 @@ fn solve_kepuni(
     }
 
     None // Convergence non atteinte
+}
+
+/// VelocityCorrectionError Error is used in case the velocity correction cannot be ended.
+#[derive(Debug, Clone)]
+struct VelocityCorrectionError;
+
+impl fmt::Display for VelocityCorrectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "The eccentricity control detected that the asteroid as no angular momentum"
+        )
+    }
+}
+
+fn velocity_correction(
+    x1: Vector3<f64>,
+    x2: Vector3<f64>,
+    v2: Vector3<f64>,
+    dt: f64,
+    peri_max: f64,
+    ecc_max: f64,
+) -> Result<(Vector3<f64>, f64, f64), VelocityCorrectionError> {
+    let mu = GaussGrav.powi(2);
+    let sig0 = x2.dot(&v2);
+    let r2 = x2.norm();
+
+    let Some((_, ecc, _, energy)) = eccentricity_control(&x2, &v2, peri_max, ecc_max) else {
+        return Err(VelocityCorrectionError);
+    };
+
+    let eps = 1e3 * EPSILON;
+    let alpha = 2. * energy;
+
+    let Some((_, _, _, s2, s3)) = solve_kepuni(dt, r2, sig0, mu, alpha, ecc, Some(eps)) else {
+        return Err(VelocityCorrectionError);
+    };
+
+    // Calcul des coefficients f et g de Lagrange
+    let f = 1.0 - (mu * s2) / r2;
+    let g = dt - (mu * s3);
+
+    // Calcul de la vitesse améliorée
+    let v2 = (x1 - f * x2) / g;
+
+    Ok((v2, f, g))
 }
 
 #[cfg(test)]
@@ -309,7 +360,7 @@ mod kepler_test {
         let alpha = -1.6421583777711407E-004;
         let e0 = 0.28359959913734450;
 
-        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0).unwrap();
+        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
 
         assert_eq!(psi, -15.327414893041839);
         assert_eq!(s0, 0.9807723505583343);
@@ -318,12 +369,47 @@ mod kepler_test {
         assert_eq!(s3, -598.9874390519309);
 
         let alpha = 1.6421583777711407E-004;
-        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0).unwrap();
-        
+        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+
         assert_eq!(psi, -15.1324122746124);
         assert_eq!(s0, 1.0188608766146905);
         assert_eq!(s1, -15.227430038021337);
         assert_eq!(s2, 114.854187452308);
         assert_eq!(s3, -578.615100072754);
+    }
+
+    #[test]
+    fn test_velocity_correction() {
+        let x1 = Vector3::new(
+            -0.84356112612968326,
+            0.93728832737077283,
+            0.65918390102977664,
+        );
+
+        let x2 = Vector3::new(
+            -0.62312162291738404,
+            1.0076797884556383,
+            0.70812568798442455,
+        );
+
+        let v2 = Vector3::new(
+            -1.5524310368624056E-002,
+            -3.9841041766040678E-003,
+            -2.7640154361637183E-003,
+        );
+        let dt = 14.731970000000729;
+
+        let (v2, f, g) = velocity_correction(x1, x2, v2, dt, 1., 1.).unwrap();
+
+        assert_eq!(f, 0.98816487709729062);
+        assert_eq!(g, 14.674676076120734);
+        assert_eq!(
+            v2.as_slice(),
+            [
+                -0.015524310248562921,
+                -0.003984104769239458,
+                -0.0027640155187336176
+            ]
+        )
     }
 }
