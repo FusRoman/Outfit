@@ -1,6 +1,5 @@
 use aberth::StopReason;
 use core::fmt;
-use itertools::concat;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
@@ -358,10 +357,23 @@ impl GaussObs {
             return None;
         };
 
-        Some(self.from_position_velocity_to_orbit(
-            &asteroid_pos_all_time.column(1).into(),
+        let Some((corrected_pos, corrected_vel)) = self.pos_and_vel_correction(
+            &asteroid_pos_all_time,
             &asteroid_vel,
-        ))
+            &unit_matrix,
+            &inv_unit_matrix,
+            1e3,
+            5.,
+            1e-10,
+            50,
+        ) else {
+            return Some(self.from_position_velocity_to_orbit(
+                &asteroid_pos_all_time.column(1).into(),
+                &asteroid_vel,
+            ));
+        };
+
+        Some(self.from_position_velocity_to_orbit(&corrected_pos.column(1).into(), &corrected_vel))
     }
 
     fn pos_and_vel_correction(
@@ -411,7 +423,7 @@ impl GaussObs {
                 continue;
             };
 
-            let diff_pos = (new_ast_pos - previous_ast_pos);
+            let diff_pos = new_ast_pos - previous_ast_pos;
             let diff_pos_squared = diff_pos.component_mul(&diff_pos).sum();
             let sca = new_ast_pos.component_mul(&new_ast_pos).sum();
             let ast_pos_err = (diff_pos_squared / sca).sqrt();
@@ -689,12 +701,12 @@ mod gauss_test {
         assert_eq!(
             prelim_orbit,
             KeplerianOrbit {
-                semi_major_axis: 1.8155297166304307,
-                eccentricity: 0.289218264882585,
-                inclination: 0.20434785751953052,
-                ascending_node_longitude: 0.007289013369042698,
-                periapsis_argument: 1.2263737249473101,
-                mean_anomaly: 0.4455474295573425
+                semi_major_axis: 1.8015109749705496,
+                eccentricity: 0.2835090890769234,
+                inclination: 0.20264596920729464,
+                ascending_node_longitude: 0.008079724163250196,
+                periapsis_argument: 1.244926174041886,
+                mean_anomaly: 0.44069722652585874
             }
         )
     }
