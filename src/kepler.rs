@@ -262,7 +262,7 @@ fn solve_kepuni(
 
 /// VelocityCorrectionError Error is used in case the velocity correction cannot be ended.
 #[derive(Debug, Clone)]
-struct VelocityCorrectionError;
+pub struct VelocityCorrectionError;
 
 impl fmt::Display for VelocityCorrectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -273,10 +273,10 @@ impl fmt::Display for VelocityCorrectionError {
     }
 }
 
-fn velocity_correction(
-    x1: Vector3<f64>,
-    x2: Vector3<f64>,
-    v2: Vector3<f64>,
+pub fn velocity_correction(
+    x1: &Vector3<f64>,
+    x2: &Vector3<f64>,
+    v2: &Vector3<f64>,
     dt: f64,
     peri_max: f64,
     ecc_max: f64,
@@ -399,7 +399,7 @@ mod kepler_test {
         );
         let dt = 14.731970000000729;
 
-        let (v2, f, g) = velocity_correction(x1, x2, v2, dt, 1., 1.).unwrap();
+        let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1.).unwrap();
 
         assert_eq!(f, 0.98816487709729062);
         assert_eq!(g, 14.674676076120734);
