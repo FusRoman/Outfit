@@ -1,5 +1,6 @@
 #[derive(Debug, PartialEq)]
 pub struct KeplerianOrbit {
+    pub reference_epoch: f64,
     pub semi_major_axis: f64,
     pub eccentricity: f64,
     pub inclination: f64,

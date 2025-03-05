@@ -10,9 +10,14 @@ pub const AU: f64 = 149_597_870.7;
 
 /// Earth ellipsoid constant from (GRS1980/WGS84)
 pub const EARTH_MAJOR_AXIS: f64 = 6_378_137.0; // Earth equatorial radius in meter
-pub const EARTH_MINOR_AXIS: f64 = 6_356_752.3; // Earth polar radius in meter 
+pub const EARTH_MINOR_AXIS: f64 = 6_356_752.3; // Earth polar radius in meter
 pub const ERAU: f64 = (EARTH_MAJOR_AXIS / 1000.) / AU;
 
 /// Gaussian gravitational constant
 pub const GaussGrav: f64 = 0.01720209895;
 pub const GaussGravSquared: f64 = GaussGrav * GaussGrav;
+
+///speed of light (Km/s)
+pub const VLIGHT: f64 = 2.99792458e5;
+/// speed of light (AU/day)
+pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;

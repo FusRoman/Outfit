@@ -3,7 +3,7 @@ use core::fmt;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
-use super::constants::GaussGrav;
+use super::constants::{GaussGrav, VLIGHT_AU};
 
 use aberth::aberth;
 
@@ -204,12 +204,12 @@ impl GaussObs {
     /// Return
     /// ------
     /// * the position vector of the asteroid at the time of the observation
-    fn asteroid_position_vector(
+    fn position_vector_and_reference_epoch(
         &self,
         unit_matrix: &Matrix3<f64>,
         unit_matinv: &Matrix3<f64>,
         vector_c: &Vector3<f64>,
-    ) -> Result<Matrix3<f64>, SpuriousRoot> {
+    ) -> Result<(Matrix3<f64>, f64), SpuriousRoot> {
         let obs_pos_t = self.observer_position.transpose();
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
@@ -222,8 +222,9 @@ impl GaussObs {
             rho[1] * unit_matrix.column(1),
             rho[2] * unit_matrix.column(2),
         ]);
+        let reference_epoch = self.time[1] - rho[1] / VLIGHT_AU;
 
-        Ok(obs_pos_t + rho_unit)
+        Ok((obs_pos_t + rho_unit, reference_epoch))
     }
 
     /// Compute the velocity vector of the asteroid at the time of the second observation
@@ -273,15 +274,15 @@ impl GaussObs {
         vect_b: &Vector3<f64>,
         tau1: f64,
         tau3: f64,
-    ) -> Option<(Matrix3<f64>, Vector3<f64>)> {
+    ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
         let r2m3 = 1. / root.powi(3);
         let vector_c: Vector3<f64> = Vector3::new(
             vect_a[0] + vect_b[0] * r2m3,
             -1.,
             vect_a[2] + vect_b[2] * r2m3,
         );
-        let Some(ast_pos_all_time) = self
-            .asteroid_position_vector(&unit_matrix, &inv_unit_matrix, &vector_c)
+        let Some((ast_pos_all_time, reference_epoch)) = self
+            .position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c)
             .ok()
         else {
             return None;
@@ -294,7 +295,7 @@ impl GaussObs {
             return None;
         };
         if is_accepted {
-            return Some((ast_pos_all_time, asteroid_vel));
+            return Some((ast_pos_all_time, asteroid_vel, reference_epoch));
         }
         return None;
     }
@@ -303,6 +304,7 @@ impl GaussObs {
         &self,
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
+        reference_epoch: f64,
     ) -> KeplerianOrbit {
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
@@ -319,6 +321,7 @@ impl GaussObs {
         let mut type_ = String::new();
         ccek1(&mut elem, &mut type_, &ast_pos_vel);
         KeplerianOrbit {
+            reference_epoch: reference_epoch,
             semi_major_axis: elem[0],
             eccentricity: elem[1],
             inclination: elem[2],
@@ -343,21 +346,23 @@ impl GaussObs {
         let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6).unwrap();
 
         // get the first accepted root and return the asteroid position and asteroid velocity
-        let Some((asteroid_pos_all_time, asteroid_vel)) = roots.into_iter().find_map(|root| {
-            self.accept_root(
-                root,
-                &unit_matrix,
-                &inv_unit_matrix,
-                &vect_a,
-                &vect_b,
-                tau1,
-                tau3,
-            )
-        }) else {
+        let Some((asteroid_pos_all_time, asteroid_vel, reference_epoch)) =
+            roots.into_iter().find_map(|root| {
+                self.accept_root(
+                    root,
+                    &unit_matrix,
+                    &inv_unit_matrix,
+                    &vect_a,
+                    &vect_b,
+                    tau1,
+                    tau3,
+                )
+            })
+        else {
             return None;
         };
 
-        let Some((corrected_pos, corrected_vel)) = self.pos_and_vel_correction(
+        let Some((corrected_pos, corrected_vel, corrected_epoch)) = self.pos_and_vel_correction(
             &asteroid_pos_all_time,
             &asteroid_vel,
             &unit_matrix,
@@ -370,10 +375,15 @@ impl GaussObs {
             return Some(self.from_position_velocity_to_orbit(
                 &asteroid_pos_all_time.column(1).into(),
                 &asteroid_vel,
+                reference_epoch,
             ));
         };
 
-        Some(self.from_position_velocity_to_orbit(&corrected_pos.column(1).into(), &corrected_vel))
+        Some(self.from_position_velocity_to_orbit(
+            &corrected_pos.column(1).into(),
+            &corrected_vel,
+            corrected_epoch,
+        ))
     }
 
     fn pos_and_vel_correction(
@@ -386,9 +396,11 @@ impl GaussObs {
         ecc_max: f64,
         err_max: f64,
         itmax: i32,
-    ) -> Option<(Matrix3<f64>, Vector3<f64>)> {
+    ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
         let mut previous_ast_pos = asteroid_position.clone();
         let mut previous_ast_vel = asteroid_velocity.clone();
+        let mut corrected_epoch = 0.;
+
         for _ in 0..itmax {
             let Ok((ast_vel1, f1, g1)) = velocity_correction(
                 &previous_ast_pos.column(0).into(),
@@ -416,8 +428,8 @@ impl GaussObs {
             let f_lagrange = f1 * g2 - f2 * g1;
 
             let c_vector = Vector3::new(g2 / f_lagrange, -1., -(g1 / f_lagrange));
-            let Some(new_ast_pos) = self
-                .asteroid_position_vector(&unit_matrix, &inv_unit_matrix, &c_vector)
+            let Some((new_ast_pos, it_epoch)) = self
+                .position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &c_vector)
                 .ok()
             else {
                 continue;
@@ -440,12 +452,13 @@ impl GaussObs {
 
             previous_ast_pos = new_ast_pos;
             previous_ast_vel = corrected_velocity;
+            corrected_epoch = it_epoch;
 
             if ast_pos_err <= err_max {
                 break;
             }
         }
-        Some((previous_ast_pos, previous_ast_vel))
+        Some((previous_ast_pos, previous_ast_vel, corrected_epoch))
     }
 }
 
@@ -608,7 +621,8 @@ mod gauss_test {
             -1.,
             vector_a[2] + vector_b[2] * r2m3,
         );
-        let ast_pos = gauss.asteroid_position_vector(&unit_matrix, &inv_unit_matrix, &vector_c);
+        let ast_pos =
+            gauss.position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c);
         assert!(ast_pos.is_err());
 
         let second_root: f64 = 1.3856312487504951;
@@ -618,8 +632,8 @@ mod gauss_test {
             -1.,
             vector_a[2] + vector_b[2] * r2m3,
         );
-        let ast_pos = gauss
-            .asteroid_position_vector(&unit_matrix, &inv_unit_matrix, &vector_c)
+        let (ast_pos, ref_epoch) = gauss
+            .position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c)
             .unwrap();
 
         let ast_pos_slice: [f64; 9] = ast_pos
@@ -640,7 +654,9 @@ mod gauss_test {
                 0.9428539454255418,
                 0.6653391541170498
             ]
-        )
+        );
+
+        assert_eq!(ref_epoch, 57049.24229942721);
     }
 
     #[test]
@@ -701,6 +717,7 @@ mod gauss_test {
         assert_eq!(
             prelim_orbit,
             KeplerianOrbit {
+                reference_epoch: 57049.24233491307,
                 semi_major_axis: 1.8015109749705496,
                 eccentricity: 0.2835090890769234,
                 inclination: 0.20264596920729464,
@@ -775,7 +792,7 @@ mod gauss_test {
         )
         .transpose();
 
-        let (new_ast_pos, new_ast_vel) = gauss
+        let (new_ast_pos, new_ast_vel, corrected_epoch) = gauss
             .pos_and_vel_correction(
                 &ast_pos,
                 &ast_vel,
@@ -811,5 +828,7 @@ mod gauss_test {
                 -0.0027640157742952693
             ]
         );
+
+        assert_eq!(corrected_epoch, 57049.24233491307);
     }
 }
