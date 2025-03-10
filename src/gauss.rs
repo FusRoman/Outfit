@@ -196,10 +196,9 @@ impl GaussObs {
     ///
     /// Argument
     /// --------
-    /// * roots: the roots computed from solve_8poly
-    /// * unit_matrix: the matrix made of unit_vector to the orbiting body
-    /// * unit_matinv: the inverse of the unit matrix
-    /// * vector_a and vector_b returned by the gauss_prelim function
+    /// * `unit_matrix`: the matrix made of unit_vector to the orbiting body
+    /// * `unit_matinv`: the inverse of the unit matrix
+    /// * `vector_c`: the vector c used to compute the asteroid position vector
     ///
     /// Return
     /// ------
@@ -229,19 +228,27 @@ impl GaussObs {
 
     /// Compute the velocity vector of the asteroid at the time of the second observation
     ///
-    /// Inputs:
-    ///     ast_pos_vector: Asteroid position vector at the time of the three observations
-    ///     cartesian representation, unit= AU
-    ///       x y z
-    ///    t1 0 1 2
-    ///    t2 4 5 6
-    ///    t3 7 8 9
-    ///    
-    ///    tau1: Normalized time of the first observation
-    ///    tau3: normalized time of the third observation
+    /// Argument
+    /// --------
+    /// * `ast_pos_vector`: Asteroid position vector at the time of the three observations
+    ///  cartesian representation, 
+    /// 
+    /// unit = AU; 
+    /// t1, t2 and t3 are the time of the three observations; 
+    /// x, y, z are the cartesian coordinates of the asteroid at the time of the three observations
+    /// 
+    /// |    | x | y | z |
+    /// |----|---|---|---|
+    /// | t1 | 0 | 1 | 2 |
+    /// | t2 | 4 | 5 | 6 |
+    /// | t3 | 7 | 8 | 9 |
+    /// 
+    /// * `tau1`: Normalized time of the first observation
+    /// * `tau3`: normalized time of the third observation
     ///
-    /// Output:
-    ///     Velocity vector of the asteroid [vx, vy, vz]
+    /// Return
+    /// ------
+    /// * Velocity vector of the asteroid [vx, vy, vz]
     fn gibbs_correction(
         &self,
         ast_pos_vector: &Matrix3<f64>,
