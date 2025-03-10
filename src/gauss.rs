@@ -21,7 +21,7 @@ use super::ref_system::rotpn;
 /// time is the observation time in modified julian date (MJD
 /// observer_position is the position of the observer from where the observation have been taken.
 /// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
-struct GaussObs {
+pub struct GaussObs {
     ra: Vector3<f64>,
     dec: Vector3<f64>,
     time: Vector3<f64>,
@@ -552,7 +552,7 @@ mod gauss_test {
             ),
         };
 
-        let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
+        let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
             gauss.gauss_prelim().unwrap();
 
         let (coeff_6, coeff_3, coeff_0) =

@@ -196,13 +196,13 @@ fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 ///
 /// Argument
 /// --------
-/// * lat: observer latitude in degree
-/// * height: observer height in kilometer
+/// * `lat`: observer latitude in degree
+/// * `height`: observer height in kilometer
 ///
 /// Return
 /// ------
-/// * rho_cos_phi: normalized radius of the observer projected on the equatorial plane
-/// * rho_sin_phi: normalized radius of the observer projected on the polar axis.
+/// * `rho_cos_phi`: normalized radius of the observer projected on the equatorial plane
+/// * `rho_sin_phi`: normalized radius of the observer projected on the polar axis.
 fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     let latitude_rad = lat.to_radians();
 
@@ -242,7 +242,7 @@ mod observer_pos_tests {
 
     #[test]
     fn geodetic_to_parallax_test() {
-        /// latitude and height of Pan-STARRS 1, Haleakala
+        // latitude and height of Pan-STARRS 1, Haleakala
         let (pxy1, pz1) = geodetic_to_parallax(20.707233557, 3067.694);
         assert_eq!(pxy1, 0.9362410003211518);
         assert_eq!(pz1, 0.35154299856304305);
@@ -250,7 +250,7 @@ mod observer_pos_tests {
 
     #[test]
     fn body_fixed_coord_test() {
-        /// longitude, latitude and height of Pan-STARRS 1, Haleakala
+        // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
         let obs_fixed_vector = body_fixed_coord(lon, lat, h);
         assert_eq!(
@@ -278,7 +278,7 @@ mod observer_pos_tests {
     async fn pvobs_test() {
         let state = OutfitState::new().await;
         let tmjd = 57028.479297592596;
-        /// longitude, latitude and height of Pan-STARRS 1, Haleakala
+        // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
 
         let (observer_position, observer_velocity) = pvobs(tmjd, lon, lat, h, &state.ut1_provider);
@@ -306,7 +306,7 @@ mod observer_pos_tests {
         let state = OutfitState::new().await;
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 
-        /// longitude, latitude and height of Pan-STARRS 1, Haleakala
+        // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
 
         let helio_pos = helio_obs_pos(&tmjd, lon, lat, h, &state).await;
