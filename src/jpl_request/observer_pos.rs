@@ -1,6 +1,4 @@
 use nalgebra::{Matrix3, Vector3};
-use reqwest::StatusCode;
-
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, ERAU, RADSEC, T2000};
 use super::super::env_state::OutfitState;
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
@@ -77,8 +75,6 @@ fn pvobs(
 ) -> (Vector3<f64>, Vector3<f64>) {
     // Initialisation
     let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
-    let mut dx = Vector3::zeros();
-    let mut dv = Vector3::zeros();
 
     // Get the coordinates of the observer on Earth
     let dxbf = body_fixed_coord(longitude, latitude, height);
@@ -108,8 +104,8 @@ fn pvobs(
     let rotmat = rot1_mat * rot_mat;
 
     // Apply transformation to the observer position and velocity
-    dx = rotmat * dxbf;
-    dv = rotmat * dvbf;
+    let dx = rotmat * dxbf;
+    let dv = rotmat * dvbf;
 
     (dx, dv)
 }

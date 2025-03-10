@@ -14,8 +14,8 @@ pub const EARTH_MINOR_AXIS: f64 = 6_356_752.3; // Earth polar radius in meter
 pub const ERAU: f64 = (EARTH_MAJOR_AXIS / 1000.) / AU;
 
 /// Gaussian gravitational constant
-pub const GaussGrav: f64 = 0.01720209895;
-pub const GaussGravSquared: f64 = GaussGrav * GaussGrav;
+pub const GAUSS_GRAV: f64 = 0.01720209895;
+pub const GAUSS_GRAV_SQUARED: f64 = GAUSS_GRAV * GAUSS_GRAV;
 
 ///speed of light (Km/s)
 pub const VLIGHT: f64 = 2.99792458e5;

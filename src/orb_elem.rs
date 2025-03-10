@@ -1,12 +1,6 @@
-use super::constants::GaussGravSquared;
+use super::constants::{GAUSS_GRAV_SQUARED, DPI};
 use super::ref_system::rotmt;
 use nalgebra::Vector3;
-
-use std::f64;
-use std::f64::consts::PI;
-
-const EPS: f64 = 5e-15;
-const DOUBLEPI: f64 = PI * 2.;
 
 fn atan2(y: f64, x: f64) -> f64 {
     y.atan2(x)
@@ -17,8 +11,8 @@ fn sqrt(x: f64) -> f64 {
 }
 
 fn prodmm(a: &mut [[f64; 3]; 3], b: [[f64; 3]; 3], c: [[f64; 3]; 3]) {
-    let mut w = b;
-    let mut z = c;
+    let w = b;
+    let z = c;
 
     for j in 0..3 {
         for k in 0..3 {
@@ -32,7 +26,7 @@ fn prodmm(a: &mut [[f64; 3]; 3], b: [[f64; 3]; 3], c: [[f64; 3]; 3]) {
 }
 
 fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
-    let z = x; // Copie du vecteur x
+    let z = x;
 
     for j in 0..3 {
         let mut s = 0.0;
@@ -67,28 +61,28 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
     let sini = sqrt(elv[0] * elv[0] + elv[1] * elv[1]);
     let mut ainc = atan2(sini, elv[2]);
 
-    if ainc > DOUBLEPI {
-        ainc -= DOUBLEPI;
+    if ainc > DPI {
+        ainc -= DPI;
     }
     if ainc < 0.0 {
-        ainc += DOUBLEPI;
+        ainc += DPI;
     }
-    let mut anod = if sini == 0.0 {
+    let anod = if sini == 0.0 {
         0.0
     } else {
         let mut anod = atan2(elv[0], -elv[1]);
-        if anod > DOUBLEPI {
-            anod -= DOUBLEPI;
+        if anod > DPI {
+            anod -= DPI;
         }
         if anod < 0.0 {
-            anod += DOUBLEPI;
+            anod += DPI;
         }
         anod
     };
 
     // Cartesian coordinates with respect to the "orbital frame" (with X axis directed along the line of nodes)
-    let mut r1 = rotmt(ainc, 0);
-    let mut r2 = rotmt(anod, 2);
+    let r1 = rotmt(ainc, 0);
+    let r2 = rotmt(anod, 2);
 
     prodmm(&mut rot, r1, r2);
     prodmv(&mut xorb, rot, xv[0..3].try_into().unwrap());
@@ -100,50 +94,46 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
     let rs = sqrt(xorb[0] * xorb[0] + xorb[1] * xorb[1]);
     let v2 = vorb[0] * vorb[0] + vorb[1] * vorb[1];
 
-    let mut reca = 2.0 / rs - v2 / GaussGravSquared;
+    let reca = 2.0 / rs - v2 / GAUSS_GRAV_SQUARED;
 
     // CASE 1: RECA > 0 (elliptic orbit)
     if reca > 0.0 {
         *type_ = String::from("KEP");
         let sma = 1.0 / reca;
-        let enne = sqrt(GaussGravSquared / sma.powi(3));
+        let enne = sqrt(GAUSS_GRAV_SQUARED / sma.powi(3));
 
         // Eccentricity
         let esine = rv / (enne * sma * sma);
-        let ecose = v2 * rs / GaussGravSquared - 1.0;
+        let ecose = v2 * rs / GAUSS_GRAV_SQUARED - 1.0;
         let ecc = sqrt(esine * esine + ecose * ecose);
 
-        if (ecc - 1.0).abs() < EPS {
-            reca = 0.0;
-        } else {
-            let anec = atan2(esine, ecose);
-            let mut emme = anec - ecc * anec.sin();
-            if emme < 0.0 {
-                emme += DOUBLEPI;
-            }
-            if emme > DOUBLEPI {
-                emme -= DOUBLEPI;
-            }
-
-            // Argument of pericenter
-            let x1 = anec.cos() - ecc;
-            let rad = 1.0 - ecc * ecc;
-            let x2 = sqrt(rad) * anec.sin();
-
-            let xm = sqrt(x1 * x1 + x2 * x2);
-            let x1 = x1 / xm;
-            let x2 = x2 / xm;
-            let sinper = x1 * xorb[1] - x2 * xorb[0];
-            let cosper = x1 * xorb[0] + x2 * xorb[1];
-            let argper = atan2(sinper, cosper);
-
-            elem[0] = sma;
-            elem[1] = ecc;
-            elem[2] = ainc;
-            elem[3] = anod;
-            elem[4] = argper;
-            elem[5] = emme;
+        let anec = atan2(esine, ecose);
+        let mut emme = anec - ecc * anec.sin();
+        if emme < 0.0 {
+            emme += DPI;
         }
+        if emme > DPI {
+            emme -= DPI;
+        }
+
+        // Argument of pericenter
+        let x1 = anec.cos() - ecc;
+        let rad = 1.0 - ecc * ecc;
+        let x2 = sqrt(rad) * anec.sin();
+
+        let xm = sqrt(x1 * x1 + x2 * x2);
+        let x1 = x1 / xm;
+        let x2 = x2 / xm;
+        let sinper = x1 * xorb[1] - x2 * xorb[0];
+        let cosper = x1 * xorb[0] + x2 * xorb[1];
+        let argper = atan2(sinper, cosper);
+
+        elem[0] = sma;
+        elem[1] = ecc;
+        elem[2] = ainc;
+        elem[3] = anod;
+        elem[4] = argper;
+        elem[5] = emme;
     }
     // CASE 2: RECA = 0 (parabolic orbit)
     else if reca == 0.0 {
@@ -151,7 +141,7 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
         let ecc = 1.0;
 
         // Semilatus rectum and pericenter distance
-        let p = el2 / GaussGravSquared;
+        let p = el2 / GAUSS_GRAV_SQUARED;
         let q = p / 2.0;
 
         // True anomaly
@@ -174,27 +164,24 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
         *type_ = String::from("COM");
 
         // Semilatus rectum, true anomaly and eccentricity
-        let p = el2 / GaussGravSquared;
+        let p = el2 / GAUSS_GRAV_SQUARED;
         let ecosf = p / rs - 1.0;
         let esinf = rv * p / (elmod * rs);
         let effe = atan2(esinf, ecosf);
         let ecc = sqrt(ecosf * ecosf + esinf * esinf);
-        if (ecc - 1.0).abs() < EPS {
-            reca = 0.0;
-        } else {
-            // Pericenter distance
-            let q = p / (1.0 + ecc);
 
-            // Argument of pericenter
-            let argper = atan2(xorb[1], xorb[0]) - effe;
+        // Pericenter distance
+        let q = p / (1.0 + ecc);
 
-            elem[0] = q;
-            elem[1] = ecc;
-            elem[2] = ainc;
-            elem[3] = anod;
-            elem[4] = argper;
-            elem[5] = effe;
-        }
+        // Argument of pericenter
+        let argper = atan2(xorb[1], xorb[0]) - effe;
+
+        elem[0] = q;
+        elem[1] = ecc;
+        elem[2] = ainc;
+        elem[3] = anod;
+        elem[4] = argper;
+        elem[5] = effe;
     }
 }
 
@@ -214,13 +201,13 @@ pub fn eccentricity_control(
         return None;
     }
 
-    let lenz_prelim = asteroid_velocity.cross(&angular_momentum) * (1. / GaussGravSquared);
+    let lenz_prelim = asteroid_velocity.cross(&angular_momentum) * (1. / GAUSS_GRAV_SQUARED);
     let lenz_factor = asteroid_position * (1. / distance_to_center);
     let lenz_vector = lenz_prelim - lenz_factor;
 
     let eccentricity = lenz_vector.norm();
-    let perihelie = angmom_norm / (GaussGravSquared * (1. + eccentricity));
-    let energy = ast_vel_2 / 2. - GaussGravSquared / distance_to_center;
+    let perihelie = angmom_norm / (GAUSS_GRAV_SQUARED * (1. + eccentricity));
+    let energy = ast_vel_2 / 2. - GAUSS_GRAV_SQUARED / distance_to_center;
     Some((
         eccentricity < ecc_max && perihelie < peri_max,
         eccentricity,
@@ -238,7 +225,7 @@ mod orb_elem_test {
     fn test_elem() {
         let mut elem = [0.0; 6];
         let mut type_ = String::new();
-        let mut xv = [
+        let xv = [
             -0.62355005100316385,
             1.2114681148601605,
             0.25200059143776038,

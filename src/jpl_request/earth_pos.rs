@@ -15,7 +15,7 @@ use std::str::FromStr;
 /// Return
 /// ------
 /// * a vector of PosRecord, the position vector component are in astronomical units
-pub async fn get_earth_position(mjd_list: &Vec<f64>, http_client: &Client) -> Vec<PosRecord> {
+pub(crate) async fn get_earth_position(mjd_list: &Vec<f64>, http_client: &Client) -> Vec<PosRecord> {
     let response_data = request_vector(mjd_list, http_client).await;
     deserialize_vector(&response_data)
 }
@@ -66,7 +66,7 @@ VEC_TABLE=1
 /// Contains the informations from the JPL Horizons vector state query
 /// x,y,z are the components of the position vector at the time contained in the jd and date field
 #[derive(Debug, serde::Deserialize, PartialEq)]
-pub struct PosRecord {
+pub(crate) struct PosRecord {
     #[serde(rename = "JDTDB")]
     jd: f64,
     #[serde(rename = "CalendarDate(TDB)")]

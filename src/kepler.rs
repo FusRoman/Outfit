@@ -1,4 +1,4 @@
-use super::constants::GaussGrav;
+use super::constants::GAUSS_GRAV;
 use super::constants::DPI;
 use super::orb_elem::eccentricity_control;
 use core::fmt;
@@ -135,8 +135,7 @@ fn prelim_kepuni(
     const ITX: usize = 20;
 
     // Initialisation de psi
-    let mut psi = dt / r0;
-    let mut psi0;
+    let psi0;
 
     if alpha < 0.0 {
         // Cas elliptique
@@ -161,7 +160,7 @@ fn prelim_kepuni(
             u0 = principal_angle(u0);
             let ell0 = principal_angle(u0 - e0 * u0.sin());
             let mut u = PI;
-            let mut ell = principal_angle(ell0 + enne * dt);
+            let ell = principal_angle(ell0 + enne * dt);
 
             for _ in 0..ITX {
                 let du = -(u - e0 * u.sin() - ell) / (1.0 - e0 * u.cos());
@@ -192,7 +191,7 @@ fn prelim_kepuni(
 
         let ell0 = e0 * f0.sinh() - f0;
         let mut f: f64 = 0.0;
-        let mut ell = ell0 + enne * dt;
+        let ell = ell0 + enne * dt;
 
         for _ in 0..ITX {
             if f.abs() < 15.0 {
@@ -213,9 +212,7 @@ fn prelim_kepuni(
         return None; // Cas non supporté
     }
 
-    psi = psi0;
-
-    Some((psi, alpha))
+    Some((psi0, alpha))
 }
 
 /// Résout l'équation universelle de Kepler en utilisant une méthode de Newton.
@@ -281,7 +278,7 @@ pub fn velocity_correction(
     peri_max: f64,
     ecc_max: f64,
 ) -> Result<(Vector3<f64>, f64, f64), VelocityCorrectionError> {
-    let mu = GaussGrav.powi(2);
+    let mu = GAUSS_GRAV.powi(2);
     let sig0 = x2.dot(&v2);
     let r2 = x2.norm();
 

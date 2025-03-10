@@ -3,7 +3,7 @@ use core::fmt;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
-use super::constants::{GaussGrav, VLIGHT_AU};
+use super::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use aberth::aberth;
 
@@ -119,8 +119,8 @@ impl GaussObs {
         ),
         GaussSingMatrix,
     > {
-        let tau1 = GaussGrav * (self.time[0] - self.time[1]);
-        let tau3 = GaussGrav * (self.time[2] - self.time[1]);
+        let tau1 = GAUSS_GRAV * (self.time[0] - self.time[1]);
+        let tau3 = GAUSS_GRAV * (self.time[2] - self.time[1]);
         let tau13 = tau3 - tau1;
         let vector_a = Vector3::new(tau3 / tau13, -1.0, -(tau1 / tau13));
         let vector_b = Vector3::new(
@@ -259,9 +259,9 @@ impl GaussObs {
         let d_vect = Vector3::new(-d1, d2, d3);
 
         Vector3::new(
-            GaussGrav * ast_pos_vector.row(0).dot(&d_vect.transpose()),
-            GaussGrav * ast_pos_vector.row(1).dot(&d_vect.transpose()),
-            GaussGrav * ast_pos_vector.row(2).dot(&d_vect.transpose()),
+            GAUSS_GRAV * ast_pos_vector.row(0).dot(&d_vect.transpose()),
+            GAUSS_GRAV * ast_pos_vector.row(1).dot(&d_vect.transpose()),
+            GAUSS_GRAV * ast_pos_vector.row(2).dot(&d_vect.transpose()),
         )
     }
 

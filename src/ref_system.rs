@@ -1,22 +1,22 @@
-use super::constants::{EPS, RADEG, RADSEC, T2000};
-use std::f64::consts::PI;
+use super::constants::{EPS, RADEG, RADSEC, T2000, DPI};
 
-enum RefEpoch {
-    J2000,
-    EPOCH(f64),
-}
+// TBD: will be used later in the project
+// enum RefEpoch {
+//     J2000,
+//     EPOCH(f64),
+// }
 
-enum RefSystem {
-    // Equatorial Mean, equatorial coordinates based on equator and mean equinox
-    // at a given epoch (J2000 for instance)
-    // (corrected for precession but not for nutation)
-    EQUM(RefEpoch),
-    // Equatorial True (same as EQUM but corrected for precession and nutation)
-    EQUT(RefEpoch),
-    // Ecliptic mean, ecliptic coordinates based on ecliptic and mean equinox
-    // at a given epoch (J2000 for instance)
-    ECLM(RefEpoch),
-}
+// enum RefSystem {
+//     // Equatorial Mean, equatorial coordinates based on equator and mean equinox
+//     // at a given epoch (J2000 for instance)
+//     // (corrected for precession but not for nutation)
+//     EQUM(RefEpoch),
+//     // Equatorial True (same as EQUM but corrected for precession and nutation)
+//     EQUT(RefEpoch),
+//     // Ecliptic mean, ecliptic coordinates based on ecliptic and mean equinox
+//     // at a given epoch (J2000 for instance)
+//     ECLM(RefEpoch),
+// }
 
 pub fn rotpn(
     rot: &mut [[f64; 3]; 3],
@@ -65,7 +65,7 @@ pub fn rotpn(
             if epoch != "J2000" {
                 if rsys == "ECLM" {
                     let obl = obleq(date);
-                    let mut r = rotmt(-obl, 1);
+                    let r = rotmt(-obl, 1);
                     *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUT" {
@@ -85,7 +85,7 @@ pub fn rotpn(
             } else {
                 if rsys == "ECLM" {
                     let obl = obleq(T2000);
-                    let mut r = rotmt(-obl, 1);
+                    let r = rotmt(-obl, 1);
                     *rot = matmul(&r, rot);
                     rsys = "EQUM".to_string();
                 } else if rsys == "EQUT" {
@@ -118,17 +118,17 @@ pub fn rotpn(
                 rsys = "EQUM".to_string();
             } else if rsys == "ECLM" {
                 let obl = obleq(date);
-                let mut r = rotmt(-obl, 0);
+                let r = rotmt(-obl, 0);
                 *rot = matmul(&r, rot);
                 rsys = "EQUM".to_string();
             } else if rsys == "EQUM" {
                 if rsys2 == "EQUT" {
-                    let mut r = rnut80(date);
+                    let r = rnut80(date);
                     *rot = matmul(&r, rot);
                     rsys = "EQUT".to_string();
                 } else if rsys2 == "ECLM" {
                     let obl = obleq(date);
-                    let mut r = rotmt(obl, 0);
+                    let r = rotmt(obl, 0);
                     *rot = matmul(&r, rot);
                     rsys = "ECLM".to_string();
                 } else {
@@ -189,26 +189,23 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
     r
 }
 
-// arcsecond to radian conversion factor
-const RS: f64 = 4.84813681109536e-6;
-const P2: f64 = 2.0 * PI;
 pub fn nutn80(tjm: f64) -> (f64, f64) {
     let t1 = (tjm - T2000) / 36525.0;
     let t = t1 as f64;
     let t2 = t * t;
     let t3 = t2 * t;
 
-    let dl = (485866.733 + 1717915922.633 * t1 + 31.310 * t2 + 0.064 * t3) * RS;
-    let dp = (1287099.804 + 129596581.224 * t1 - 0.577 * t2 - 0.012 * t3) * RS;
-    let df = (335778.877 + 1739527263.137 * t1 - 13.257 * t2 + 0.011 * t3) * RS;
-    let dd = (1072261.307 + 1602961601.328 * t1 - 6.891 * t2 + 0.019 * t3) * RS;
-    let dn = (450160.280 - 6962890.539 * t1 + 7.455 * t2 + 0.008 * t3) * RS;
+    let dl = (485866.733 + 1717915922.633 * t1 + 31.310 * t2 + 0.064 * t3) * RADSEC;
+    let dp = (1287099.804 + 129596581.224 * t1 - 0.577 * t2 - 0.012 * t3) * RADSEC;
+    let df = (335778.877 + 1739527263.137 * t1 - 13.257 * t2 + 0.011 * t3) * RADSEC;
+    let dd = (1072261.307 + 1602961601.328 * t1 - 6.891 * t2 + 0.019 * t3) * RADSEC;
+    let dn = (450160.280 - 6962890.539 * t1 + 7.455 * t2 + 0.008 * t3) * RADSEC;
 
-    let l = dl % P2;
-    let p = dp % P2;
-    let x = df % P2 * 2.0;
-    let d = dd % P2;
-    let n = dn % P2;
+    let l = dl % DPI;
+    let p = dp % DPI;
+    let x = df % DPI * 2.0;
+    let d = dd % DPI;
+    let n = dn % DPI;
 
     let sin_cos = |x: f64| -> (f64, f64) { (x.cos(), x.sin()) };
 
@@ -443,7 +440,7 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
 fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
     let epsm = obleq(tjm);
 
-    let (mut dpsi, mut deps) = nutn80(tjm);
+    let (mut dpsi, deps) = nutn80(tjm);
     dpsi *= RADSEC;
     let epst = epsm + deps * RADSEC;
 
@@ -480,9 +477,6 @@ fn trsp3(matrix: &mut [[f64; 3]; 3]) {
 
 fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
     // Déclaration et initialisation des matrices de rotation
-    let mut r1 = [[0.0; 3]; 3];
-    let mut r2 = [[0.0; 3]; 3];
-    let mut r3 = [[0.0; 3]; 3];
     let mut rp = [[0.0; 3]; 3];
 
     // Constantes de précession
@@ -784,7 +778,7 @@ mod ref_system_test {
             60730.5,
         );
 
-        //assert_eq!(roteqec, ref_roteqec);
+        assert_eq!(roteqec, ref_roteqec);
 
         let ref_roteqec = [
             [1.0, 0.0, 0.0],
@@ -803,7 +797,7 @@ mod ref_system_test {
             60730.5,
         );
 
-        //assert_eq!(roteqec, ref_roteqec);
+        assert_eq!(roteqec, ref_roteqec);
     }
 
     #[test]
