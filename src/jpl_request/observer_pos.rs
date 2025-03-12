@@ -11,11 +11,11 @@ use hifitime::ut1::Ut1Provider;
 /// 
 /// Argument
 /// --------
-/// * mjd_tt: vector of observation time in modified julian date (MJD)
-/// * longitude: observer longitude on Earth in degree
-/// * latitude: observer latitude on Earth in degree
-/// * height: observer height on Earth in degree
-/// * state: need the http_client and the ut1_provider
+/// * `mjd_tt`: vector of observation time in modified julian date (MJD)
+/// * `longitude`: observer longitude on Earth in degree
+/// * `latitude`: observer latitude on Earth in degree
+/// * `height`: observer height on Earth in degree
+/// * `state`: need the http_client and the ut1_provider
 /// 
 /// Return
 /// ------
@@ -56,16 +56,16 @@ pub async fn helio_obs_pos(
 ///
 /// Argument
 /// --------
-/// * tmjd: time of the observation in modified julian date (MJD)
-/// * longitude: observer longitude on Earth in degree
-/// * latitude: observer latitude on Earth in degree
-/// * height: observer height on Earth in degree
-/// * ut1_provider: the ut1 provider from hifitime containing the delta time in second between TAI and UT1 from the JPL
+/// * `tmjd`: time of the observation in modified julian date (MJD)
+/// * `longitude`: observer longitude on Earth in degree
+/// * `latitude`: observer latitude on Earth in degree
+/// * `height`: observer height on Earth in degree
+/// * `ut1_provider`: the ut1 provider from hifitime containing the delta time in second between TAI and UT1 from the JPL
 ///
 /// Return
 /// ------
-/// * dx: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
-/// * dy: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
+/// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
+/// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
 fn pvobs(
     tmjd: f64,
     longitude: f64,
@@ -171,8 +171,8 @@ fn equequ(tjm: f64) -> f64 {
 ///
 /// Argument
 /// --------
-/// * lat: observer latitude in radians
-/// * height: observer height in kilometer
+/// * `lat`: observer latitude in radians
+/// * `height`: observer height in kilometer
 ///
 /// Return
 /// ------
@@ -199,7 +199,7 @@ fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 /// ------
 /// * `rho_cos_phi`: normalized radius of the observer projected on the equatorial plane
 /// * `rho_sin_phi`: normalized radius of the observer projected on the polar axis.
-fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
+pub (crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     let latitude_rad = lat.to_radians();
 
     let (rho_cos_phi, rho_sin_phi) = lat_alt_to_parallax(latitude_rad, height);
