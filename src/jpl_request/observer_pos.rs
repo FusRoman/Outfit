@@ -1,36 +1,35 @@
+use super::super::observers::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
-use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, ERAU, RADSEC, T2000};
+
+use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
 use super::super::env_state::OutfitState;
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
 use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
 use hifitime::ut1::Ut1Provider;
 
-
 /// Get the matrix of the heliocentric position vector at the time of three observations
-/// 
+///
 /// Argument
 /// --------
-/// * mjd_tt: vector of observation time in modified julian date (MJD)
-/// * longitude: observer longitude on Earth in degree
-/// * latitude: observer latitude on Earth in degree
-/// * height: observer height on Earth in degree
-/// * state: need the http_client and the ut1_provider
-/// 
+/// * `mjd_tt`: vector of observation time in modified julian date (MJD)
+/// * `longitude`: observer longitude on Earth in degree
+/// * `latitude`: observer latitude on Earth in degree
+/// * `height`: observer height on Earth in degree
+/// * `state`: need the http_client and the ut1_provider
+///
 /// Return
 /// ------
-/// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three 
+/// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
 pub async fn helio_obs_pos(
+    observer: &Observer,
     mjd_tt: &Vector3<f64>,
-    longitude: f64,
-    latitude: f64,
-    height: f64,
     state: &OutfitState,
 ) -> Matrix3<f64> {
     let position_obs_time = mjd_tt
         .iter()
-        .map(|mjd_el| pvobs(*mjd_el, longitude, latitude, height, &state.ut1_provider).0)
+        .map(|mjd_el| pvobs(observer, *mjd_el, &state.ut1_provider).0)
         .collect::<Vec<Vector3<f64>>>();
 
     let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
@@ -56,28 +55,26 @@ pub async fn helio_obs_pos(
 ///
 /// Argument
 /// --------
-/// * tmjd: time of the observation in modified julian date (MJD)
-/// * longitude: observer longitude on Earth in degree
-/// * latitude: observer latitude on Earth in degree
-/// * height: observer height on Earth in degree
-/// * ut1_provider: the ut1 provider from hifitime containing the delta time in second between TAI and UT1 from the JPL
+/// * `tmjd`: time of the observation in modified julian date (MJD)
+/// * `longitude`: observer longitude on Earth in degree
+/// * `latitude`: observer latitude on Earth in degree
+/// * `height`: observer height on Earth in degree
+/// * `ut1_provider`: the ut1 provider from hifitime containing the delta time in second between TAI and UT1 from the JPL
 ///
 /// Return
 /// ------
-/// * dx: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
-/// * dy: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
+/// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
+/// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
 fn pvobs(
+    observer: &Observer,
     tmjd: f64,
-    longitude: f64,
-    latitude: f64,
-    height: f64,
     ut1_provider: &Ut1Provider,
 ) -> (Vector3<f64>, Vector3<f64>) {
     // Initialisation
     let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
 
     // Get the coordinates of the observer on Earth
-    let dxbf = body_fixed_coord(longitude, latitude, height);
+    let dxbf = observer.body_fixed_coord();
 
     // Get the observer velocity due to Earth rotation
     let dvbf = omega.cross(&dxbf);
@@ -171,8 +168,8 @@ fn equequ(tjm: f64) -> f64 {
 ///
 /// Argument
 /// --------
-/// * lat: observer latitude in radians
-/// * height: observer height in kilometer
+/// * `lat`: observer latitude in radians
+/// * `height`: observer height in kilometer
 ///
 /// Return
 /// ------
@@ -199,35 +196,12 @@ fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 /// ------
 /// * `rho_cos_phi`: normalized radius of the observer projected on the equatorial plane
 /// * `rho_sin_phi`: normalized radius of the observer projected on the polar axis.
-fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
+pub(crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     let latitude_rad = lat.to_radians();
 
     let (rho_cos_phi, rho_sin_phi) = lat_alt_to_parallax(latitude_rad, height);
 
     (rho_cos_phi, rho_sin_phi)
-}
-
-/// Get the fixed position of an observatory using its geographic coordinates
-///
-/// Argument
-/// --------
-/// * longitude: observer longitude in degree
-/// * latitude: observer latitude in degree
-/// * height: observer height in degree
-///
-/// Return
-/// ------
-/// * observer fixed coordinates vector on the Earth (not corrected from Earth motion)
-/// * units is AU
-fn body_fixed_coord(longitude: f64, latitude: f64, height: f64) -> Vector3<f64> {
-    let (pxy1, pz1) = geodetic_to_parallax(latitude, height);
-    let lon_radians = longitude.to_radians();
-
-    Vector3::new(
-        ERAU * pxy1 * lon_radians.cos(),
-        ERAU * pxy1 * lon_radians.sin(),
-        ERAU * pz1,
-    )
 }
 
 #[cfg(test)]
@@ -242,21 +216,6 @@ mod observer_pos_tests {
         let (pxy1, pz1) = geodetic_to_parallax(20.707233557, 3067.694);
         assert_eq!(pxy1, 0.9362410003211518);
         assert_eq!(pz1, 0.35154299856304305);
-    }
-
-    #[test]
-    fn body_fixed_coord_test() {
-        // longitude, latitude and height of Pan-STARRS 1, Haleakala
-        let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
-        let obs_fixed_vector = body_fixed_coord(lon, lat, h);
-        assert_eq!(
-            obs_fixed_vector,
-            Vector3::new(
-                -0.00003653799439776371,
-                -0.00001607260397528885,
-                0.000014988110430544328
-            )
-        )
     }
 
     #[test]
@@ -276,8 +235,9 @@ mod observer_pos_tests {
         let tmjd = 57028.479297592596;
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
+        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
-        let (observer_position, observer_velocity) = pvobs(tmjd, lon, lat, h, &state.ut1_provider);
+        let (observer_position, observer_velocity) = pvobs(&pan_starrs, tmjd, &state.ut1_provider);
 
         assert_eq!(
             observer_position.as_slice(),
@@ -304,8 +264,9 @@ mod observer_pos_tests {
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
+        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
-        let helio_pos = helio_obs_pos(&tmjd, lon, lat, h, &state).await;
+        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state).await;
 
         assert_eq!(
             helio_pos.as_slice(),
