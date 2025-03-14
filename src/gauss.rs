@@ -3,6 +3,8 @@ use core::fmt;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
+use crate::observers::observers::Observer;
+
 use super::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use aberth::aberth;
@@ -73,9 +75,7 @@ impl GaussObs {
         ra: Vector3<f64>,
         dec: Vector3<f64>,
         mjd_time: Vector3<f64>,
-        longitude: f64,
-        latitude: f64,
-        height: f64,
+        observer: &Observer,
     ) -> GaussObs {
         let state = OutfitState::new().await;
 
@@ -83,7 +83,7 @@ impl GaussObs {
             ra: ra,
             dec: dec,
             time: mjd_time,
-            observer_position: helio_obs_pos(&mjd_time, longitude, latitude, height, &state).await,
+            observer_position: helio_obs_pos(&observer, &mjd_time, &state).await,
         }
     }
 
@@ -231,18 +231,18 @@ impl GaussObs {
     /// Argument
     /// --------
     /// * `ast_pos_vector`: Asteroid position vector at the time of the three observations
-    ///  cartesian representation, 
-    /// 
-    /// unit = AU; 
-    /// t1, t2 and t3 are the time of the three observations; 
+    ///  cartesian representation,
+    ///
+    /// unit = AU;
+    /// t1, t2 and t3 are the time of the three observations;
     /// x, y, z are the cartesian coordinates of the asteroid at the time of the three observations
-    /// 
+    ///
     /// |    | x | y | z |
     /// |----|---|---|---|
     /// | t1 | 0 | 1 | 2 |
     /// | t2 | 4 | 5 | 6 |
     /// | t3 | 7 | 8 | 9 |
-    /// 
+    ///
     /// * `tau1`: Normalized time of the first observation
     /// * `tau3`: normalized time of the third observation
     ///
