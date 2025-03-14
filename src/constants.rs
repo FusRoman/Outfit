@@ -1,3 +1,6 @@
+use crate::observers::observers::Observer;
+use std::collections::HashMap;
+
 pub const EPS: f64 = 1e-6;
 pub const T2000: f64 = 51544.5; // J2000 Epoch for MJD
 pub const RADEG: f64 = std::f64::consts::PI / 180.0; // Degrees -> radians conversion factor
@@ -21,3 +24,8 @@ pub const GAUSS_GRAV_SQUARED: f64 = GAUSS_GRAV * GAUSS_GRAV;
 pub const VLIGHT: f64 = 2.99792458e5;
 /// speed of light (AU/day)
 pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;
+
+/// type def
+pub type Degree = f64;
+pub type Kilometer = f64;
+pub type MpcCodeObs = HashMap<String, Observer>;
