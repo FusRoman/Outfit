@@ -14,3 +14,6 @@ serde = { version = "1.0", features = ["derive"] }
 aberth = "0.4.1"
 hifitime = { version = "4.0.2", features = ["ut1"] }
 once_cell = "1.21.1"
+camino = "1.1.9"
+serde_with = "3.12.0"
+thiserror = "2.0.12"

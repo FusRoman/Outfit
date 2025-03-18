@@ -1,9 +1,7 @@
-use hifitime::Epoch;
 use itertools::Itertools;
 use nalgebra::Vector3;
 use regex::Regex;
 use reqwest::Client;
-use std::str::FromStr;
 
 /// Request the JPL Horizon API to get the position vector of Earth
 /// with respect to the Sun at different time.
@@ -147,38 +145,10 @@ fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
         .collect()
 }
 
-/// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to modified julian date (MJD)
-///
-/// Argument
-/// --------
-/// * date: a vector of date in the format YYYY-MM-ddTHH:mm:ss
-///
-/// Return
-/// ------
-/// * a vector of float representing the input date in modified julian date (MJD)
-pub fn date_to_mjd(date: &Vec<&str>) -> Vec<f64> {
-    date.iter()
-        .map(|x| Epoch::from_str(x).unwrap().to_mjd_utc_days())
-        .collect::<Vec<f64>>()
-}
-
-/// Transformation from modified julian date (MJD) in julian date (JD)
-///
-/// Argument
-/// --------
-/// * mjd: a vector of MJD
-///
-/// Return
-/// ------
-/// * a vector of jd
-pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
-    mjd.iter()
-        .map(|x| Epoch::from_mjd_utc(*x).to_jde_utc_days())
-        .collect()
-}
-
 #[cfg(test)]
 mod earth_pos_tests {
+    use crate::time::{date_to_mjd, mjd_to_jd};
+
     use super::super::super::env_state::OutfitState;
     use super::*;
 

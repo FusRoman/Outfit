@@ -5,8 +5,9 @@ use crate::{constants::ERAU, env_state::OutfitState};
 
 use super::super::jpl_request::observer_pos::geodetic_to_parallax;
 use crate::constants::{Degree, Kilometer, MpcCodeObs};
+use serde::Deserialize;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Deserialize)]
 pub struct Observer {
     // in degrees east of Greenwich
     pub longitude: Degree,
