@@ -154,13 +154,111 @@ fn extract_80col(colfile: &Utf8Path) -> (Observations, ObjectNumber) {
     )
 }
 
-/// A trait to add 80 column file to a TrajectorySet
+/// Create a vector of Observations from vectors of right ascension, declination, time, and observer
+/// Each observations should have been observed by the same observer.
+///
+/// Arguments
+/// ---------
+/// * `ra`: a vector of right ascension
+/// * `dec`: a vector of declination
+/// * `time`: a vector of time
+/// * `observer`: the observer
+///
+/// Return
+/// ------
+/// * a vector of Observations
+fn observation_from_vec(
+    ra: &Vec<Degree>,
+    dec: &Vec<Degree>,
+    time: &Vec<MJD>,
+    observer: &str,
+) -> Observations {
+    ra.iter()
+        .zip(dec.iter())
+        .zip(time.iter())
+        .map(|((ra, dec), time)| Observation {
+            ra: *ra,
+            dec: *dec,
+            time: *time,
+            observer: observer.to_string(),
+        })
+        .collect()
+}
+
+/// A trait to extend the TrajectorySet struct
+/// It provides methods to create a TrajectorySet from an 80 column file and to add observations from an 80 column file
+/// It also provides methods to create a TrajectorySet from vectors of right ascension, declination, time, and observer and to add observations from vectors of right ascension, declination, time, and observer
 pub trait TrajectoryExt {
     fn from_80col(colfile: &Utf8Path) -> Self;
     fn add_80col(&mut self, colfile: &Utf8Path);
+
+    fn new_from_vec(
+        object_number: &str,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
+        time: &Vec<MJD>,
+        observer: &str,
+    ) -> Self;
+    fn add_from_vec(
+        &mut self,
+        object_number: &str,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
+        time: &Vec<MJD>,
+        observer: &str,
+    );
 }
 
 impl TrajectoryExt for TrajectorySet {
+    /// Create a TrajectorySet from an object number, right ascension, declination, time, and one observer.
+    /// Each observations should have been observed by the same observer.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `object_number`: the object number
+    /// * `ra`: a vector of right ascension
+    /// * `dec`: a vector of declination
+    /// * `time`: a vector of time
+    /// * `observer`: the observer
+    ///
+    /// Return
+    /// ------
+    /// * a TrajectorySet containing the observations
+    fn new_from_vec(
+        object_number: &str,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
+        time: &Vec<MJD>,
+        observer: &str,
+    ) -> Self {
+        let observations: Observations = observation_from_vec(ra, dec, time, observer);
+        let mut traj_set: HashMap<ObjectNumber, Observations> = HashMap::new();
+        traj_set.insert(object_number.to_string(), observations);
+        traj_set
+    }
+
+    /// Add the observations of an object number, right ascension, declination, time, and one observer to a TrajectorySet
+    /// Each observations should have been observed by the same observer.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `object_number`: the object number
+    /// * `ra`: a vector of right ascension
+    /// * `dec`: a vector of declination
+    /// * `time`: a vector of time
+    /// * `observer`: the observer
+    fn add_from_vec(
+        &mut self,
+        object_number: &str,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
+        time: &Vec<MJD>,
+        observer: &str,
+    ) {
+        let observations: Observations = observation_from_vec(ra, dec, time, observer);
+        self.insert(object_number.to_string(), observations);
+    }
+
     /// Create a TrajectorySet from an 80 column file
     ///
     /// Arguments
