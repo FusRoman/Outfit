@@ -2,10 +2,14 @@ use crate::{
     constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, MJD},
     time::frac_date_to_mjd,
 };
+use arrow::{array::Float64Array, record_batch::RecordBatch};
 use camino::Utf8Path;
+use hifitime::efmt::format;
+use itertools::Itertools;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
-use std::{collections::HashMap, ops::Range, str::FromStr};
+use std::{collections::HashMap, fs::File, ops::Range, str::FromStr};
 use thiserror::Error;
 
 /// Parse a right ascension string to degrees
@@ -207,6 +211,9 @@ pub trait TrajectoryExt {
         time: &Vec<MJD>,
         observer: &str,
     );
+
+    fn new_from_parquet(parquet: &Utf8Path) -> Self;
+    fn add_from_parquet(&mut self, parquet: &Utf8Path);
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -257,6 +264,105 @@ impl TrajectoryExt for TrajectorySet {
     ) {
         let observations: Observations = observation_from_vec(ra, dec, time, observer);
         self.insert(object_number.to_string(), observations);
+    }
+
+    fn add_from_parquet(&mut self, parquet: &Utf8Path) {
+        todo!()
+    }
+
+    fn new_from_parquet(parquet: &Utf8Path) -> Self {
+        let file = File::open(parquet)
+            .expect(format!("Could not open file {}", parquet.as_str()).as_str());
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect(
+            format!(
+                "Could not create a parquet reader for file {}",
+                parquet.as_str()
+            )
+            .as_str(),
+        );
+
+        // get the fields of the schema
+        let schema_field_names = builder
+            .schema()
+            .fields()
+            .into_iter()
+            .map(|f| f.name().clone())
+            .collect_vec();
+
+        // check if the required fields are present
+        // ra, dec, jd, and trajectory_id
+        assert!(
+            schema_field_names.contains(&"ra".to_string())
+                && schema_field_names.contains(&"dec".to_string())
+                && schema_field_names.contains(&"jd".to_string())
+                && schema_field_names.contains(&"trajectory_id".to_string()),
+            "The parquet file does not contain the required columns ra, dec, jd, and trajectory_id, schema fields: {:?}",
+            schema_field_names
+        );
+
+        let mut ra_vec: Vec<Degree> = Vec::new();
+        let dec_vec: Vec<Degree> = Vec::new();
+        let time_vec: Vec<MJD> = Vec::new();
+
+        let mut reader = builder.build().unwrap();
+
+        fn batch_col_to_arc_dyn<'a>(
+            batch: &'a RecordBatch,
+            col_name: &'a str,
+            schema_name: &Vec<String>,
+        ) -> &'a dyn arrow::array::Array {
+            let col_index = batch.schema().index_of(col_name).expect(
+                format!(
+                    "The schema does not contain the column {}, schema fields: {:?}",
+                    col_name, schema_name
+                )
+                .as_str(),
+            );
+            batch.column(col_index)
+        }
+
+        fn arc_dyn_to_vec(arc: &dyn arrow::array::Array) -> Vec<Degree> {
+            arc.as_any()
+                .downcast_ref::<Float64Array>()
+                .expect("Error downcasting to Float64Array")
+                .values()
+                .iter()
+                .map(|v| *v)
+                .collect()
+        }
+
+        while let Some(batch) = reader.next() {
+            let batch = batch.unwrap();
+
+            let ra_col = batch_col_to_arc_dyn(&batch, &"ra", &schema_field_names);
+            let dec_col = batch_col_to_arc_dyn(&batch, &"dec", &schema_field_names);
+            let jd_col = batch_col_to_arc_dyn(&batch, &"jd", &schema_field_names);
+            let trajectory_id_col = batch_col_to_arc_dyn(&batch, &"trajectory_id", &schema_field_names);
+
+            let dec_col = batch.column_by_name("dec").expect(
+                format!(
+                    "The schema does not contain the column ra, schema fields: {:?}",
+                    schema_field_names
+                )
+                .as_str(),
+            );
+
+            let tmp_ra: Vec<Degree> = arc_dyn_to_vec(ra_col);
+            ra_vec.extend(tmp_ra);
+
+            println!("{:?}", ra_vec);
+
+            let col_index = batch.schema().index_of("ra").expect(
+                format!(
+                    "The schema does not contain the column ra, schema fields: {:?}",
+                    schema_field_names
+                )
+                .as_str(),
+            );
+            let column = batch.column(col_index);
+        }
+
+        HashMap::new()
     }
 
     /// Create a TrajectorySet from an 80 column file
