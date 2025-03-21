@@ -1,76 +1,211 @@
-use std::{collections::HashMap, hash::Hash, str::FromStr};
-use crate::{constants::Degree, observers::observers::Observer};
+use crate::{
+    constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, MJD},
+    time::frac_date_to_mjd,
+};
 use camino::Utf8Path;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
+use std::{collections::HashMap, ops::Range, str::FromStr};
 use thiserror::Error;
 
+/// Parse a right ascension string to degrees
+///
+/// Arguments
+/// ---------
+/// * `ra`: a string representing the right ascension in the format HH MM SS.SS
+///
+/// Return
+/// ------
+/// * a float representing the right ascension in degrees
+fn parse_ra_to_deg(ra: &str) -> Option<Degree> {
+    let parts: Vec<&str> = ra.split_whitespace().collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let h: f64 = parts[0].parse().ok()?;
+    let m: f64 = parts[1].parse().ok()?;
+    let s: f64 = parts[2].parse().ok()?;
+    Some((h + m / 60.0 + s / 3600.0) * 15.0)
+}
+
+/// Parse a declination string to degrees
+///
+/// Arguments
+/// ---------
+/// * `dec`: a string representing the declination in the format HH MM SS.SS
+///
+/// Return
+/// ------
+/// * a float representing the declination in degrees
+fn parse_dec_to_deg(dec: &str) -> Option<Degree> {
+    let parts: Vec<&str> = dec.split_whitespace().collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let sign = if parts[0].starts_with('-') { -1.0 } else { 1.0 };
+    let d: f64 = parts[0]
+        .trim_start_matches(['-', '+'].as_ref())
+        .parse()
+        .ok()?;
+    let m: f64 = parts[1].parse().ok()?;
+    let s: f64 = parts[2].parse().ok()?;
+    Some(sign * (d + m / 60.0 + s / 3600.0))
+}
+
 /// A struct containing the observer and the time, ra, dec, and rms of an observation
-/// 
+///
 /// # Fields
 ///
 /// * `observer` - The observer
-/// * `time` - The time of the observation
 /// * `ra` - The right ascension of the observation
 /// * `dec` - The declination of the observation
-/// * `rms_ra` - The RMS of the right ascension
-/// * `rms_dec` - The RMS of the declination
+/// * `time` - The time of the observation
 #[derive(Debug, Deserialize)]
 pub struct Observation {
-    observer: Observer,
-    time: f64,
-    ra: Degree,
-    dec: Degree,
-    rms_ra: Degree,
-    rms_dec: Degree,
+    pub observer: MpcCode,
+    pub ra: Degree,
+    pub dec: Degree,
+    pub time: MJD,
 }
-
-pub type Observations = Vec<Observation>;
-
-pub type Trajectory = HashMap<String, Observations>;
 
 #[derive(Error, Debug)]
 pub enum ParseObsError {
     #[error("The line is too short")]
     TooShortLine,
+    #[error("The line is not a CCD observation")]
+    NotCCDObs,
 }
 
-// #[derive(Debug, DeserializeFromStr)]
-// struct ObservationWrapper(Trajectory);
+#[derive(Debug, DeserializeFromStr)]
+struct ObservationWrapper(Observation);
 
-// impl FromStr for ObservationWrapper {
-//     type Err = ParseObsError;
+impl FromStr for ObservationWrapper {
+    type Err = ParseObsError;
 
-//     fn from_str(line: &str) -> Result<Self, Self::Err> {
-//         if line.len() < 80 {
-//             return Err(ParseObsError::TooShortLine);
-//         }
+    /// Parse a line from an 80 column file to an Observation
+    ///
+    /// Arguments
+    /// ---------
+    /// * `line`: a string representing a line from an 80 column file
+    ///
+    /// Return
+    /// ------
+    /// * an Observation struct
+    fn from_str(line: &str) -> Result<Self, Self::Err> {
+        if line.len() < 80 {
+            return Err(ParseObsError::TooShortLine);
+        }
 
-//         let observation = Observation {
-//             designation: line[0..5].trim().to_string(),
-//             packed_designation: line[5..12].trim().to_string(),
-//             observation_date: line[15..32].trim().to_string(),
-//             ra: line[32..44].trim().to_string(),
-//             dec: line[44..56].trim().to_string(),
-//             magnitude: line.get(65..70).and_then(|s| s.trim().parse().ok()), 
-//             observatory_code: line[77..80].trim().to_string(),
-//         };
+        if line.chars().nth(14) == Some('s') {
+            return Err(ParseObsError::NotCCDObs);
+        }
 
-//         Ok(ObservationWrapper(observation))
-//     }
-// }
+        let observation = Observation {
+            time: frac_date_to_mjd(line[15..32].trim())
+                .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
+            ra: parse_ra_to_deg(line[32..44].trim())
+                .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str()),
+            dec: parse_dec_to_deg(line[44..56].trim())
+                .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str()),
+            observer: line[77..80].trim().to_string(),
+        };
 
-trait TrajectoryExt{
-    fn from_ades(ades_file: &Utf8Path) -> Self;
-    fn from_80col(colfile: &Utf8Path) -> Self;
+        Ok(ObservationWrapper(observation))
+    }
 }
 
-impl TrajectoryExt for Trajectory {
-    fn from_ades(ades_file: &Utf8Path) -> Self {
-        todo!()
+/// Extract the observations and the object number from an 80 column file
+///
+/// Arguments
+/// ---------
+/// * `colfile`: a path to an 80 column file
+///
+/// Return
+/// ------
+/// * a tuple containing the observations and the object number
+fn extract_80col(colfile: &Utf8Path) -> (Observations, ObjectNumber) {
+    let file_content = std::fs::read_to_string(colfile)
+        .expect(format!("Could not read file {}", colfile.as_str()).as_str());
+
+    let first_line = file_content
+        .lines()
+        .next()
+        .expect(format!("Could not read first line of file {}", colfile.as_str()).as_str());
+
+    fn get_object_number(line: &str, range: Range<usize>) -> String {
+        line[range].trim_start_matches('0').trim().to_string()
     }
 
+    let mut object_number = get_object_number(first_line, 0..5);
+    if object_number.is_empty() {
+        object_number = get_object_number(first_line, 5..12);
+    }
+
+    (
+        file_content
+            .lines()
+            .filter_map(|line| match line.parse::<ObservationWrapper>() {
+                Ok(wrapper) => Some(wrapper.0),
+                Err(ParseObsError::NotCCDObs) => None,
+                Err(e) => panic!("Error parsing line: {:?}", e),
+            })
+            .collect(),
+        object_number,
+    )
+}
+
+/// A trait to add 80 column file to a TrajectorySet
+pub trait TrajectoryExt {
+    fn from_80col(colfile: &Utf8Path) -> Self;
+    fn add_80col(&mut self, colfile: &Utf8Path);
+}
+
+impl TrajectoryExt for TrajectorySet {
+    /// Create a TrajectorySet from an 80 column file
+    ///
+    /// Arguments
+    /// ---------
+    /// * `colfile`: a path to an 80 column file
+    ///
+    /// Return
+    /// ------
+    /// * a TrajectorySet containing the observations from the 80 column file
     fn from_80col(colfile: &Utf8Path) -> Self {
-        todo!()
+        let mut traj_set: HashMap<ObjectNumber, Observations> = HashMap::new();
+        let (observations, object_number) = extract_80col(colfile);
+        traj_set.insert(object_number, observations);
+        traj_set
+    }
+
+    /// Add the observations of a 80 column file to a TrajectorySet
+    ///
+    /// Arguments
+    /// ---------
+    /// * `colfile`: a path to an 80 column file
+    fn add_80col(&mut self, colfile: &Utf8Path) {
+        let (observations, object_number) = extract_80col(colfile);
+        self.insert(object_number, observations);
+    }
+}
+
+#[cfg(test)]
+mod observations_test {
+    use super::*;
+
+    #[test]
+    fn test_ra_to_deg() {
+        assert_eq!(parse_ra_to_deg("23 58 57.68"), Some(359.7403333333333));
+        assert_eq!(parse_ra_to_deg("04 41 04.77"), Some(70.269875));
+        assert_eq!(parse_ra_to_deg("1 2 3.4.5"), None);
+        assert_eq!(parse_ra_to_deg("1 2"), None);
+    }
+
+    #[test]
+    fn test_dec_to_deg() {
+        assert_eq!(parse_dec_to_deg("-00 30 14.2"), Some(-0.5039444444444444));
+        assert_eq!(parse_dec_to_deg("+13 55 42.7"), Some(13.928527777777777));
+        assert_eq!(parse_dec_to_deg("89 15 50.2"), Some(89.26394444444445));
+        assert_eq!(parse_dec_to_deg("89 15 50.2.3"), None);
+        assert_eq!(parse_dec_to_deg("89 15"), None);
     }
 }
