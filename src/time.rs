@@ -5,7 +5,7 @@ use hifitime::{Epoch, TimeScale};
 ///
 /// Argument
 /// --------
-/// * date: a vector of date in the format YYYY-MM-ddTHH:mm:ss
+/// * `date`: a vector of date in the format YYYY-MM-ddTHH:mm:ss
 ///
 /// Return
 /// ------
@@ -20,7 +20,7 @@ pub fn date_to_mjd(date: &Vec<&str>) -> Vec<f64> {
 ///
 /// Argument
 /// --------
-/// * mjd: a vector of MJD
+/// * `mjd`: a vector of MJD
 ///
 /// Return
 /// ------
@@ -31,7 +31,30 @@ pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
         .collect()
 }
 
+/// Transformation from julian date (JD) in modified julian date (MJD)
+///
+/// Argument
+/// --------
+/// * `jd`: a vector of JD
+///
+/// Return
+/// ------
+/// * a vector of MJD
+pub fn jd_to_mjd(jd: &Vec<f64>) -> Vec<f64> {
+    jd.iter()
+        .map(|x| Epoch::from_jde_utc(*x).to_mjd_utc_days())
+        .collect()
+}
 
+/// Transformation from date in the format YYYY MM DD.FFFFF to modified julian date (MJD)
+///
+/// Argument
+/// --------
+/// * `date_str`: a string representing the date in the format YYYY MM DD.FFFFF
+///
+/// Return
+/// ------
+/// * a float representing the input date in modified julian date (MJD)
 pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     let parts: Vec<&str> = date_str.split_whitespace().collect();
     if parts.len() != 3 {
@@ -76,6 +99,13 @@ mod time_test {
         let mjd = vec![59215.0, 59216.0];
         let jd = mjd_to_jd(&mjd);
         assert_eq!(jd, vec![2459215.5, 2459216.5]);
+    }
+
+    #[test]
+    fn test_jd_to_mjd() {
+        let jd = vec![2459215.5, 2459216.5];
+        let mjd = jd_to_mjd(&jd);
+        assert_eq!(mjd, vec![59215.0, 59216.0]);
     }
 
     #[test]
