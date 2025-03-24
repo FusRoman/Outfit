@@ -1,5 +1,5 @@
 use outfit::constants::TrajectorySet;
-use outfit::observations::observations::TrajectoryExt;
+use outfit::observations::trajectory_ext::TrajectoryExt;
 
 #[test]
 fn test_trajectories_from_vec() {
