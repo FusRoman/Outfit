@@ -1,10 +1,11 @@
-use std::{collections::HashMap, fs::File};
+use std::{collections::HashMap, fs::File, iter};
 
 use crate::{
     constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, MJD},
     observations::observations::Observation,
 };
 use camino::Utf8Path;
+use hifitime::Epoch;
 use parquet::{
     file::reader::{FileReader, SerializedFileReader},
     record::{Row, RowAccessor},
@@ -36,7 +37,7 @@ pub trait TrajectoryExt {
     );
 
     fn new_from_parquet(parquet: &Utf8Path, mpc_code: MpcCode) -> Self;
-    fn add_from_parquet(&mut self, parquet: &Utf8Path);
+    fn add_from_parquet(&mut self, parquet: &Utf8Path, observer: MpcCode);
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -89,8 +90,11 @@ impl TrajectoryExt for TrajectorySet {
         self.insert(object_number.to_string(), observations);
     }
 
-    fn add_from_parquet(&mut self, parquet: &Utf8Path) {
-        todo!()
+    fn add_from_parquet(&mut self, parquet: &Utf8Path, observer: MpcCode) {
+        let new_trajs = Self::new_from_parquet(parquet, observer);
+        for (traj_id, obs) in new_trajs {
+            self.entry(traj_id).or_default().extend(obs);
+        }
     }
 
     fn new_from_parquet(parquet: &Utf8Path, observer: MpcCode) -> Self {
@@ -160,14 +164,17 @@ impl TrajectoryExt for TrajectorySet {
 
             let ra = get_column(&row, "ra");
             let dec = get_column(&row, "dec");
-            let time = get_column(&row, "jd");
+
+            let jd_time = get_column(&row, "jd");
+            let mjd_time = Epoch::from_jde_utc(jd_time).to_mjd_utc_days();
+
             let traj_id = get_column(&row, "trajectory_id");
 
             let obs = Observation {
                 observer: observer.clone(),
                 ra: ra,
                 dec: dec,
-                time: time,
+                time: mjd_time,
             };
 
             trajectories

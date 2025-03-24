@@ -19,7 +19,21 @@ fn test_large_parquet() {
 
     let ztf_observer = "I41".to_string();
 
-    let traj_set = TrajectorySet::new_from_parquet(&path_file, ztf_observer);
+    let mut traj_set = TrajectorySet::new_from_parquet(&path_file, ztf_observer);
 
-    println!("{:?}", traj_set);
+    assert_eq!(traj_set.len(), 2082);
+    assert_eq!(traj_set.get("1").unwrap().len(), 6);
+    assert_eq!(traj_set.get("2").unwrap().len(), 7);
+    assert_eq!(traj_set.get("3").unwrap().len(), 7);
+    assert_eq!(traj_set.get("4").unwrap().len(), 7);
+
+    let path_file = Utf8Path::new("tests/data/trajectories.parquet");
+    let rubin_observer = "X05".to_string();
+    traj_set.add_from_parquet(path_file, rubin_observer);
+
+    assert_eq!(traj_set.len(), 2082);
+    assert_eq!(traj_set.get("1").unwrap().len(), 9);
+    assert_eq!(traj_set.get("2").unwrap().len(), 10);
+    assert_eq!(traj_set.get("3").unwrap().len(), 10);
+    assert_eq!(traj_set.get("4").unwrap().len(), 10);
 }
