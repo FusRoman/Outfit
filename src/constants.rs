@@ -1,6 +1,8 @@
 use crate::observations::observations::Observation;
 use crate::observers::observers::Observer;
 use std::collections::HashMap;
+use ahash::RandomState;
+use smallvec::SmallVec;
 
 pub const EPS: f64 = 1e-6;
 pub const T2000: f64 = 51544.5; // J2000 Epoch for MJD
@@ -46,9 +48,9 @@ pub enum ObjectNumber {
     String(String)
 }
 
-pub type Observations = Vec<Observation>;
+pub type Observations = SmallVec<[Observation; 6]>;
 
 /// A set of trajectories
 /// The key is the object number
 /// The value is a vector of observations associated to this object
-pub type TrajectorySet = HashMap<ObjectNumber, Observations>;
+pub type TrajectorySet = HashMap<ObjectNumber, Observations, RandomState>;

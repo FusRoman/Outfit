@@ -1692,6 +1692,7 @@ name = "outfit"
 version = "0.1.0"
 dependencies = [
  "aberth",
+ "ahash",
  "arrow",
  "camino",
  "criterion",
@@ -1705,6 +1706,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_with",
+ "smallvec",
  "thiserror",
  "tokio",
 ]

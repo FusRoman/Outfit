@@ -1,3 +1,5 @@
+use ahash::{AHasher, RandomState};
+use smallvec::SmallVec;
 use std::{collections::HashMap, fs::File, iter, rc::Rc, sync::Arc};
 
 use crate::{
@@ -74,7 +76,7 @@ impl TrajectoryExt for TrajectorySet {
         observer: &str,
     ) -> Self {
         let observations: Observations = observation_from_vec(ra, dec, time, observer);
-        let mut traj_set: HashMap<ObjectNumber, Observations> = HashMap::new();
+        let mut traj_set: TrajectorySet = HashMap::default();
         traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
     }
@@ -98,7 +100,10 @@ impl TrajectoryExt for TrajectorySet {
         observer: &str,
     ) {
         let observations: Observations = observation_from_vec(ra, dec, time, observer);
-        self.insert(ObjectNumber::String(object_number.to_string()), observations);
+        self.insert(
+            ObjectNumber::String(object_number.to_string()),
+            observations,
+        );
     }
 
     fn add_from_parquet(
@@ -143,7 +148,7 @@ impl TrajectoryExt for TrajectorySet {
             .build()
             .expect("Failed to build reader");
 
-        let mut trajectories: TrajectorySet = HashMap::new();
+        let mut trajectories: TrajectorySet = HashMap::default();
         let observer: Rc<str> = observer.into();
         let mut mjd_time = Vec::with_capacity(batch_size);
 
@@ -186,7 +191,7 @@ impl TrajectoryExt for TrajectorySet {
 
             for ((ra, dec), (mjd_time, traj_id)) in
                 ra.into_iter().zip(dec).zip(mjd_time.drain(..).zip(traj_id))
-            {   
+            {
                 let obs = Observation {
                     observer: observer.clone(),
                     ra: ra.expect("Expected RA"),
@@ -195,11 +200,10 @@ impl TrajectoryExt for TrajectorySet {
                 };
 
                 let traj_id = traj_id.expect("Expected TrajID");
-                if let Some(observations) = trajectories.get_mut(&ObjectNumber::Int(traj_id)) {
-                    observations.push(obs);
-                } else {
-                    trajectories.insert(ObjectNumber::Int(traj_id), vec![obs]);
-                }
+                trajectories
+                    .entry(ObjectNumber::Int(traj_id))
+                    .or_insert_with(|| SmallVec::with_capacity(10))
+                    .push(obs);
             }
         }
 
@@ -216,7 +220,7 @@ impl TrajectoryExt for TrajectorySet {
     /// ------
     /// * a TrajectorySet containing the observations from the 80 column file
     fn from_80col(colfile: &Utf8Path) -> Self {
-        let mut traj_set: HashMap<ObjectNumber, Observations> = HashMap::new();
+        let mut traj_set: TrajectorySet = HashMap::default();
         let (observations, object_number) = extract_80col(colfile);
         traj_set.insert(object_number, observations);
         traj_set
