@@ -46,7 +46,7 @@ impl FromStr for ObservationWrapper {
                 .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str()),
             dec: parse_dec_to_deg(line[44..56].trim())
                 .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str()),
-            observer: line[77..80].trim().to_string(),
+            observer: line[77..80].trim().into(),
         };
 
         Ok(ObservationWrapper(observation))

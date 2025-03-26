@@ -1,7 +1,6 @@
 use crate::{constants::{Degree, MpcCode, ObjectNumber, Observations, MJD}, observations::observation_wrapper::{ObservationWrapper, ParseObsError}};
 use camino::Utf8Path;
-use serde::Deserialize;
-use std::ops::Range;
+use std::{ops::Range, rc::Rc, sync::Arc};
 
 /// A struct containing the observer and the time, ra, dec, and rms of an observation
 ///
@@ -11,9 +10,9 @@ use std::ops::Range;
 /// * `ra` - The right ascension of the observation
 /// * `dec` - The declination of the observation
 /// * `time` - The time of the observation
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Observation {
-    pub observer: MpcCode,
+    pub observer: Rc<str>,
     pub ra: Degree,
     pub dec: Degree,
     pub time: MJD,
@@ -55,7 +54,7 @@ pub(crate) fn extract_80col(colfile: &Utf8Path) -> (Observations, ObjectNumber) 
                 Err(e) => panic!("Error parsing line: {:?}", e),
             })
             .collect(),
-        object_number,
+        ObjectNumber::String(object_number),
     )
 }
 
@@ -85,7 +84,7 @@ pub(crate) fn observation_from_vec(
             ra: *ra,
             dec: *dec,
             time: *time,
-            observer: observer.to_string(),
+            observer: observer.into(),
         })
         .collect()
 }

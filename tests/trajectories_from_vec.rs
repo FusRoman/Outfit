@@ -1,4 +1,4 @@
-use outfit::constants::TrajectorySet;
+use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;
 
 #[test]
@@ -13,12 +13,12 @@ fn test_trajectories_from_vec() {
         TrajectorySet::new_from_vec(object_number, &ra, &dec, &time, observer);
 
     assert_eq!(traj_set.len(), 1);
-    let obs_33803 = traj_set.get("33803").unwrap();
+    let obs_33803 = traj_set.get(&ObjectNumber::String("33803".into())).unwrap();
     assert_eq!(obs_33803.len(), 1);
     assert_eq!(obs_33803[0].time, 43041.93878);
     assert_eq!(obs_33803[0].ra, 359.7403333333333);
     assert_eq!(obs_33803[0].dec, -0.5039444444444444);
-    assert_eq!(obs_33803[0].observer, "049".to_string());
+    assert_eq!(&*obs_33803[0].observer, "049");
 
     let object_number = "8467";
     let ra = vec![14.62025];
@@ -29,10 +29,10 @@ fn test_trajectories_from_vec() {
     traj_set.add_from_vec(object_number, &ra, &dec, &time, observer);
 
     assert_eq!(traj_set.len(), 2);
-    let obs_8467 = traj_set.get("8467").unwrap();
+    let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();
     assert_eq!(obs_8467.len(), 1);
     assert_eq!(obs_8467[0].time, 43785.35799);
     assert_eq!(obs_8467[0].ra, 14.62025);
     assert_eq!(obs_8467[0].dec, 9.987777777777778);
-    assert_eq!(obs_8467[0].observer, "675".to_string());
+    assert_eq!(&*obs_8467[0].observer, "675");
 }

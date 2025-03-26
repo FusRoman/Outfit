@@ -1,12 +1,18 @@
-use std::{collections::HashMap, fs::File, iter};
+use std::{collections::HashMap, fs::File, iter, rc::Rc, sync::Arc};
 
 use crate::{
-    constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, MJD},
+    constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
     observations::observations::Observation,
+    time::jd_to_mjd,
+};
+use arrow::{
+    array::{Float64Array, PrimitiveArray, RecordBatch, StringArray, UInt32Array},
+    datatypes::SchemaRef,
 };
 use camino::Utf8Path;
-use hifitime::Epoch;
+use hifitime::{efmt::format, Epoch};
 use parquet::{
+    arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask},
     file::reader::{FileReader, SerializedFileReader},
     record::{Row, RowAccessor},
 };
@@ -36,8 +42,13 @@ pub trait TrajectoryExt {
         observer: &str,
     );
 
-    fn new_from_parquet(parquet: &Utf8Path, mpc_code: MpcCode) -> Self;
-    fn add_from_parquet(&mut self, parquet: &Utf8Path, observer: MpcCode);
+    fn new_from_parquet(parquet: &Utf8Path, mpc_code: MpcCode, batch_size: Option<usize>) -> Self;
+    fn add_from_parquet(
+        &mut self,
+        parquet: &Utf8Path,
+        observer: MpcCode,
+        batch_size: Option<usize>,
+    );
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -64,7 +75,7 @@ impl TrajectoryExt for TrajectorySet {
     ) -> Self {
         let observations: Observations = observation_from_vec(ra, dec, time, observer);
         let mut traj_set: HashMap<ObjectNumber, Observations> = HashMap::new();
-        traj_set.insert(object_number.to_string(), observations);
+        traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
     }
 
@@ -87,100 +98,109 @@ impl TrajectoryExt for TrajectorySet {
         observer: &str,
     ) {
         let observations: Observations = observation_from_vec(ra, dec, time, observer);
-        self.insert(object_number.to_string(), observations);
+        self.insert(ObjectNumber::String(object_number.to_string()), observations);
     }
 
-    fn add_from_parquet(&mut self, parquet: &Utf8Path, observer: MpcCode) {
-        let new_trajs = Self::new_from_parquet(parquet, observer);
+    fn add_from_parquet(
+        &mut self,
+        parquet: &Utf8Path,
+        observer: MpcCode,
+        batch_size: Option<usize>,
+    ) {
+        let new_trajs = Self::new_from_parquet(parquet, observer, batch_size);
         for (traj_id, obs) in new_trajs {
             self.entry(traj_id).or_default().extend(obs);
         }
     }
 
-    fn new_from_parquet(parquet: &Utf8Path, observer: MpcCode) -> Self {
-        let file = File::open(parquet)
-            .expect(format!("Could not open file {}", parquet.as_str()).as_str());
+    fn new_from_parquet(parquet: &Utf8Path, observer: MpcCode, batch_size: Option<usize>) -> Self {
+        let file = File::open(parquet).expect("Unable to open file");
 
-        let reader = SerializedFileReader::new(file).expect(
-            format!(
-                "Could not create a SerializedFileReader from file {}",
-                parquet.as_str()
-            )
-            .as_str(),
-        );
+        let builder =
+            ParquetRecordBatchReaderBuilder::try_new(file).expect("Failed to read metadata");
 
-        let mut trajectories: TrajectorySet = HashMap::new();
+        let parquet_metadata = builder.metadata();
+        let schema_descr = parquet_metadata.file_metadata().schema_descr();
 
-        let schema = reader.metadata().file_metadata().schema();
-        let fields = schema.get_fields();
-
-        let col_index: HashMap<&str, usize> = fields
+        let all_fields = schema_descr.columns();
+        let column_names = ["ra", "dec", "jd", "trajectory_id"];
+        let projection_indices: Vec<usize> = column_names
             .iter()
-            .enumerate()
-            .map(|(i, field)| (field.name(), i))
+            .map(|name| {
+                all_fields
+                    .iter()
+                    .position(|f| f.name() == *name)
+                    .unwrap_or_else(|| panic!("Column '{}' not found in schema", name))
+            })
             .collect();
 
-        let iter = reader.get_row_iter(None).expect(
-            format!(
-                "Could not create a row iterator from file {}",
-                parquet.as_str()
-            )
-            .as_str(),
-        );
+        let mask = ProjectionMask::leaves(schema_descr, projection_indices);
 
-        let get_column = |row: &Row, column_name: &str| {
-            row.get_double(
-                *col_index.get(column_name).expect(
-                    format!(
-                        "The row does not contain the column {}, schema fields: {:?}",
-                        column_name, fields
-                    )
-                    .as_str(),
-                ),
-            )
-            .or_else(|_| {
-                row.get_long(
-                    *col_index.get(column_name).expect(
-                        format!(
-                            "The row does not contain the column {}, schema fields: {:?}",
-                            column_name, fields
-                        )
-                        .as_str(),
-                    ),
-                )
-                .map(|x| x as f64)
-            })
-            .expect(
-                format!(
-                    "Cannot parse the column value as a double or a long: {}",
-                    column_name
-                )
-                .as_str(),
-            )
-        };
+        let batch_size = batch_size.unwrap_or(2048);
+        let reader = builder
+            .with_projection(mask)
+            .with_batch_size(batch_size)
+            .build()
+            .expect("Failed to build reader");
 
-        for row in iter {
-            let row = row.expect("Error reading row");
+        let mut trajectories: TrajectorySet = HashMap::new();
+        let observer: Rc<str> = observer.into();
+        let mut mjd_time = Vec::with_capacity(batch_size);
 
-            let ra = get_column(&row, "ra");
-            let dec = get_column(&row, "dec");
+        for maybe_batch in reader {
+            let batch = maybe_batch.expect("Error reading batch");
 
-            let jd_time = get_column(&row, "jd");
-            let mjd_time = Epoch::from_jde_utc(jd_time).to_mjd_utc_days();
+            let ra = batch
+                .column_by_name("ra")
+                .expect("Error getting ra column")
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .expect("Error downcasting ra column");
 
-            let traj_id = get_column(&row, "trajectory_id");
+            let dec = batch
+                .column_by_name("dec")
+                .expect("Error getting dec column")
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .expect("Error downcasting dec column");
 
-            let obs = Observation {
-                observer: observer.clone(),
-                ra: ra,
-                dec: dec,
-                time: mjd_time,
-            };
+            let jd_time = batch
+                .column_by_name("jd")
+                .expect("Error getting jd column")
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .expect("Error downcasting jd column");
 
-            trajectories
-                .entry(traj_id.to_string())
-                .or_insert_with(Vec::new)
-                .push(obs);
+            mjd_time.extend(
+                jd_time
+                    .into_iter()
+                    .map(|jd| jd.expect("Expected JD") - JDTOMJD),
+            );
+
+            let traj_id = batch
+                .column_by_name("trajectory_id")
+                .expect("Error getting trajectory_id column")
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .expect("Error downcasting trajectory_id column");
+
+            for ((ra, dec), (mjd_time, traj_id)) in
+                ra.into_iter().zip(dec).zip(mjd_time.drain(..).zip(traj_id))
+            {   
+                let obs = Observation {
+                    observer: observer.clone(),
+                    ra: ra.expect("Expected RA"),
+                    dec: dec.expect("Expected DEC"),
+                    time: mjd_time,
+                };
+
+                let traj_id = traj_id.expect("Expected TrajID");
+                if let Some(observations) = trajectories.get_mut(&ObjectNumber::Int(traj_id)) {
+                    observations.push(obs);
+                } else {
+                    trajectories.insert(ObjectNumber::Int(traj_id), vec![obs]);
+                }
+            }
         }
 
         trajectories
