@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use nalgebra::Vector3;
 use regex::Regex;
-use reqwest::Client;
+use crate::outfit::Outfit;
 
 /// Request the JPL Horizon API to get the position vector of Earth
 /// with respect to the Sun at different time.
@@ -13,8 +13,8 @@ use reqwest::Client;
 /// Return
 /// ------
 /// * a vector of PosRecord, the position vector component are in astronomical units
-pub(crate) async fn get_earth_position(mjd_list: &Vec<f64>, http_client: &Client) -> Vec<PosRecord> {
-    let response_data = request_vector(mjd_list, http_client).await;
+pub(crate) fn get_earth_position(mjd_list: &Vec<f64>, env_state: &Outfit) -> Vec<PosRecord> {
+    let response_data = request_vector(mjd_list, env_state);
     deserialize_vector(&response_data)
 }
 
@@ -31,7 +31,7 @@ fn jd_tlist(mjd_list: &Vec<f64>) -> String {
 /// Return
 /// ------
 /// * The JPL API raw response
-async fn request_vector(mjd_list: &Vec<f64>, http_client: &Client) -> String {
+fn request_vector(mjd_list: &Vec<f64>, env_state: &Outfit) -> String {
     let requested_params = format!(
         "
 !$$SOF
@@ -50,15 +50,10 @@ VEC_TABLE=1
 ",
         jd_tlist(mjd_list)
     );
-    http_client
-        .post("https://ssd.jpl.nasa.gov/api/horizons_file.api")
-        .form(&[("format", "text"), ("input", &requested_params)])
-        .send()
-        .await
-        .expect("Request Earth position vector to the JPL failed")
-        .text()
-        .await
-        .expect("Get the raw JPL response failed")
+    env_state.post_url(
+        "https://ssd.jpl.nasa.gov/api/horizons_file.api",
+        &[("format", "text"), ("input", &requested_params)],
+    )
 }
 
 /// Contains the informations from the JPL Horizons vector state query
@@ -149,8 +144,8 @@ fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 mod earth_pos_tests {
     use crate::time::{date_to_mjd, mjd_to_jd};
 
-    use super::super::super::env_state::OutfitState;
     use super::*;
+    use crate::outfit::Outfit;
 
     #[test]
     fn test_jd_list() {
@@ -167,12 +162,12 @@ mod earth_pos_tests {
         assert_eq!(jd_list, vec![2459400.0329166665, 2460672.5746296295])
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_jplvector_request() {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let mjd_list = date_to_mjd(&date_list);
-        let response_data = request_vector(&mjd_list, &state.http_client).await;
+        let response_data = request_vector(&mjd_list, &state);
         assert!(response_data.contains(
             "$$SOE
 2459400.032916666, A.D. 2021-Jul-04 12:47:24.0000,  2.195672929244244E-01, -9.108330730147444E-01, -3.948423288985838E-01,
@@ -216,12 +211,12 @@ $$EOE
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_earth_pos() {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_mjd(&date_list);
-        let earth_vector = get_earth_position(&jd_list, &state.http_client).await;
+        let earth_vector = get_earth_position(&jd_list, &state);
         assert_eq!(
             earth_vector,
             vec![
@@ -243,11 +238,11 @@ $$EOE
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_earth_pos_with_mjd() {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
         let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
-        let earth_vector = get_earth_position(&test_mjd, &state.http_client).await;
+        let earth_vector = get_earth_position(&test_mjd, &state);
         assert_eq!(
             earth_vector,
             vec![

@@ -1,5 +1,5 @@
 pub mod constants;
-mod env_state;
+pub mod env_state;
 pub mod gauss;
 pub mod jpl_request;
 mod kepler;
@@ -10,3 +10,4 @@ mod orb_elem;
 mod ref_system;
 mod time;
 mod conversion;
+pub mod outfit;

@@ -1,6 +1,7 @@
 use crate::observations::observations::Observation;
 use crate::observers::observers::Observer;
 use std::collections::HashMap;
+use std::sync::Arc;
 use ahash::RandomState;
 use smallvec::SmallVec;
 
@@ -34,7 +35,7 @@ pub type Degree = f64;
 pub type Kilometer = f64;
 /// a mpc code observatory made of three characters
 pub type MpcCode = String;
-pub type MpcCodeObs = HashMap<MpcCode, Observer>;
+pub type MpcCodeObs = HashMap<MpcCode, Arc<Observer>>;
 /// Modified Julian Date
 pub type MJD = f64; // time in modified julian date
 

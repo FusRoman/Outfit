@@ -1,11 +1,12 @@
 use ahash::{AHasher, RandomState};
 use smallvec::SmallVec;
-use std::{collections::HashMap, fs::File, iter, rc::Rc, sync::Arc};
+use std::{collections::HashMap, env, fs::File, iter, rc::Rc, sync::Arc};
 
+use crate::observers::observers::Observer;
+use crate::outfit::Outfit;
 use crate::{
     constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
     observations::observations::Observation,
-    time::jd_to_mjd,
 };
 use arrow::{
     array::{Float64Array, PrimitiveArray, RecordBatch, StringArray, UInt32Array},
@@ -25,30 +26,38 @@ use super::observations::{extract_80col, observation_from_vec};
 /// It provides methods to create a TrajectorySet from an 80 column file and to add observations from an 80 column file
 /// It also provides methods to create a TrajectorySet from vectors of right ascension, declination, time, and observer and to add observations from vectors of right ascension, declination, time, and observer
 pub trait TrajectoryExt {
-    fn from_80col(colfile: &Utf8Path) -> Self;
-    fn add_80col(&mut self, colfile: &Utf8Path);
+    fn from_80col(env_state: &mut Outfit, colfile: &Utf8Path) -> Self;
+    fn add_80col(&mut self, env_state: &mut Outfit, colfile: &Utf8Path);
 
     fn new_from_vec(
+        env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
         dec: &Vec<Degree>,
         time: &Vec<MJD>,
-        observer: &str,
+        observer: Arc<Observer>,
     ) -> Self;
     fn add_from_vec(
         &mut self,
+        env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
         dec: &Vec<Degree>,
         time: &Vec<MJD>,
-        observer: &str,
+        observer: Arc<Observer>,
     );
 
-    fn new_from_parquet(parquet: &Utf8Path, mpc_code: MpcCode, batch_size: Option<usize>) -> Self;
+    fn new_from_parquet(
+        env_state: &mut Outfit,
+        parquet: &Utf8Path,
+        mpc_code: Arc<Observer>,
+        batch_size: Option<usize>,
+    ) -> Self;
     fn add_from_parquet(
         &mut self,
+        env_state: &mut Outfit,
         parquet: &Utf8Path,
-        observer: MpcCode,
+        observer: Arc<Observer>,
         batch_size: Option<usize>,
     );
 }
@@ -69,13 +78,14 @@ impl TrajectoryExt for TrajectorySet {
     /// ------
     /// * a TrajectorySet containing the observations
     fn new_from_vec(
+        env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
         dec: &Vec<Degree>,
         time: &Vec<MJD>,
-        observer: &str,
+        observer: Arc<Observer>,
     ) -> Self {
-        let observations: Observations = observation_from_vec(ra, dec, time, observer);
+        let observations: Observations = observation_from_vec(env_state, ra, dec, time, observer);
         let mut traj_set: TrajectorySet = HashMap::default();
         traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
@@ -93,13 +103,14 @@ impl TrajectoryExt for TrajectorySet {
     /// * `observer`: the observer
     fn add_from_vec(
         &mut self,
+        env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
         dec: &Vec<Degree>,
         time: &Vec<MJD>,
-        observer: &str,
+        observer: Arc<Observer>,
     ) {
-        let observations: Observations = observation_from_vec(ra, dec, time, observer);
+        let observations: Observations = observation_from_vec(env_state, ra, dec, time, observer);
         self.insert(
             ObjectNumber::String(object_number.to_string()),
             observations,
@@ -108,17 +119,25 @@ impl TrajectoryExt for TrajectorySet {
 
     fn add_from_parquet(
         &mut self,
+        env_state: &mut Outfit,
         parquet: &Utf8Path,
-        observer: MpcCode,
+        observer: Arc<Observer>,
         batch_size: Option<usize>,
     ) {
-        let new_trajs = Self::new_from_parquet(parquet, observer, batch_size);
+        let new_trajs = Self::new_from_parquet(env_state, parquet, observer, batch_size);
         for (traj_id, obs) in new_trajs {
             self.entry(traj_id).or_default().extend(obs);
         }
     }
 
-    fn new_from_parquet(parquet: &Utf8Path, observer: MpcCode, batch_size: Option<usize>) -> Self {
+    fn new_from_parquet(
+        env_state: &mut Outfit,
+        parquet: &Utf8Path,
+        observer: Arc<Observer>,
+        batch_size: Option<usize>,
+    ) -> Self {
+        let uint16_obs = env_state.uint16_from_observer(observer);
+
         let file = File::open(parquet).expect("Unable to open file");
 
         let builder =
@@ -149,7 +168,6 @@ impl TrajectoryExt for TrajectorySet {
             .expect("Failed to build reader");
 
         let mut trajectories: TrajectorySet = HashMap::default();
-        let observer: Rc<str> = observer.into();
         let mut mjd_time = Vec::with_capacity(batch_size);
 
         for maybe_batch in reader {
@@ -192,12 +210,12 @@ impl TrajectoryExt for TrajectorySet {
             for ((ra, dec), (mjd_time, traj_id)) in
                 ra.into_iter().zip(dec).zip(mjd_time.drain(..).zip(traj_id))
             {
-                let obs = Observation {
-                    observer: observer.clone(),
-                    ra: ra.expect("Expected RA"),
-                    dec: dec.expect("Expected DEC"),
-                    time: mjd_time,
-                };
+                let obs = Observation::new(
+                    uint16_obs,
+                    ra.expect("Expected RA"),
+                    dec.expect("Expected DEC"),
+                    mjd_time,
+                );
 
                 let traj_id = traj_id.expect("Expected TrajID");
                 trajectories
@@ -219,9 +237,9 @@ impl TrajectoryExt for TrajectorySet {
     /// Return
     /// ------
     /// * a TrajectorySet containing the observations from the 80 column file
-    fn from_80col(colfile: &Utf8Path) -> Self {
+    fn from_80col(env_state: &mut Outfit, colfile: &Utf8Path) -> Self {
         let mut traj_set: TrajectorySet = HashMap::default();
-        let (observations, object_number) = extract_80col(colfile);
+        let (observations, object_number) = extract_80col(env_state, colfile);
         traj_set.insert(object_number, observations);
         traj_set
     }
@@ -231,8 +249,8 @@ impl TrajectoryExt for TrajectorySet {
     /// Arguments
     /// ---------
     /// * `colfile`: a path to an 80 column file
-    fn add_80col(&mut self, colfile: &Utf8Path) {
-        let (observations, object_number) = extract_80col(colfile);
+    fn add_80col(&mut self, env_state: &mut Outfit, colfile: &Utf8Path) {
+        let (observations, object_number) = extract_80col(env_state, colfile);
         self.insert(object_number, observations);
     }
 }

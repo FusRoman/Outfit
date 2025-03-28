@@ -1,8 +1,9 @@
+use crate::outfit::Outfit;
+
 use super::super::observers::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
-use super::super::env_state::OutfitState;
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
 use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
@@ -22,20 +23,20 @@ use hifitime::ut1::Ut1Provider;
 /// ------
 /// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
-pub async fn helio_obs_pos(
+pub fn helio_obs_pos(
     observer: &Observer,
     mjd_tt: &Vector3<f64>,
-    state: &OutfitState,
+    state: &Outfit,
 ) -> Matrix3<f64> {
     let position_obs_time = mjd_tt
         .iter()
-        .map(|mjd_el| pvobs(observer, *mjd_el, &state.ut1_provider).0)
+        .map(|mjd_el| pvobs(observer, *mjd_el, &state.get_ut1_provider()).0)
         .collect::<Vec<Vector3<f64>>>();
 
     let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
 
     let time_vec = vec![mjd_tt.x, mjd_tt.y, mjd_tt.z];
-    let earth_helio_position = get_earth_position(&time_vec, &state.http_client).await;
+    let earth_helio_position = get_earth_position(&time_vec, &state);
 
     let earth_pos_vec = earth_helio_position
         .iter()
@@ -207,8 +208,8 @@ pub(crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 #[cfg(test)]
 mod observer_pos_tests {
 
-    use super::super::super::env_state::OutfitState;
     use super::*;
+    use crate::outfit::Outfit;
 
     #[test]
     fn geodetic_to_parallax_test() {
@@ -229,15 +230,16 @@ mod observer_pos_tests {
         assert_eq!(res_gmst, 4.894961212789145);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn pvobs_test() {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
         let tmjd = 57028.479297592596;
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
-        let (observer_position, observer_velocity) = pvobs(&pan_starrs, tmjd, &state.ut1_provider);
+        let (observer_position, observer_velocity) =
+            pvobs(&pan_starrs, tmjd, state.get_ut1_provider());
 
         assert_eq!(
             observer_position.as_slice(),
@@ -257,16 +259,16 @@ mod observer_pos_tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_helio_pos_obs() {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
-        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state).await;
+        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state);
 
         assert_eq!(
             helio_pos.as_slice(),

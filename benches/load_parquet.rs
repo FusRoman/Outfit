@@ -3,10 +3,12 @@ use criterion::Throughput;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use outfit::constants::TrajectorySet;
 use outfit::observations::trajectory_ext::TrajectoryExt;
+use outfit::outfit::Outfit;
 
 fn bench_load_parquet(c: &mut Criterion) {
+    let mut outfit = Outfit::new();
     let path = Utf8Path::new("tests/data/test_from_fink.parquet");
-    let ztf_observer = "I41".to_string();
+    let ztf_observer = outfit.get_observer_from_mpc_code(&"I41".into());
 
     let mut batch_group = c.benchmark_group("batch_sizes");
 
@@ -32,8 +34,12 @@ fn bench_load_parquet(c: &mut Criterion) {
             batch_size,
             |b, batch_size| {
                 b.iter(|| {
-                    let mut traj_set =
-                        TrajectorySet::new_from_parquet(&path, ztf_observer.clone(), *batch_size);
+                    let mut traj_set = TrajectorySet::new_from_parquet(
+                        &mut outfit,
+                        &path,
+                        ztf_observer.clone(),
+                        *batch_size,
+                    );
                 })
             },
         );
