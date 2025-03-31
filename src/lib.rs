@@ -8,6 +8,6 @@ pub mod observations;
 pub mod observers;
 mod orb_elem;
 mod ref_system;
-mod time;
+pub mod time;
 mod conversion;
 pub mod outfit;

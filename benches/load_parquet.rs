@@ -34,7 +34,7 @@ fn bench_load_parquet(c: &mut Criterion) {
             batch_size,
             |b, batch_size| {
                 b.iter(|| {
-                    let mut traj_set = TrajectorySet::new_from_parquet(
+                    let  _ = TrajectorySet::new_from_parquet(
                         &mut outfit,
                         &path,
                         ztf_observer.clone(),

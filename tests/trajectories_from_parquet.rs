@@ -67,6 +67,6 @@ async fn mega_test() {
     let path_file = Utf8Path::new("tests/data/mega_test.parquet");
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
 
-    let mut traj_set =
+    let _ =
         TrajectorySet::new_from_parquet(&mut env_state, &path_file, ztf_observer, None);
 }
