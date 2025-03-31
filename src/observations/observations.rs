@@ -1,5 +1,5 @@
 use crate::{
-    constants::{Degree, ObjectNumber, Observations, MJD},
+    constants::{Degree32, ObjectNumber, Observations, MJD},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     observers::observers::Observer,
     outfit::Outfit,
@@ -20,13 +20,13 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct Observation {
     observer: u16,
-    pub ra: Degree,
-    pub dec: Degree,
+    pub ra: Degree32,
+    pub dec: Degree32,
     pub time: MJD,
 }
 
 impl Observation {
-    pub fn new(observer: u16, ra: Degree, dec: Degree, time: MJD) -> Self {
+    pub fn new(observer: u16, ra: Degree32, dec: Degree32, time: MJD) -> Self {
         Observation {
             observer,
             ra,
@@ -137,8 +137,8 @@ pub(crate) fn extract_80col(
 /// * a vector of Observations
 pub(crate) fn observation_from_vec(
     env_state: &mut Outfit,
-    ra: &Vec<Degree>,
-    dec: &Vec<Degree>,
+    ra: &Vec<Degree32>,
+    dec: &Vec<Degree32>,
     time: &Vec<MJD>,
     observer: Arc<Observer>,
 ) -> Observations {

@@ -1,4 +1,4 @@
-use crate::constants::Degree;
+use crate::constants::Degree32;
 
 /// Parse a right ascension string to degrees
 ///
@@ -9,14 +9,14 @@ use crate::constants::Degree;
 /// Return
 /// ------
 /// * a float representing the right ascension in degrees
-pub (crate) fn parse_ra_to_deg(ra: &str) -> Option<Degree> {
+pub (crate) fn parse_ra_to_deg(ra: &str) -> Option<Degree32> {
     let parts: Vec<&str> = ra.split_whitespace().collect();
     if parts.len() != 3 {
         return None;
     }
-    let h: f64 = parts[0].parse().ok()?;
-    let m: f64 = parts[1].parse().ok()?;
-    let s: f64 = parts[2].parse().ok()?;
+    let h: f32 = parts[0].parse().ok()?;
+    let m: f32 = parts[1].parse().ok()?;
+    let s: f32 = parts[2].parse().ok()?;
     Some((h + m / 60.0 + s / 3600.0) * 15.0)
 }
 
@@ -29,18 +29,18 @@ pub (crate) fn parse_ra_to_deg(ra: &str) -> Option<Degree> {
 /// Return
 /// ------
 /// * a float representing the declination in degrees
-pub (crate) fn parse_dec_to_deg(dec: &str) -> Option<Degree> {
+pub (crate) fn parse_dec_to_deg(dec: &str) -> Option<Degree32> {
     let parts: Vec<&str> = dec.split_whitespace().collect();
     if parts.len() != 3 {
         return None;
     }
     let sign = if parts[0].starts_with('-') { -1.0 } else { 1.0 };
-    let d: f64 = parts[0]
+    let d: f32 = parts[0]
         .trim_start_matches(['-', '+'].as_ref())
         .parse()
         .ok()?;
-    let m: f64 = parts[1].parse().ok()?;
-    let s: f64 = parts[2].parse().ok()?;
+    let m: f32 = parts[1].parse().ok()?;
+    let s: f32 = parts[2].parse().ok()?;
     Some(sign * (d + m / 60.0 + s / 3600.0))
 }
 

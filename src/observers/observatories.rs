@@ -1,27 +1,26 @@
 use super::bimap::BiMap;
 use super::observers::Observer;
-use crate::constants::{Degree, Kilometer, MpcCodeObs};
-use once_cell::sync::OnceCell;
-use std::sync::Arc;
+use crate::constants::{Degree64, Kilometer, MpcCodeObs};
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug)]
 pub(crate) struct Observatories {
-    pub(crate) mpc_code_obs: OnceCell<MpcCodeObs>,
+    pub(crate) mpc_code_obs: OnceLock<MpcCodeObs>,
     obs_to_uint16: BiMap<Arc<Observer>, u16>,
 }
 
 impl Observatories {
     pub(crate) fn new() -> Self {
         Observatories {
-            mpc_code_obs: OnceCell::new(),
+            mpc_code_obs: OnceLock::new(),
             obs_to_uint16: BiMap::new(),
         }
     }
 
     pub(crate) fn add_observer(
         &mut self,
-        longitude: Degree,
-        latitude: Degree,
+        longitude: Degree64,
+        latitude: Degree64,
         elevation: Kilometer,
         name: Option<String>,
     ) -> Arc<Observer> {

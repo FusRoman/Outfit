@@ -4,10 +4,10 @@ use std::{collections::HashMap, fs::File, sync::Arc};
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use crate::{
-    constants::{Degree, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
+    constants::{Degree32, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
     observations::observations::Observation,
 };
-use arrow::array::{Float64Array, UInt32Array};
+use arrow::array::{Float32Array, Float64Array, UInt32Array};
 use camino::Utf8Path;
 use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask};
 
@@ -23,8 +23,8 @@ pub trait TrajectoryExt {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        dec: &Vec<Degree>,
+        ra: &Vec<Degree32>,
+        dec: &Vec<Degree32>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self;
@@ -32,8 +32,8 @@ pub trait TrajectoryExt {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        dec: &Vec<Degree>,
+        ra: &Vec<Degree32>,
+        dec: &Vec<Degree32>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     );
@@ -71,8 +71,8 @@ impl TrajectoryExt for TrajectorySet {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        dec: &Vec<Degree>,
+        ra: &Vec<Degree32>,
+        dec: &Vec<Degree32>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self {
@@ -96,8 +96,8 @@ impl TrajectoryExt for TrajectorySet {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        dec: &Vec<Degree>,
+        ra: &Vec<Degree32>,
+        dec: &Vec<Degree32>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) {
@@ -168,14 +168,14 @@ impl TrajectoryExt for TrajectorySet {
                 .column_by_name("ra")
                 .expect("Error getting ra column")
                 .as_any()
-                .downcast_ref::<Float64Array>()
+                .downcast_ref::<Float32Array>()
                 .expect("Error downcasting ra column");
 
             let dec = batch
                 .column_by_name("dec")
                 .expect("Error getting dec column")
                 .as_any()
-                .downcast_ref::<Float64Array>()
+                .downcast_ref::<Float32Array>()
                 .expect("Error downcasting dec column");
 
             let jd_time = batch

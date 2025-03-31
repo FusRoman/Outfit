@@ -5,7 +5,7 @@ use reqwest::IntoUrl;
 use serde::Serialize;
 
 use crate::{
-    constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
+    constants::{Degree64, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
     observers::{observatories::Observatories, observers::Observer},
 };
@@ -144,8 +144,8 @@ impl Outfit {
 
     pub fn new_observer(
         &mut self,
-        longitude: Degree,
-        latitude: Degree,
+        longitude: Degree64,
+        latitude: Degree64,
         elevation: Kilometer,
         name: Option<String>,
     ) -> Arc<Observer> {

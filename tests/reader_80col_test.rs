@@ -27,7 +27,7 @@ async fn test_80col_reader() {
     let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();
     assert_eq!(obs_8467.len(), 3748);
     assert_eq!(obs_8467[0].time, 43785.35799);
-    assert_eq!(obs_8467[0].ra, 14.62025);
+    assert_eq!(obs_8467[0].ra, 14.620249);
     assert_eq!(obs_8467[0].dec, 9.987777777777778);
     assert_eq!(
         obs_8467[0].get_observer(&env_state).name,
@@ -43,7 +43,7 @@ async fn test_80col_reader() {
     assert_eq!(obs_k25.len(), 20);
     assert_eq!(obs_k25[0].time, 60732.280490000005);
     assert_eq!(obs_k25[0].ra, 154.65650833333333);
-    assert_eq!(obs_k25[0].dec, 29.973188888888888);
+    assert_eq!(obs_k25[0].dec, 29.97319);
     assert_eq!(
         obs_k25[0].get_observer(&env_state).name,
         Some("Kitt Peak-Bok".to_string())
