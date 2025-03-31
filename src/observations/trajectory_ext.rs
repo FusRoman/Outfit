@@ -46,6 +46,9 @@ pub trait TrajectoryExt {
         observer: Arc<Observer>,
         batch_size: Option<usize>,
     );
+
+    fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self;
+    fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path);
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -103,6 +106,21 @@ impl TrajectoryExt for TrajectorySet {
         );
     }
 
+    /// Add a set of trajectories from a parquet file to a TrajectorySet
+    ///
+    /// Arguments
+    /// ---------
+    /// * `parquet`: a path to a parquet file
+    /// * `observer`: the observer
+    /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
+    /// 
+    /// Return
+    /// ------
+    /// * a TrajectorySet containing the new observations is added to the existing TrajectorySet
+    ///
+    /// Note: the parquet file should contain the columns "ra", "dec", "jd", and "trajectory_id"
+    /// The "jd" column is converted to MJD using the JDTOMJD constant
+    /// The "ra" and "dec" columns are converted to 32 bits for performance
     fn add_from_parquet(
         &mut self,
         env_state: &mut Outfit,
@@ -113,6 +131,21 @@ impl TrajectoryExt for TrajectorySet {
         parquet_to_trajset(self, env_state, parquet, observer, batch_size);
     }
 
+    /// Create a TrajectorySet from a parquet file
+    ///
+    /// Arguments
+    /// ---------
+    /// * `parquet`: a path to a parquet file
+    /// * `observer`: the observer
+    /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
+    ///
+    /// Return
+    /// ------
+    /// * a TrajectorySet containing the observations from the parquet file
+    ///
+    /// Note: the parquet file should contain the columns "ra", "dec", "jd", and "trajectory_id"
+    /// The "jd" column is converted to MJD using the JDTOMJD constant
+    /// The "ra" and "dec" columns are converted to 32 bits for performance
     fn new_from_parquet(
         env_state: &mut Outfit,
         parquet: &Utf8Path,
@@ -148,5 +181,13 @@ impl TrajectoryExt for TrajectorySet {
     fn add_80col(&mut self, env_state: &mut Outfit, colfile: &Utf8Path) {
         let (observations, object_number) = extract_80col(env_state, colfile);
         self.insert(object_number, observations);
+    }
+
+    fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path) {
+        todo!();
+    }
+
+    fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self {
+        todo!();
     }
 }

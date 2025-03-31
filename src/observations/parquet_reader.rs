@@ -11,6 +11,22 @@ use arrow::array::{Float32Array, Float64Array, UInt32Array};
 use camino::Utf8Path;
 use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask};
 
+/// Reads a Parquet file and converts it to a TrajectorySet.
+/// The Parquet file must contain the following columns: "ra", "dec", "jd", and "trajectory_id".
+/// The "jd" column is converted to MJD using the JDTOMJD constant.
+/// The "ra" and "dec" columns are converted to 32 bits for performance.
+/// 
+/// Arguments
+/// ---------
+/// * `trajectories`: a mutable reference to a TrajectorySet
+/// * `env_state`: a mutable reference to an Outfit
+/// * `parquet`: a path to a Parquet file
+/// * `observer`: an Arc<Observer>
+/// * `batch_size`: an optional batch size to use when reading the Parquet file, If None, the default batch size is 2048
+///
+/// Return
+/// ------
+/// * a TrajectorySet containing the observations from the Parquet file
 pub (crate) fn parquet_to_trajset(
     trajectories: &mut TrajectorySet,
     env_state: &mut Outfit,

@@ -14,6 +14,7 @@ itertools = "0.14.0"
 nalgebra = "0.33.2"
 ordered-float = "5.0.0"
 parquet = "54.2.1"
+quick-xml = { version = "0.37.3", features = ["serialize"] }
 regex = "1.11.1"
 reqwest = { version = "0.12", features = ["json"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
