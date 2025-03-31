@@ -1,12 +1,12 @@
 use super::bimap::BiMap;
 use super::observers::Observer;
-use crate::constants::MpcCodeObs;
+use crate::constants::{Degree, Kilometer, MpcCodeObs};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) struct Observatories {
-    pub (crate) mpc_code_obs: OnceCell<MpcCodeObs>,
+    pub(crate) mpc_code_obs: OnceCell<MpcCodeObs>,
     obs_to_uint16: BiMap<Arc<Observer>, u16>,
 }
 
@@ -16,6 +16,20 @@ impl Observatories {
             mpc_code_obs: OnceCell::new(),
             obs_to_uint16: BiMap::new(),
         }
+    }
+
+    pub(crate) fn add_observer(
+        &mut self,
+        longitude: Degree,
+        latitude: Degree,
+        elevation: Kilometer,
+        name: Option<String>,
+    ) -> Arc<Observer> {
+        let obs = Observer::new(longitude, latitude, elevation, name.clone());
+        let arc_observer = Arc::new(obs);
+        self.obs_to_uint16
+            .entry_or_insert_by_key(arc_observer.clone(), self.obs_to_uint16.len() as u16);
+        arc_observer
     }
 
     /// Get an observer from an observer index
@@ -48,5 +62,28 @@ impl Observatories {
         self.obs_to_uint16
             .entry_or_insert_by_key(observer, obs_idx)
             .clone()
+    }
+}
+
+#[cfg(test)]
+mod observatories_test {
+    use super::*;
+
+    #[test]
+    fn test_observatories() {
+        let mut observatories = Observatories::new();
+        let obs = observatories.add_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
+        assert_eq!(obs.longitude, 1.0);
+        assert_eq!(obs.rho_cos_phi, 0.999395371426802);
+        assert_eq!(obs.rho_sin_phi, 0.0346660237964843);
+        assert_eq!(obs.name, Some("Test".to_string()));
+        assert_eq!(observatories.obs_to_uint16.len(), 1);
+        let observer = observatories.get_observer_from_uint16(0);
+        assert_eq!(observer.name, Some("Test".to_string()));
+
+        observatories.add_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
+        assert_eq!(observatories.obs_to_uint16.len(), 2);
+        let observer = observatories.get_observer_from_uint16(1);
+        assert_eq!(observer.name, Some("Test2".to_string()));
     }
 }

@@ -1,5 +1,3 @@
-use std::env;
-
 use camino::Utf8Path;
 use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;

@@ -1,11 +1,10 @@
 use nalgebra::Vector3;
 use ordered_float::NotNan;
-use std::{collections::HashMap, sync::Arc};
 
-use crate::{constants::{MpcCode, ERAU}};
+use crate::constants::ERAU;
 
 use super::super::jpl_request::observer_pos::geodetic_to_parallax;
-use crate::constants::{Degree, Kilometer, MpcCodeObs};
+use crate::constants::{Degree, Kilometer};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Observer {

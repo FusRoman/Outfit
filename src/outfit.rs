@@ -5,7 +5,7 @@ use reqwest::IntoUrl;
 use serde::Serialize;
 
 use crate::{
-    constants::{MpcCode, MpcCodeObs},
+    constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
     observers::{observatories::Observatories, observers::Observer},
 };
@@ -25,13 +25,6 @@ impl Outfit {
 
     pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
         &self.env_state.ut1_provider
-    }
-
-    pub(crate) fn get_url<U>(&self, url: U) -> String
-    where
-        U: IntoUrl,
-    {
-        self.env_state.get_from_url(url)
     }
 
     pub(crate) fn post_url<U, T: Serialize + ?Sized>(&self, url: U, form: &T) -> String
@@ -57,7 +50,6 @@ impl Outfit {
     ///
     /// Arguments
     /// ---------
-    /// * `env_state`: the state of the library
     /// * `mpc_code`: the MPC code
     ///
     /// Return
@@ -147,8 +139,18 @@ impl Outfit {
     /// ------
     /// * The observer
     pub(crate) fn get_observer_from_uint16(&self, observer_idx: u16) -> &Observer {
+        self.observatories.get_observer_from_uint16(observer_idx)
+    }
+
+    pub fn new_observer(
+        &mut self,
+        longitude: Degree,
+        latitude: Degree,
+        elevation: Kilometer,
+        name: Option<String>,
+    ) -> Arc<Observer> {
         self.observatories
-            .get_observer_from_uint16(observer_idx)
+            .add_observer(longitude, latitude, elevation, name)
     }
 }
 
@@ -218,5 +220,19 @@ mod outfit_struct_test {
             name: Some("Mazariegos".to_string()),
         };
         assert_eq!(observer, test.into());
+    }
+
+    #[test]
+    fn test_add_observer() {
+        let mut outfit = Outfit::new();
+        let obs = outfit.new_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
+        assert_eq!(obs.longitude, 1.0);
+        assert_eq!(obs.rho_cos_phi, 0.999395371426802);
+        assert_eq!(obs.rho_sin_phi, 0.0346660237964843);
+        assert_eq!(obs.name, Some("Test".to_string()));
+        assert_eq!(outfit.observatories.uint16_from_observer(obs), 0);
+
+        let obs2 = outfit.new_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
+        assert_eq!(outfit.observatories.uint16_from_observer(obs2), 1);
     }
 }

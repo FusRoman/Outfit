@@ -1,9 +1,4 @@
 use std::fmt::Debug;
-
-use crate::{
-    constants::MpcCode,
-    observers::{observatories::Observatories, observers::Observer},
-};
 use hifitime::ut1::Ut1Provider;
 use reqwest::{Client, IntoUrl};
 use serde::Serialize;

@@ -1,24 +1,15 @@
-use ahash::{AHasher, RandomState};
 use smallvec::SmallVec;
-use std::{collections::HashMap, env, fs::File, iter, rc::Rc, sync::Arc};
+use std::{collections::HashMap, fs::File, sync::Arc};
 
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use crate::{
-    constants::{Degree, MpcCode, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
+    constants::{Degree, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
     observations::observations::Observation,
 };
-use arrow::{
-    array::{Float64Array, PrimitiveArray, RecordBatch, StringArray, UInt32Array},
-    datatypes::SchemaRef,
-};
+use arrow::array::{Float64Array, UInt32Array};
 use camino::Utf8Path;
-use hifitime::{efmt::format, Epoch};
-use parquet::{
-    arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask},
-    file::reader::{FileReader, SerializedFileReader},
-    record::{Row, RowAccessor},
-};
+use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask};
 
 use super::observations::{extract_80col, observation_from_vec};
 
