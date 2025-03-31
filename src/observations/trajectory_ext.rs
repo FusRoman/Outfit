@@ -1,17 +1,12 @@
-use smallvec::SmallVec;
-use std::{collections::HashMap, fs::File, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
+use crate::constants::{Degree32, ObjectNumber, Observations, TrajectorySet, MJD};
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
-use crate::{
-    constants::{Degree32, ObjectNumber, Observations, TrajectorySet, JDTOMJD, MJD},
-    observations::observations::Observation,
-};
-use arrow::array::{Float32Array, Float64Array, UInt32Array};
 use camino::Utf8Path;
-use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask};
 
 use super::observations::{extract_80col, observation_from_vec};
+use super::parquet_reader::parquet_to_trajset;
 
 /// A trait to extend the TrajectorySet struct
 /// It provides methods to create a TrajectorySet from an 80 column file and to add observations from an 80 column file
@@ -115,10 +110,7 @@ impl TrajectoryExt for TrajectorySet {
         observer: Arc<Observer>,
         batch_size: Option<usize>,
     ) {
-        let new_trajs = Self::new_from_parquet(env_state, parquet, observer, batch_size);
-        for (traj_id, obs) in new_trajs {
-            self.entry(traj_id).or_default().extend(obs);
-        }
+        parquet_to_trajset(self, env_state, parquet, observer, batch_size);
     }
 
     fn new_from_parquet(
@@ -127,96 +119,9 @@ impl TrajectoryExt for TrajectorySet {
         observer: Arc<Observer>,
         batch_size: Option<usize>,
     ) -> Self {
-        let uint16_obs = env_state.uint16_from_observer(observer);
-
-        let file = File::open(parquet).expect("Unable to open file");
-
-        let builder =
-            ParquetRecordBatchReaderBuilder::try_new(file).expect("Failed to read metadata");
-
-        let parquet_metadata = builder.metadata();
-        let schema_descr = parquet_metadata.file_metadata().schema_descr();
-
-        let all_fields = schema_descr.columns();
-        let column_names = ["ra", "dec", "jd", "trajectory_id"];
-        let projection_indices: Vec<usize> = column_names
-            .iter()
-            .map(|name| {
-                all_fields
-                    .iter()
-                    .position(|f| f.name() == *name)
-                    .unwrap_or_else(|| panic!("Column '{}' not found in schema", name))
-            })
-            .collect();
-
-        let mask = ProjectionMask::leaves(schema_descr, projection_indices);
-
-        let batch_size = batch_size.unwrap_or(2048);
-        let reader = builder
-            .with_projection(mask)
-            .with_batch_size(batch_size)
-            .build()
-            .expect("Failed to build reader");
-
-        let mut trajectories: TrajectorySet = HashMap::default();
-        let mut mjd_time = Vec::with_capacity(batch_size);
-
-        for maybe_batch in reader {
-            let batch = maybe_batch.expect("Error reading batch");
-
-            let ra = batch
-                .column_by_name("ra")
-                .expect("Error getting ra column")
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .expect("Error downcasting ra column");
-
-            let dec = batch
-                .column_by_name("dec")
-                .expect("Error getting dec column")
-                .as_any()
-                .downcast_ref::<Float32Array>()
-                .expect("Error downcasting dec column");
-
-            let jd_time = batch
-                .column_by_name("jd")
-                .expect("Error getting jd column")
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .expect("Error downcasting jd column");
-
-            mjd_time.extend(
-                jd_time
-                    .into_iter()
-                    .map(|jd| jd.expect("Expected JD") - JDTOMJD),
-            );
-
-            let traj_id = batch
-                .column_by_name("trajectory_id")
-                .expect("Error getting trajectory_id column")
-                .as_any()
-                .downcast_ref::<UInt32Array>()
-                .expect("Error downcasting trajectory_id column");
-
-            for ((ra, dec), (mjd_time, traj_id)) in
-                ra.into_iter().zip(dec).zip(mjd_time.drain(..).zip(traj_id))
-            {
-                let obs = Observation::new(
-                    uint16_obs,
-                    ra.expect("Expected RA"),
-                    dec.expect("Expected DEC"),
-                    mjd_time,
-                );
-
-                let traj_id = traj_id.expect("Expected TrajID");
-                trajectories
-                    .entry(ObjectNumber::Int(traj_id))
-                    .or_insert_with(|| SmallVec::with_capacity(10))
-                    .push(obs);
-            }
-        }
-
-        trajectories
+        let mut trajs: TrajectorySet = HashMap::default();
+        parquet_to_trajset(&mut trajs, env_state, parquet, observer, batch_size);
+        trajs
     }
 
     /// Create a TrajectorySet from an 80 column file
