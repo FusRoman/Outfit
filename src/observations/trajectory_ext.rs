@@ -184,10 +184,26 @@ impl TrajectoryExt for TrajectorySet {
         self.insert(object_number, observations);
     }
 
+    /// Add a set of trajectories to a TrajectorySet from an ADES file
+    ///
+    /// Arguments
+    /// ---------
+    /// * `env_state`: a mutable reference to the Outfit instance
+    /// * `ades`: a path to an ADES file
     fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path) {
         parse_ades(env_state, ades, self);
     }
 
+    /// Create a TrajectorySet from an ADES file
+    ///
+    /// Arguments
+    /// ---------
+    /// * `env_state`: a mutable reference to the Outfit instance
+    /// * `ades`: a path to an ADES file
+    ///
+    /// Return
+    /// ------
+    /// * a TrajectorySet containing the observations from the ADES file
     fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self {
         let mut trajs: TrajectorySet = HashMap::default();
         parse_ades(env_state, ades, &mut trajs);
