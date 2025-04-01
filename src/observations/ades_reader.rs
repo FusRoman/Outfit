@@ -1,7 +1,7 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 use camino::Utf8Path;
-use hifitime::Epoch;
+use hifitime::{efmt::format, Epoch};
 use quick_xml::de::from_str;
 use serde::{Deserialize, Deserializer};
 use smallvec::SmallVec;
@@ -14,13 +14,15 @@ use crate::{
 use super::observations::Observation;
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Ades {
+pub struct StructuredAdes {
     #[serde(rename = "obsBlock")]
-    pub obs_blocks: Option<Vec<ObsBlock>>,
+    pub obs_blocks: Vec<ObsBlock>,
+}
 
+#[derive(Debug, Deserialize)]
+pub struct FlatAdes {
     #[serde(rename = "optical")]
-    pub flat_opticals: Option<Vec<OpticalObs>>,
+    pub opticals: Vec<OpticalObs>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,27 +99,69 @@ where
     Ok(time.to_mjd_utc_days())
 }
 
+fn parse_flat_ades(outfit: &mut Outfit, flat_ades: &FlatAdes, trajs: &mut TrajectorySet) {
+    for optical in &flat_ades.opticals {
+        let traj_id = optical.get_id();
+        let observer = outfit.uint16_from_mpc_code(&optical.stn);
+        let observation = optical.to_observation(observer);
+        trajs
+            .entry(traj_id)
+            .or_insert_with(|| SmallVec::with_capacity(10))
+            .push(observation);
+    }
+}
+
+fn parse_structured_ades(
+    outfit: &mut Outfit,
+    structured_ades: &StructuredAdes,
+    trajs: &mut TrajectorySet,
+) {
+    for obs_block in &structured_ades.obs_blocks {
+        let obs_context = &obs_block.obs_context;
+        let mpc_code = &obs_context.observatory.mpc_code;
+        let observer = outfit.uint16_from_mpc_code(mpc_code);
+
+        for optical in &obs_block.obs_data.opticals {
+            let observation = optical.to_observation(observer);
+            let traj_id = optical.get_id();
+            trajs
+                .entry(traj_id)
+                .or_insert_with(|| SmallVec::with_capacity(10))
+                .push(observation);
+        }
+    }
+}
+
+/// Parses an ADES file and populates the given `Outfit` and `TrajectorySet`.
+/// It first attempts to parse the file as a `FlatAdes`, and if that fails, it tries to parse it as a `StructuredAdes`.
+/// If both parsing attempts fail, it panics with an error message.
+/// If new observatory are found, they are added to the `Outfit` observatory set.
+///
+/// Arguments
+/// ---------
+/// * `outfit`: A mutable reference to the `Outfit` instance.
+/// * `ades`: A reference to the ADES file path.
+/// * `trajs`: A mutable reference to the `TrajectorySet` instance.
 pub(crate) fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path, trajs: &mut TrajectorySet) {
-    let xml = std::fs::read_to_string(ades).unwrap();
-    let ades: Ades = from_str(&xml).unwrap();
+    let xml = std::fs::read_to_string(ades)
+        .expect(format!("Failed to read ADES file: {}", ades.to_string()).as_str());
 
-    match ades.obs_blocks {
-        Some(obs_blocks) => {
-            for obs_block in obs_blocks {
-                let obs_context = obs_block.obs_context;
-                let mpc_code = obs_context.observatory.mpc_code;
-                let observer = outfit.uint16_from_mpc_code(&mpc_code);
-
-                for optical in obs_block.obs_data.opticals {
-                    let observation = optical.to_observation(observer);
-                    let traj_id = optical.get_id();
-                    trajs
-                        .entry(traj_id)
-                        .or_insert_with(|| SmallVec::with_capacity(10))
-                        .push(observation);
+        match from_str::<FlatAdes>(&xml) {
+            Ok(flat_ades) => {
+                parse_flat_ades(outfit, &flat_ades, trajs);
+            }
+            Err(flat_err) => {
+                match from_str::<StructuredAdes>(&xml) {
+                    Ok(structured_ades) => {
+                        parse_structured_ades(outfit, &structured_ades, trajs);
+                    }
+                    Err(structured_err) => {
+                        panic!(
+                            "Failed to parse ADES file:\n- Flat error: {}\n- Structured error: {}",
+                            flat_err, structured_err
+                        );
+                    }
                 }
             }
         }
-        None => {}
-    }
 }
