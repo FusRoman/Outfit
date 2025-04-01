@@ -35,6 +35,15 @@ impl Observation {
         }
     }
 
+    /// Get the observer from the observation
+    ///
+    /// Arguments
+    /// ---------
+    /// * `env_state`: a mutable reference to the Outfit instance
+    ///
+    /// Return
+    /// ------
+    /// * The observer
     pub fn get_observer<'a>(&self, env_state: &'a Outfit) -> &'a Observer {
         env_state.get_observer_from_uint16(self.observer)
     }
