@@ -1,8 +1,11 @@
-use std::fmt::Debug;
 use hifitime::ut1::Ut1Provider;
-use reqwest::{Client, IntoUrl};
-use serde::Serialize;
+use std::convert::TryFrom;
+use std::{fmt::Debug, time::Duration};
 use tokio::task;
+use ureq::{
+    http::{self, Uri},
+    Agent,
+};
 
 /// This object is passed to the various functions in the library
 /// to provide access to the state of the library
@@ -15,7 +18,7 @@ use tokio::task;
 ///     The key is the MPC code and the value is the observer
 #[derive(Debug)]
 pub struct OutfitEnv {
-    pub http_client: Client,
+    pub http_client: Agent,
     pub ut1_provider: Ut1Provider,
 }
 
@@ -30,8 +33,14 @@ impl OutfitEnv {
     ///     - The observatories are lazily loaded from the Minor Planet Center
     pub fn new() -> Self {
         let ut1_provider = OutfitEnv::initialize_ut1_provider();
+
+        let config = Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build();
+        let agent: Agent = config.into();
+
         OutfitEnv {
-            http_client: Client::new(),
+            http_client: agent,
             ut1_provider: ut1_provider,
         }
     }
@@ -45,38 +54,32 @@ impl OutfitEnv {
 
     pub(crate) fn get_from_url<U>(&self, url: U) -> String
     where
-        U: IntoUrl,
+        Uri: TryFrom<U>,
+        <Uri as TryFrom<U>>::Error: Into<http::Error>,
     {
-        task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.http_client
-                    .get(url)
-                    .send()
-                    .await
-                    .expect("Get request failed")
-                    .text()
-                    .await
-                    .expect("Failed to get text from get request")
-            })
-        })
+        self.http_client
+            .get(url)
+            .call()
+            .expect("Get request failed")
+            .body_mut()
+            .read_to_string()
+            .expect("Failed to read response body")
     }
 
-    pub(crate) fn post_from_url<U, T: Serialize + ?Sized>(&self, url: U, form: &T) -> String
+    pub(crate) fn post_from_url<T, I, K, V>(&self, url: T, form: I) -> String
     where
-        U: IntoUrl,
+        Uri: TryFrom<T>,
+        <Uri as TryFrom<T>>::Error: Into<http::Error>,
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
-        task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.http_client
-                    .post(url)
-                    .form(form)
-                    .send()
-                    .await
-                    .expect("Post request failed")
-                    .text()
-                    .await
-                    .expect("Failed to get text from post request")
-            })
-        })
+        self.http_client
+            .post(url)
+            .send_form(form)
+            .expect("Post request failed")
+            .body_mut()
+            .read_to_string()
+            .expect("Failed to read response body")
     }
 }

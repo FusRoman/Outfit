@@ -1,7 +1,7 @@
+use crate::outfit::Outfit;
 use itertools::Itertools;
 use nalgebra::Vector3;
 use regex::Regex;
-use crate::outfit::Outfit;
 
 /// Request the JPL Horizon API to get the position vector of Earth
 /// with respect to the Sun at different time.
@@ -52,7 +52,7 @@ VEC_TABLE=1
     );
     env_state.post_url(
         "https://ssd.jpl.nasa.gov/api/horizons_file.api",
-        &[("format", "text"), ("input", &requested_params)],
+        [("format", "text"), ("input", &requested_params)],
     )
 }
 

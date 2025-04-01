@@ -23,12 +23,11 @@ quick-xml = { version = "0.37.3", features = [
     "serialize",
 ], default-features = false }
 regex = { version = "1.11.1", default-features = false }
-reqwest = { version = "0.12", features = ["json"], default-features = false }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 smallvec = { version = "1.14.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 tokio = { version = "1", features = ["full"], default-features = false }
-ureq = { version = "3.0.10", default-features = false }
+ureq = { version = "3.0.10", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", default-features = false }

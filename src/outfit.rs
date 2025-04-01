@@ -1,8 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use ordered_float::NotNan;
-use reqwest::IntoUrl;
-use serde::Serialize;
+use ureq::http::{self, Uri};
 
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
@@ -27,9 +26,13 @@ impl Outfit {
         &self.env_state.ut1_provider
     }
 
-    pub(crate) fn post_url<U, T: Serialize + ?Sized>(&self, url: U, form: &T) -> String
+    pub(crate) fn post_url<T, I, K, V>(&self, url: T, form: I) -> String
     where
-        U: IntoUrl,
+        Uri: TryFrom<T>,
+        <Uri as TryFrom<T>>::Error: Into<http::Error>,
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
         self.env_state.post_from_url(url, form)
     }

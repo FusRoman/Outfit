@@ -1489,7 +1489,6 @@ dependencies = [
  "parquet",
  "quick-xml",
  "regex",
- "reqwest",
  "serde",
  "smallvec",
  "thiserror",
@@ -1782,7 +1781,9 @@ version = "0.23.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
 dependencies = [
+ "log",
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
@@ -2354,8 +2355,12 @@ dependencies = [
  "base64",
  "log",
  "percent-encoding",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-pki-types",
  "ureq-proto",
  "utf-8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -2534,6 +2539,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2210b291f7ea53617fbafcc4939f10914214ec15aace5ba62293a668f322c5c9"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
