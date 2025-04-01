@@ -7,7 +7,7 @@ use crate::{
     constants::{ObjectNumber, TrajectorySet, JDTOMJD},
     observations::observations::Observation,
 };
-use arrow::array::{Float32Array, Float64Array, UInt32Array};
+use arrow::array::{Float64Array, UInt32Array};
 use camino::Utf8Path;
 use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMask};
 
