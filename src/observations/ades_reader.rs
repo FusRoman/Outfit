@@ -14,62 +14,74 @@ use crate::{
 use super::observations::Observation;
 
 #[derive(Debug, Deserialize)]
-pub struct StructuredAdes {
+struct StructuredAdes {
     #[serde(rename = "obsBlock")]
-    pub obs_blocks: Vec<ObsBlock>,
+    obs_blocks: Vec<ObsBlock>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct FlatAdes {
+struct FlatAdes {
     #[serde(rename = "optical")]
-    pub opticals: Vec<OpticalObs>,
+    opticals: Vec<OpticalObs>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ObsBlock {
+struct ObsBlock {
     #[serde(rename = "obsContext")]
-    pub obs_context: ObsContext,
+    obs_context: ObsContext,
 
     #[serde(rename = "obsData")]
-    pub obs_data: ObsData,
+    obs_data: ObsData,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ObsContext {
-    pub observatory: Observatory,
+struct ObsContext {
+    observatory: Observatory,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Observatory {
+struct Observatory {
     #[serde(rename = "mpcCode")]
-    pub mpc_code: String,
+    mpc_code: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ObsData {
+struct ObsData {
     #[serde(rename = "optical")]
-    pub opticals: Vec<OpticalObs>,
+    opticals: Vec<OpticalObs>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OpticalObs {
+struct OpticalObs {
     #[serde(rename = "permID")]
-    pub perm_id: Option<String>,
+    perm_id: Option<String>,
     #[serde(rename = "provID")]
-    pub prov_id: Option<String>,
+    prov_id: Option<String>,
     #[serde(rename = "trkSub")]
-    pub trk_sub: Option<String>,
+    trk_sub: Option<String>,
 
     #[serde(rename = "obsTime", deserialize_with = "deserialize_mjd")]
-    pub obs_time: f64,
+    obs_time: f64,
 
-    pub ra: f32,
-    pub dec: f32,
+    ra: f32,
+    dec: f32,
 
-    pub stn: String,
+    stn: String,
 }
 
 impl OpticalObs {
+
+    /// Returns the trajectory ID for the optical observation.
+    /// It first checks for a `perm_id`, then a `prov_id`, and finally falls back to `trk_sub`.
+    /// If none of these are available, it panics with an error message.
+    /// The ID is parsed as a `u32` if possible, otherwise it is returned as a string.
+    ///
+    /// Return
+    /// ------
+    /// * An `ObjectNumber` representing the trajectory ID.
+    /// * If the ID is a valid `u32`, it is returned as `ObjectNumber::Int(id)`.
+    /// * If the ID is not a valid `u32`, it is returned as `ObjectNumber::String(id)`.
+    /// * If no ID is found, it panics with an error message.
     fn get_id(&self) -> ObjectNumber {
         let id = self
             .perm_id
@@ -88,7 +100,18 @@ impl OpticalObs {
     }
 }
 
-pub fn deserialize_mjd<'de, D>(deserializer: D) -> Result<f64, D::Error>
+/// Deserialize a date string in the format "YYYY-MM-DDTHH:MM:SS" into a floating-point number
+/// representing the Modified Julian Date (MJD).
+/// The date string is expected to be in UTC.
+///
+/// Arguments
+/// ---------
+/// * `deserializer`: The deserializer to use for the date string.
+///
+/// Return
+/// ------
+/// * A `Result` containing the parsed MJD as a `f64` or an error if the parsing fails.
+fn deserialize_mjd<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -99,6 +122,17 @@ where
     Ok(time.to_mjd_utc_days())
 }
 
+/// Parses a `FlatAdes` file and populates the given `Outfit` and `TrajectorySet`.
+/// It iterates through the optical observations, extracting the observer's MPC code and
+/// creating an `Observation` for each optical observation.
+/// The observations are then added to the `TrajectorySet` using the trajectory ID.
+/// If a new observatory is found, it is added to the `Outfit` observatory set.
+/// 
+/// Arguments
+/// ---------
+/// * `outfit`: A mutable reference to the `Outfit` instance.
+/// * `flat_ades`: A reference to the `FlatAdes` instance.
+/// * `trajs`: A mutable reference to the `TrajectorySet` instance.
 fn parse_flat_ades(outfit: &mut Outfit, flat_ades: &FlatAdes, trajs: &mut TrajectorySet) {
     for optical in &flat_ades.opticals {
         let traj_id = optical.get_id();
@@ -111,6 +145,17 @@ fn parse_flat_ades(outfit: &mut Outfit, flat_ades: &FlatAdes, trajs: &mut Trajec
     }
 }
 
+/// Parses a `StructuredAdes` file and populates the given `Outfit` and `TrajectorySet`.
+/// It iterates through the observation blocks, extracting the observer's MPC code and
+/// creating an `Observation` for each optical observation.
+/// The observations are then added to the `TrajectorySet` using the trajectory ID.
+/// If a new observatory is found, it is added to the `Outfit` observatory set.
+///
+/// Arguments
+/// ---------
+/// * `outfit`: A mutable reference to the `Outfit` instance.
+/// * `structured_ades`: A reference to the `StructuredAdes` instance.
+/// * `trajs`: A mutable reference to the `TrajectorySet` instance.
 fn parse_structured_ades(
     outfit: &mut Outfit,
     structured_ades: &StructuredAdes,
