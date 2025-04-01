@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use camino::Utf8Path;
-use hifitime::{efmt::format, Epoch};
+use hifitime::Epoch;
 use quick_xml::de::from_str;
 use serde::{Deserialize, Deserializer};
 use smallvec::SmallVec;
