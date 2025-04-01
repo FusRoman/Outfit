@@ -8,7 +8,7 @@ async fn test_80col_reader() {
     let mut env_state = Outfit::new();
 
     let path_file = Utf8Path::new("tests/data/33803.obs");
-    let mut traj_set = TrajectorySet::from_80col(&mut env_state, &path_file);
+    let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, &path_file);
 
     let obs_33803 = traj_set.get(&ObjectNumber::String("33803".into())).unwrap();
     assert_eq!(traj_set.len(), 1);
@@ -22,7 +22,7 @@ async fn test_80col_reader() {
     );
 
     let path_file = Utf8Path::new("tests/data/8467.obs");
-    traj_set.add_80col(&mut env_state, &path_file);
+    traj_set.add_from_80col(&mut env_state, &path_file);
     assert_eq!(traj_set.len(), 2);
     let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();
     assert_eq!(obs_8467.len(), 3748);
@@ -35,7 +35,7 @@ async fn test_80col_reader() {
     );
 
     let path_file = Utf8Path::new("tests/data/K25D50B.obs");
-    traj_set.add_80col(&mut env_state, &path_file);
+    traj_set.add_from_80col(&mut env_state, &path_file);
     assert_eq!(traj_set.len(), 3);
     let obs_k25 = traj_set
         .get(&ObjectNumber::String("K25D50B".into()))
