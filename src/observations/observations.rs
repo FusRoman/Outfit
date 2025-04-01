@@ -26,6 +26,19 @@ pub struct Observation {
 }
 
 impl Observation {
+
+    /// Create a new observation
+    ///
+    /// Arguments
+    /// ---------
+    /// * `observer`: the observer
+    /// * `ra`: the right ascension of the observation
+    /// * `dec`: the declination of the observation
+    /// * `time`: the time of the observation in MJD
+    ///
+    /// Return
+    /// ------
+    /// * a new Observation struct
     pub fn new(observer: u16, ra: Degree, dec: Degree, time: MJD) -> Self {
         Observation {
             observer,
