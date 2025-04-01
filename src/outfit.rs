@@ -193,8 +193,8 @@ mod outfit_struct_test {
 
     use crate::{observers::observers::Observer, outfit::Outfit};
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_observer_from_mpc_code() {
+    #[test]
+    fn test_observer_from_mpc_code() {
         let outfit = Outfit::new();
 
         let observer = outfit.get_observer_from_mpc_code(&"000".into());

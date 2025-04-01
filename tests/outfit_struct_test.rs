@@ -1,7 +1,7 @@
 use outfit::outfit::Outfit;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_outfit_observer_management() {
+#[test]
+fn test_outfit_observer_management() {
     let mut outfit = Outfit::new();
 
     let obs1 = outfit.new_observer(51.58206, -73.06644, 100., Some("Test Observer 1".into()));

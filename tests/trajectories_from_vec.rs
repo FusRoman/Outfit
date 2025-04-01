@@ -2,8 +2,8 @@ use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_trajectories_from_vec() {
+#[test]
+fn test_trajectories_from_vec() {
     let mut env_state = Outfit::new();
     let object_number = "33803";
     let ra = vec![359.7403333333333];

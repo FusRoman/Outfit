@@ -1,7 +1,6 @@
 use hifitime::ut1::Ut1Provider;
 use std::convert::TryFrom;
 use std::{fmt::Debug, time::Duration};
-use tokio::task;
 use ureq::{
     http::{self, Uri},
     Agent,
@@ -46,10 +45,8 @@ impl OutfitEnv {
     }
 
     fn initialize_ut1_provider() -> Ut1Provider {
-        task::block_in_place(|| {
-            Ut1Provider::download_short_from_jpl()
-                .expect("Download of the JPL short time scale UT1 data failed")
-        })
+        Ut1Provider::download_short_from_jpl()
+            .expect("Download of the JPL short time scale UT1 data failed")
     }
 
     pub(crate) fn get_from_url<U>(&self, url: U) -> String

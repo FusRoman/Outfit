@@ -162,8 +162,8 @@ mod earth_pos_tests {
         assert_eq!(jd_list, vec![2459400.0329166665, 2460672.5746296295])
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_jplvector_request() {
+    #[test]
+    fn test_jplvector_request() {
         let state = Outfit::new();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let mjd_list = date_to_mjd(&date_list);
@@ -211,8 +211,8 @@ $$EOE
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_get_earth_pos() {
+    #[test]
+    fn test_get_earth_pos() {
         let state = Outfit::new();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_mjd(&date_list);
@@ -238,8 +238,8 @@ $$EOE
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_earth_pos_with_mjd() {
+    #[test]
+    fn test_earth_pos_with_mjd() {
         let state = Outfit::new();
         let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
         let earth_vector = get_earth_position(&test_mjd, &state);

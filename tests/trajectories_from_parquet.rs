@@ -3,8 +3,8 @@ use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_load_traj_from_parquet() {
+#[test]
+fn test_load_traj_from_parquet() {
     let mut env_state = Outfit::new();
     let path_file = Utf8Path::new("tests/data/trajectories.parquet");
 
@@ -15,8 +15,8 @@ async fn test_load_traj_from_parquet() {
     assert_eq!(traj_set.get(&ObjectNumber::Int(1)).unwrap().len(), 3);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_large_parquet() {
+#[test]
+fn test_large_parquet() {
     let mut env_state = Outfit::new();
     let path_file = Utf8Path::new("tests/data/test_from_fink.parquet");
 
