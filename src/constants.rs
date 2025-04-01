@@ -31,8 +31,7 @@ pub const VLIGHT: f64 = 2.99792458e5;
 pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;
 
 // type def
-pub type Degree32 = f32;
-pub type Degree64 = f64;
+pub type Degree = f64;
 pub type Kilometer = f64;
 /// a mpc code observatory made of three characters
 pub type MpcCode = String;

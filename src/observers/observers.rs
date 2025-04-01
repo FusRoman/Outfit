@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 use crate::constants::ERAU;
 
 use super::super::jpl_request::observer_pos::geodetic_to_parallax;
-use crate::constants::{Degree64, Kilometer};
+use crate::constants::{Degree, Kilometer};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Observer {
@@ -32,8 +32,8 @@ impl Observer {
     /// ------
     /// * Observer object
     pub(crate) fn new(
-        longitude: Degree64,
-        latitude: Degree64,
+        longitude: Degree,
+        latitude: Degree,
         elevation: Kilometer,
         name: Option<String>,
     ) -> Observer {

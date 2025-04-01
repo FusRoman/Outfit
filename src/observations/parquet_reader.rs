@@ -74,14 +74,14 @@ pub (crate) fn parquet_to_trajset(
             .column_by_name("ra")
             .expect("Error getting ra column")
             .as_any()
-            .downcast_ref::<Float32Array>()
+            .downcast_ref::<Float64Array>()
             .expect("Error downcasting ra column");
 
         let dec = batch
             .column_by_name("dec")
             .expect("Error getting dec column")
             .as_any()
-            .downcast_ref::<Float32Array>()
+            .downcast_ref::<Float64Array>()
             .expect("Error downcasting dec column");
 
         let jd_time = batch

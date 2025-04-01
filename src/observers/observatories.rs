@@ -1,6 +1,6 @@
 use super::bimap::BiMap;
 use super::observers::Observer;
-use crate::constants::{Degree64, Kilometer, MpcCodeObs};
+use crate::constants::{Degree, Kilometer, MpcCodeObs};
 use std::sync::{Arc, OnceLock};
 
 #[derive(Debug)]
@@ -19,8 +19,8 @@ impl Observatories {
 
     pub(crate) fn add_observer(
         &mut self,
-        longitude: Degree64,
-        latitude: Degree64,
+        longitude: Degree,
+        latitude: Degree,
         elevation: Kilometer,
         name: Option<String>,
     ) -> Arc<Observer> {

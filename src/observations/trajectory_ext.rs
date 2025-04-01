@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::constants::{Degree32, ObjectNumber, Observations, TrajectorySet, MJD};
+use crate::constants::{Degree, ObjectNumber, Observations, TrajectorySet, MJD};
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
@@ -19,8 +19,8 @@ pub trait TrajectoryExt {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree32>,
-        dec: &Vec<Degree32>,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self;
@@ -28,8 +28,8 @@ pub trait TrajectoryExt {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree32>,
-        dec: &Vec<Degree32>,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     );
@@ -70,8 +70,8 @@ impl TrajectoryExt for TrajectorySet {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree32>,
-        dec: &Vec<Degree32>,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self {
@@ -95,8 +95,8 @@ impl TrajectoryExt for TrajectorySet {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree32>,
-        dec: &Vec<Degree32>,
+        ra: &Vec<Degree>,
+        dec: &Vec<Degree>,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) {

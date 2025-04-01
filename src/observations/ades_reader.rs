@@ -63,8 +63,8 @@ struct OpticalObs {
     #[serde(rename = "obsTime", deserialize_with = "deserialize_mjd")]
     obs_time: f64,
 
-    ra: f32,
-    dec: f32,
+    ra: f64,
+    dec: f64,
 
     stn: String,
 }
