@@ -34,7 +34,7 @@ impl Observation {
     /// * `observer`: the observer
     /// * `ra`: the right ascension of the observation
     /// * `dec`: the declination of the observation
-    /// * `time`: the time of the observation in MJD
+    /// * `time`: the time of the observation
     ///
     /// Return
     /// ------
