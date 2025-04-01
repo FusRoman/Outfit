@@ -97,9 +97,7 @@ where
     Ok(time.to_mjd_utc_days())
 }
 
-pub fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path) -> TrajectorySet {
-    let mut trajectories: TrajectorySet = HashMap::default();
-
+pub(crate) fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path, trajs: &mut TrajectorySet) {
     let xml = std::fs::read_to_string(ades).unwrap();
     let ades: Ades = from_str(&xml).unwrap();
 
@@ -113,7 +111,7 @@ pub fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path) -> TrajectorySet {
                 for optical in obs_block.obs_data.opticals {
                     let observation = optical.to_observation(observer);
                     let traj_id = optical.get_id();
-                    trajectories
+                    trajs
                         .entry(traj_id)
                         .or_insert_with(|| SmallVec::with_capacity(10))
                         .push(observation);
@@ -122,6 +120,4 @@ pub fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path) -> TrajectorySet {
         }
         None => {}
     }
-
-    trajectories
 }

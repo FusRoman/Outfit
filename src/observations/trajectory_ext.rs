@@ -5,6 +5,7 @@ use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
 
+use super::ades_reader::parse_ades;
 use super::observations::{extract_80col, observation_from_vec};
 use super::parquet_reader::parquet_to_trajset;
 
@@ -113,7 +114,7 @@ impl TrajectoryExt for TrajectorySet {
     /// * `parquet`: a path to a parquet file
     /// * `observer`: the observer
     /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
-    /// 
+    ///
     /// Return
     /// ------
     /// * a TrajectorySet containing the new observations is added to the existing TrajectorySet
@@ -184,10 +185,12 @@ impl TrajectoryExt for TrajectorySet {
     }
 
     fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path) {
-        todo!();
+        parse_ades(env_state, ades, self);
     }
 
     fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self {
-        todo!();
+        let mut trajs: TrajectorySet = HashMap::default();
+        parse_ades(env_state, ades, &mut trajs);
+        trajs
     }
 }
