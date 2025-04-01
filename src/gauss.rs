@@ -4,12 +4,12 @@ use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
 use crate::observers::observers::Observer;
+use crate::outfit::Outfit;
 
 use super::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use aberth::aberth;
 
-use super::env_state::OutfitState;
 use super::jpl_request::observer_pos::helio_obs_pos;
 use super::kepler::velocity_correction;
 use super::keplerian_orbit::KeplerianOrbit;
@@ -71,19 +71,19 @@ impl fmt::Display for SpuriousRoot {
 impl GaussObs {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
-    pub async fn new(
+    pub fn new(
         ra: Vector3<f64>,
         dec: Vector3<f64>,
         mjd_time: Vector3<f64>,
         observer: &Observer,
     ) -> GaussObs {
-        let state = OutfitState::new().await;
+        let state = Outfit::new();
 
         GaussObs {
             ra: ra,
             dec: dec,
             time: mjd_time,
-            observer_position: helio_obs_pos(&observer, &mjd_time, &state).await,
+            observer_position: helio_obs_pos(&observer, &mjd_time, &state),
         }
     }
 

@@ -1,92 +1,21 @@
 use nalgebra::Vector3;
-use std::collections::HashMap;
+use ordered_float::NotNan;
 
-use crate::{constants::ERAU, env_state::OutfitState};
+use crate::constants::ERAU;
 
 use super::super::jpl_request::observer_pos::geodetic_to_parallax;
-use crate::constants::{Degree, Kilometer, MpcCodeObs};
+use crate::constants::{Degree, Kilometer};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Observer {
     // in degrees east of Greenwich
-    pub longitude: Degree,
+    pub longitude: ordered_float::NotNan<f64>,
     // phi' is the geocentric latitude and rho is the geocentric distance in earth radii
-    // rho cos phi
-    pub rho_cos_phi: Degree,
-    // rho sin phi
-    pub rho_sin_phi: Kilometer,
+    // rho cos phi in degrees
+    pub rho_cos_phi: ordered_float::NotNan<f64>,
+    // rho sin phi in kilometers
+    pub rho_sin_phi: ordered_float::NotNan<f64>,
     pub name: Option<String>,
-}
-
-fn parse_f32(
-    s: &str,
-    slice: std::ops::Range<usize>,
-    code: &str,
-) -> Result<f32, std::num::ParseFloatError> {
-    s.get(slice)
-        .expect(format!("Failed to parse float for observer code: {code}").as_str())
-        .trim()
-        .parse()
-}
-
-fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
-    let name = remain
-        .get(27..)
-        .expect(format!("Failed to parse name value for code: {code}").as_str());
-
-    let Some(longitude) = parse_f32(remain, 1..10, code).ok() else {
-        return (0.0, 0.0, 0.0, name.to_string());
-    };
-
-    let Some(cos) = parse_f32(remain, 10..18, code).ok() else {
-        return (longitude, 0.0, 0.0, name.to_string());
-    };
-
-    let Some(sin) = parse_f32(remain, 18..27, code).ok() else {
-        return (longitude, cos, 0.0, name.to_string());
-    };
-    (longitude, cos, sin, name.to_string())
-}
-
-pub(crate) async fn init_observatories(state: &OutfitState) -> MpcCodeObs {
-    let mut observatories: HashMap<String, Observer> = HashMap::new();
-
-    let mpc_code_response = state
-        .http_client
-        .get("https://minorplanetcenter.net/iau/lists/ObsCodes.html")
-        .send()
-        .await
-        .expect("Request to get mpc code observatory failed")
-        .text()
-        .await
-        .expect("Failed to get text from mpc code request");
-
-    let mpc_code_csv = mpc_code_response
-        .trim()
-        .strip_prefix("<pre>")
-        .and_then(|s| s.strip_suffix("</pre>"))
-        .expect("Failed to strip pre tags");
-
-    for lines in mpc_code_csv.lines().skip(2) {
-        let line = lines.trim();
-
-        if let Some((code, remain)) = line.split_at_checked(3) {
-            let remain = remain.trim_end();
-
-            let (longitude, cos, sin, name) = parse_remain(remain, code);
-
-            observatories.insert(
-                code.to_string(),
-                Observer {
-                    longitude: longitude as f64,
-                    rho_cos_phi: cos as f64,
-                    rho_sin_phi: sin as f64,
-                    name: Some(name),
-                },
-            );
-        };
-    }
-    observatories
 }
 
 impl Observer {
@@ -102,7 +31,7 @@ impl Observer {
     /// Return
     /// ------
     /// * Observer object
-    pub fn new(
+    pub(crate) fn new(
         longitude: Degree,
         latitude: Degree,
         elevation: Kilometer,
@@ -110,18 +39,11 @@ impl Observer {
     ) -> Observer {
         let (rho_cos_phi, rho_sin_phi) = geodetic_to_parallax(latitude, elevation);
         Observer {
-            longitude,
-            rho_cos_phi,
-            rho_sin_phi,
+            longitude: NotNan::try_from(longitude).expect("Longitude cannot be NaN"),
+            rho_cos_phi: NotNan::try_from(rho_cos_phi).expect("Longitude cannot be NaN"),
+            rho_sin_phi: NotNan::try_from(rho_sin_phi as f64).expect("Longitude cannot be NaN"),
             name,
         }
-    }
-
-    pub fn from_mpc_code<'a>(mpc_code: &str, state: &'a OutfitState) -> &'a Observer {
-        let observatories = state.get_observatories();
-        observatories
-            .get(mpc_code)
-            .expect("Failed to get observatory from mpc code")
     }
 
     /// Get the fixed position of an observatory using its geographic coordinates
@@ -140,9 +62,9 @@ impl Observer {
         let lon_radians = self.longitude.to_radians();
 
         Vector3::new(
-            ERAU * self.rho_cos_phi * lon_radians.cos(),
-            ERAU * self.rho_cos_phi * lon_radians.sin(),
-            ERAU * self.rho_sin_phi,
+            ERAU * self.rho_cos_phi.into_inner() * lon_radians.cos(),
+            ERAU * self.rho_cos_phi.into_inner() * lon_radians.sin(),
+            ERAU * self.rho_sin_phi.into_inner(),
         )
     }
 }
@@ -185,37 +107,5 @@ mod observer_test {
                 0.000014988110430544328
             )
         )
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_observer_from_mpc_code() {
-        let state = OutfitState::new().await;
-
-        let observer = Observer::from_mpc_code("000", &state);
-        let test = Observer {
-            longitude: 0.,
-            rho_cos_phi: 0.6241099834442139,
-            rho_sin_phi: 0.7787299752235413,
-            name: Some("Greenwich".to_string()),
-        };
-        assert_eq!(observer, &test);
-
-        let observer = Observer::from_mpc_code("C51", &state);
-        let test = Observer {
-            longitude: 0.,
-            rho_cos_phi: 0.,
-            rho_sin_phi: 0.,
-            name: Some("WISE".to_string()),
-        };
-        assert_eq!(observer, &test);
-
-        let observer = Observer::from_mpc_code("Z50", &state);
-        let test = Observer {
-            longitude: 355.2843017578125,
-            rho_cos_phi: 0.7440530061721802,
-            rho_sin_phi: 0.666068971157074,
-            name: Some("Mazariegos".to_string()),
-        };
-        assert_eq!(observer, &test);
     }
 }
