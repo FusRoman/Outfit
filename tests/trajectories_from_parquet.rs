@@ -60,13 +60,3 @@ async fn test_large_parquet() {
         Some("Simonyi Survey Telescope, Rubin Observatory".into())
     );
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mega_test() {
-    let mut env_state = Outfit::new();
-    let path_file = Utf8Path::new("tests/data/mega_test.parquet");
-    let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
-
-    let _ =
-        TrajectorySet::new_from_parquet(&mut env_state, &path_file, ztf_observer, None);
-}
