@@ -5,6 +5,8 @@ use std::sync::Arc;
 use ahash::RandomState;
 use smallvec::SmallVec;
 
+use crate::initial_orbit_determination::gauss::GaussObs;
+
 pub const EPS: f64 = 1e-6;
 pub const T2000: f64 = 51544.5; // J2000 Epoch for MJD
 pub const JDTOMJD: f64 = 2400000.5; // Julian Date -> Modified Julian Date conversion factor
@@ -55,3 +57,5 @@ pub type Observations = SmallVec<[Observation; 6]>;
 /// The key is the object number
 /// The value is a vector of observations associated to this object
 pub type TrajectorySet = HashMap<ObjectNumber, Observations, RandomState>;
+
+pub type Triplets<'a> = HashMap<ObjectNumber, Vec<GaussObs<'a>>>;

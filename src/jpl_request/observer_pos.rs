@@ -24,13 +24,14 @@ use hifitime::ut1::Ut1Provider;
 /// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
 pub fn helio_obs_pos(
-    observer: &Observer,
+    observer: &Vector3<&Observer>,
     mjd_tt: &Vector3<f64>,
     state: &Outfit,
 ) -> Matrix3<f64> {
     let position_obs_time = mjd_tt
         .iter()
-        .map(|mjd_el| pvobs(observer, *mjd_el, &state.get_ut1_provider()).0)
+        .zip(observer.iter())
+        .map(|(mjd_el, obs)| pvobs(obs, *mjd_el, &state.get_ut1_provider()).0)
         .collect::<Vec<Vector3<f64>>>();
 
     let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
@@ -268,6 +269,8 @@ mod observer_pos_tests {
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
+        // Create a vector of observers
+        let pan_starrs = Vector3::new(&pan_starrs, &pan_starrs, &pan_starrs);
         let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state);
 
         assert_eq!(
