@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 aberth = { version = "0.4.1", default-features = false }
 ahash = { version = "0.8.11", default-features = false }
-arrow = { version = "54.3.0", default-features = false }
+arrow-array = { version = "54.3.1", default-features = false }
 camino = { version = "1.1.9", default-features = false }
 csv = { version = "1.3.1", default-features = false }
 hifitime = { version = "4.0.2", default-features = false, features = ["ut1"] }
