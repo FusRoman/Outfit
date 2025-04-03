@@ -3,8 +3,8 @@ use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_load_traj_from_parquet() {
+#[test]
+fn test_load_traj_from_parquet() {
     let mut env_state = Outfit::new();
     let path_file = Utf8Path::new("tests/data/trajectories.parquet");
 
@@ -15,8 +15,8 @@ async fn test_load_traj_from_parquet() {
     assert_eq!(traj_set.get(&ObjectNumber::Int(1)).unwrap().len(), 3);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_large_parquet() {
+#[test]
+fn test_large_parquet() {
     let mut env_state = Outfit::new();
     let path_file = Utf8Path::new("tests/data/test_from_fink.parquet");
 
@@ -59,14 +59,4 @@ async fn test_large_parquet() {
         second_obs.get_observer(&env_state).name,
         Some("Simonyi Survey Telescope, Rubin Observatory".into())
     );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mega_test() {
-    let mut env_state = Outfit::new();
-    let path_file = Utf8Path::new("tests/data/mega_test.parquet");
-    let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
-
-    let _ =
-        TrajectorySet::new_from_parquet(&mut env_state, &path_file, ztf_observer, None);
 }

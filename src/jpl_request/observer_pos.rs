@@ -230,8 +230,8 @@ mod observer_pos_tests {
         assert_eq!(res_gmst, 4.894961212789145);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn pvobs_test() {
+    #[test]
+    fn pvobs_test() {
         let state = Outfit::new();
         let tmjd = 57028.479297592596;
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
@@ -259,8 +259,8 @@ mod observer_pos_tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_helio_pos_obs() {
+    #[test]
+    fn test_helio_pos_obs() {
         let state = Outfit::new();
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 

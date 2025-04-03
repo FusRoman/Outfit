@@ -3,8 +3,8 @@ use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_80col_reader() {
+#[test]
+fn test_80col_reader() {
     let mut env_state = Outfit::new();
 
     let path_file = Utf8Path::new("tests/data/33803.obs");

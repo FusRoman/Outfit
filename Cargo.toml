@@ -4,27 +4,32 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aberth = "0.4.1"
-ahash = "0.8.11"
-arrow = "54.3.0"
-camino = "1.1.9"
-csv = "1.3.1"
-hifitime = { version = "4.0.2", features = ["ut1"] }
-itertools = "0.14.0"
-nalgebra = "0.33.2"
-ordered-float = "5.0.0"
-parquet = "54.2.1"
-quick-xml = { version = "0.37.3", features = ["serialize"] }
-regex = "1.11.1"
-reqwest = { version = "0.12", features = ["json"], default-features = false }
-serde = { version = "1.0", features = ["derive"] }
-smallvec = "1.14.0"
-thiserror = "2.0.12"
-tokio = { version = "1", features = ["full"] }
-ureq = "3.0.10"
+aberth = { version = "0.4.1", default-features = false }
+ahash = { version = "0.8.11", default-features = false }
+arrow = { version = "54.3.0", default-features = false }
+camino = { version = "1.1.9", default-features = false }
+csv = { version = "1.3.1", default-features = false }
+hifitime = { version = "4.0.2", default-features = false, features = ["ut1"] }
+itertools = { version = "0.14.0", default-features = false, features = [
+    "use_std",
+] }
+nalgebra = { version = "0.33.2" }
+ordered-float = { version = "5.0.0", default-features = false }
+parquet = { version = "54.2.1", default-features = false, features = [
+    "arrow",
+    "snap",
+] }
+quick-xml = { version = "0.37.3", features = [
+    "serialize",
+], default-features = false }
+regex = { version = "1.11.1", default-features = false }
+serde = { version = "1.0", features = ["derive"], default-features = false }
+smallvec = { version = "1.14.0", default-features = false }
+thiserror = { version = "2.0.12", default-features = false }
+ureq = { version = "3.0.10", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.5.1", default-features = false }
 
 [[bench]]
 name = "load_parquet"
