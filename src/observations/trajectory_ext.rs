@@ -22,7 +22,7 @@ use super::parquet_reader::parquet_to_trajset;
 /// * `add_from_parquet`: Add observations to a TrajectorySet from a parquet file.
 /// * `new_from_ades`: Create a TrajectorySet from an ADES file.
 /// * `add_from_ades`: Add observations to a TrajectorySet from an ADES file.
-/// 
+///
 /// Note
 /// ----
 /// * Warning: No check is done for duplicated observations for every add method.
@@ -31,16 +31,16 @@ pub trait TrajectoryExt {
     /// Create a TrajectorySet from an 80 column file
     /// The trajectory are added in place in the TrajectorySet.
     /// If a trajectory id already exists, the observations are added to the existing trajectory.
-    /// 
+    ///
     /// Arguments
     /// ---------
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `colfile`: a path to an 80 column file
-    /// 
+    ///
     /// Return
     /// ------
     /// * a TrajectorySet containing the observations from the 80 column file
-    /// 
+    ///
     /// Note
     /// ----
     /// * The 80 column file must respect the MPC format.
@@ -50,12 +50,12 @@ pub trait TrajectoryExt {
     /// Add a set of trajectories from an 80 column file to a TrajectorySet
     /// The trajectory are added in place in the TrajectorySet.
     /// If a trajectory id already exists, the observations are added to the existing trajectory.
-    /// 
+    ///
     /// Arguments
     /// ---------
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `colfile`: a path to an 80 column file
-    /// 
+    ///
     /// Note
     /// ----
     /// * The 80 column file must respect the MPC format.
@@ -156,7 +156,7 @@ pub trait TrajectoryExt {
     /// ---------
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `ades`: a path to an ADES file
-    /// 
+    ///
     /// Note
     /// ----
     /// * The ADES file must respect the MPC format.
@@ -173,7 +173,7 @@ pub trait TrajectoryExt {
     /// Return
     /// ------
     /// * a TrajectorySet containing the observations from the ADES file
-    /// 
+    ///
     /// Note
     /// ----
     /// * The ADES file must respect the MPC format.

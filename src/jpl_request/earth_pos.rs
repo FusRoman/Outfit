@@ -31,7 +31,7 @@ fn jd_tlist(mjd_list: &Vec<f64>) -> String {
 /// Return
 /// ------
 /// * The JPL API raw response
-fn request_vector(mjd_list: &Vec<f64>, env_state: &Outfit) -> String {
+pub (crate) fn request_vector(mjd_list: &Vec<f64>, env_state: &Outfit) -> String {
     let requested_params = format!(
         "
 !$$SOF
