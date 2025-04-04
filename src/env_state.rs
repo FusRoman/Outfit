@@ -1,6 +1,9 @@
 use hifitime::ut1::Ut1Provider;
 use std::convert::TryFrom;
+use std::io;
 use std::{fmt::Debug, time::Duration};
+use ureq::http::Response;
+use ureq::Body;
 use ureq::{
     http::{self, Uri},
     Agent,

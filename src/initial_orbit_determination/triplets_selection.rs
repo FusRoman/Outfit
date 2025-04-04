@@ -3,20 +3,16 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use nalgebra::Vector3;
 
-use crate::{
-    constants::{TrajectorySet, Triplets},
-    outfit::Outfit,
-};
+use crate::constants::{TrajectorySet, Triplets};
 
 use super::gauss::GaussObs;
 
-fn triplets_selection<'a>(
-    trajectory_set: &'a mut TrajectorySet,
-    env_state: &'a mut Outfit,
+fn triplets_selection(
+    trajectory_set: &mut TrajectorySet,
     dt_min: Option<f64>,
     dt_max: Option<f64>,
     max_triplet: Option<u32>,
-) -> Triplets<'a> {
+) -> Triplets {
     let mut result = HashMap::default();
 
     for (object_number, observations) in trajectory_set {
@@ -41,11 +37,6 @@ fn triplets_selection<'a>(
                     Vector3::new(o1.ra, o2.ra, o3.ra),
                     Vector3::new(o1.dec, o2.dec, o3.dec),
                     Vector3::new(o1.time, o2.time, o3.time),
-                    [
-                        o1.get_observer(env_state),
-                        o2.get_observer(env_state),
-                        o3.get_observer(env_state),
-                    ],
                 );
                 triplets.push(gauss);
                 nb_triplets += 1;
@@ -77,13 +68,7 @@ mod trajectory_ext_test {
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/8467.obs"));
 
-        let triplets = triplets_selection(
-            &mut traj_set,
-            &mut env_state,
-            Some(0.03),
-            Some(150.),
-            Some(10),
-        );
+        let triplets = triplets_selection(&mut traj_set, Some(0.03), Some(150.), Some(10));
 
         assert_eq!(
             triplets

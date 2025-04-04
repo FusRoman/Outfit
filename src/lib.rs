@@ -1,6 +1,5 @@
 pub mod constants;
 pub mod env_state;
-pub mod jpl_request;
 mod kepler;
 mod keplerian_orbit;
 pub mod observations;
@@ -11,3 +10,4 @@ pub mod time;
 mod conversion;
 pub mod outfit;
 mod initial_orbit_determination;
+mod jpl_ephem;

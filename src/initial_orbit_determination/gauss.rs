@@ -1,22 +1,16 @@
 use aberth::StopReason;
 use core::fmt;
-use nalgebra::Matrix;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
-use crate::observers::observers::Observer;
-use crate::outfit::Outfit;
-
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
-use aberth::aberth;
-
-use crate::jpl_request::observer_pos::helio_obs_pos;
 use crate::kepler::velocity_correction;
 use crate::keplerian_orbit::KeplerianOrbit;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
 use crate::ref_system::rotpn;
+use aberth::aberth;
 
 /// Gauss struct data
 /// ra is right ascension in degree
@@ -25,11 +19,10 @@ use crate::ref_system::rotpn;
 /// observer_position is the position of the observer from where the observation have been taken.
 /// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
 #[derive(Debug)]
-pub struct GaussObs<'a> {
+pub struct GaussObs {
     ra: Vector3<f64>,
     dec: Vector3<f64>,
-    pub(crate) time: Vector3<f64>,
-    observer: [&'a Observer; 3],
+    time: Vector3<f64>,
     observer_position: Matrix3<f64>,
 }
 
@@ -71,20 +64,14 @@ impl fmt::Display for SpuriousRoot {
     }
 }
 
-impl<'a> GaussObs<'a> {
+impl GaussObs {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
-    pub fn new(
-        ra: Vector3<f64>,
-        dec: Vector3<f64>,
-        mjd_time: Vector3<f64>,
-        observers: [&'a Observer; 3],
-    ) -> GaussObs {
+    pub fn new(ra: Vector3<f64>, dec: Vector3<f64>, mjd_time: Vector3<f64>) -> GaussObs {
         GaussObs {
             ra: ra,
             dec: dec,
             time: mjd_time,
-            observer: observers,
             observer_position: Matrix3::zeros(),
         }
     }
@@ -478,12 +465,10 @@ mod gauss_test {
 
     #[test]
     fn test_gauss_prelim() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::zeros(),
         };
 
@@ -546,12 +531,10 @@ mod gauss_test {
 
     #[test]
     fn test_coeff_8poly() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,
@@ -578,12 +561,10 @@ mod gauss_test {
 
     #[test]
     fn test_solving_polynom() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::zeros(),
             dec: Vector3::zeros(),
             time: Vector3::zeros(),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::zeros(),
         };
 
@@ -609,12 +590,10 @@ mod gauss_test {
 
     #[test]
     fn test_asteroid_position() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,
@@ -678,12 +657,10 @@ mod gauss_test {
 
     #[test]
     fn test_gibbs_correction() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::zeros(),
         };
         let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
@@ -715,12 +692,10 @@ mod gauss_test {
 
     #[test]
     fn test_solve_orbit() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,
@@ -751,12 +726,10 @@ mod gauss_test {
 
     #[test]
     fn test_orbit_correction() {
-        let observer = Observer::new(0., 0., 0., Some("toto".to_string()));
         let gauss = GaussObs {
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
-            observer: [&observer, &observer, &observer],
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.86893516436949503,

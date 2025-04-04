@@ -1,11 +1,11 @@
 use crate::outfit::Outfit;
 
 use super::super::observers::observers::Observer;
+use super::earth_position::get_earth_position;
 use nalgebra::{Matrix3, Vector3};
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
-use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
 use hifitime::ut1::Ut1Provider;
 
@@ -23,15 +23,14 @@ use hifitime::ut1::Ut1Provider;
 /// ------
 /// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
-pub fn helio_obs_pos(
-    observer: &Vector3<&Observer>,
+pub(in crate::observers) fn helio_obs_pos(
+    observer: &Observer,
     mjd_tt: &Vector3<f64>,
     state: &Outfit,
 ) -> Matrix3<f64> {
     let position_obs_time = mjd_tt
         .iter()
-        .zip(observer.iter())
-        .map(|(mjd_el, obs)| pvobs(obs, *mjd_el, &state.get_ut1_provider()).0)
+        .map(|mjd_el| pvobs(observer, *mjd_el, &state.get_ut1_provider()).0)
         .collect::<Vec<Vector3<f64>>>();
 
     let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
@@ -67,7 +66,7 @@ pub fn helio_obs_pos(
 /// ------
 /// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
 /// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
-fn pvobs(
+pub (in crate::observers) fn pvobs(
     observer: &Observer,
     tmjd: f64,
     ut1_provider: &Ut1Provider,
@@ -270,7 +269,6 @@ mod observer_pos_tests {
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
         // Create a vector of observers
-        let pan_starrs = Vector3::new(&pan_starrs, &pan_starrs, &pan_starrs);
         let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state);
 
         assert_eq!(
