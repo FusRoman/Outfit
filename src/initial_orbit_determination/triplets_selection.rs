@@ -4,8 +4,7 @@ use itertools::Itertools;
 use nalgebra::Vector3;
 
 use crate::{
-    constants::{ObjectNumber, TrajectorySet, Triplets},
-    env_state,
+    constants::{TrajectorySet, Triplets},
     outfit::Outfit,
 };
 
@@ -62,21 +61,13 @@ fn triplets_selection<'a>(
     result
 }
 
-fn helio_pos_for_triplets(triplets: &mut Triplets, env_state: &mut Outfit) {
-    let mjd_list: Vec<f64> = triplets
-        .iter()
-        .flat_map(|(_, triplet)| {
-            triplet.iter().map(|obs| obs.time).collect::<Vec<f64>>()
-        })
-        .collect();
-}
-
-
 #[cfg(test)]
 mod trajectory_ext_test {
     use camino::Utf8Path;
 
-    use crate::{observations::trajectory_ext::TrajectoryExt, outfit::Outfit};
+    use crate::{
+        constants::ObjectNumber, observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
+    };
 
     use super::*;
 
