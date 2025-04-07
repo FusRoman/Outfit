@@ -1444,6 +1444,7 @@ dependencies = [
  "aberth",
  "ahash",
  "arrow-array",
+ "byteorder",
  "camino",
  "criterion",
  "csv",

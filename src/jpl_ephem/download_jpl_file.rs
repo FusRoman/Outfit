@@ -9,6 +9,20 @@ use tokio_stream::StreamExt;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Download a large file from a URL
+/// Uses reqwest to download the file in chunks
+/// and saves it to the specified path using tokio's async file I/O
+/// and stream processing.
+///
+/// Arguments
+/// ---------
+/// * `url`: the URL of the file to download
+/// * `path`: the path to save the downloaded file
+///
+/// Return
+/// ------
+/// * An error if the download fails
+/// * Ok(()) if the download is successful
 async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
     let mut file = File::create(path).await?;
     println!("Downloading {}...", url);
