@@ -3,8 +3,9 @@ use directories::BaseDirs;
 use std::{fs, io::{self}};
 
 use crate::outfit::Outfit;
+#[cfg(feature = "jpl-download")]
 use tokio::{fs::File, io::AsyncWriteExt};
-
+#[cfg(feature = "jpl-download")]
 use tokio_stream::StreamExt;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -23,6 +24,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 /// ------
 /// * An error if the download fails
 /// * Ok(()) if the download is successful
+#[cfg(feature = "jpl-download")]
 async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
     let mut file = File::create(path).await?;
     println!("Downloading {}...", url);
@@ -53,7 +55,6 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
 /// * The path to the ephemeris file
 /// * An error if the file cannot be found or downloaded
 pub fn get_ephemeris_file(
-    env_state: &Outfit,
     version: Option<&str>,
     user_path: Option<&str>,
 ) -> io::Result<Utf8PathBuf> {
@@ -65,7 +66,7 @@ pub fn get_ephemeris_file(
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "Fichier JPL non trouvé à ce chemin.",
+                "File not found at the path specified by the user.",
             ));
         }
     }
@@ -128,11 +129,10 @@ mod jpl_reader_test {
     #[test]
     #[cfg(not(feature = "jpl-download"))]
     fn test_no_feature_download_jpl_ephem() {
-        let env_state = Outfit::new();
         let version = Some("de442");
         let user_path = None;
 
-        let result = get_ephemeris_file(&env_state, version, user_path);
+        let result = get_ephemeris_file(version, user_path);
         assert!(
             result.is_err(),
             "feature jpl-download is enabled, weird ..."
@@ -142,13 +142,10 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_feature_download_jpl_ephem() {
-        use crate::outfit::Outfit;
-
-        let env_state = Outfit::new();
         let version = Some("de442");
         let user_path = None;
 
-        let result = get_ephemeris_file(&env_state, version, user_path);
+        let result = get_ephemeris_file(version, user_path);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");
         let path = result.unwrap();
         assert!(path.exists(), "JPL ephemeris file not found");

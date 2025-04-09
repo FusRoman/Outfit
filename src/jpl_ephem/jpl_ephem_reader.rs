@@ -1,46 +1,43 @@
 use camino::Utf8Path;
-use regex::Regex;
+use nom::number::complete::le_i32;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::BufReader;
+use std::io::Read;
 
-fn open_and_read_record(
-    file_path: &str,
-    record_number: u64,
-    record_length: usize,
-) -> io::Result<Vec<u8>> {
-    // 1. Ouvrir le fichier (équivalent de status='old')
-    let mut file = File::open(file_path)?;
+use nom::{
+    bytes::complete::{tag, take, take_until},
+    character::complete::{line_ending, not_line_ending},
+    number::complete::double,
+    IResult, Parser,
+};
 
-    // 2. Calculer l’offset du record (record_number commence à 1 comme en Fortran)
-    let offset = (record_number - 1) * record_length as u64;
-    file.seek(SeekFrom::Start(offset))?;
-
-    // 3. Lire exactement record_length octets (comme un record)
-    let mut buffer = vec![0u8; record_length];
-    file.read_exact(&mut buffer)?;
-
-    Ok(buffer)
+#[derive(Debug)]
+struct DAFHeader {
+    idword: String,
+    internal_filename: String,
+    fward: i32,
+    bward: i32,
+    free: i32,
 }
 
-fn skip_ftp_header(buffer: &[u8]) -> &[u8] {
-    let marker = b"ENDFTP";
-    if let Some(pos) = buffer.windows(marker.len()).position(|w| w == marker) {
-        // Avance après le marqueur ENDFTP
-        let mut start = pos + marker.len();
-
-        // Aligne sur le prochain multiple de 1024 (ou autre taille de record si connue)
-        let alignment = 1024; // à ajuster si besoin
-        start = ((start + alignment - 1) / alignment) * alignment;
-
-        if start < buffer.len() {
-            &buffer[start..]
-        } else {
-            &[]
-        }
-    } else {
-        // Pas de header détecté, on retourne tout
-        buffer
-    }
+fn parse_daf_header(input: &[u8]) -> IResult<&[u8], DAFHeader> {
+    let (input, id_word) = take(8usize)(input)?; // "DAF/SPK "
+    let (input, nd_bytes) = le_i32(input)?; // ND
+    let (input, ni_bytes) = le_i32(input)?; // NI
+    let (input, ifname) = take(60usize)(input)?; // internal file name
+    let (input, fwd) = le_i32(input)?; // forward ptr
+    let (input, bwd) = le_i32(input)?; // backward ptr
+    let (input, free) = le_i32(input)?; // first free address
+    Ok((
+        input,
+        DAFHeader {
+            idword: String::from_utf8_lossy(id_word).trim().to_string(),
+            internal_filename: String::from_utf8_lossy(ifname).trim().to_string(),
+            fward: fwd,
+            bward: bwd,
+            free: free,
+        },
+    ))
 }
 
 #[derive(Debug)]
@@ -53,100 +50,138 @@ struct JPLEphemHeader {
     end_jd: f64,
 }
 
-fn read_jpl_header(jpl_file_path: &Utf8Path) -> JPLEphemHeader {
-    let record = open_and_read_record(jpl_file_path.as_str(), 1, 4096).unwrap();
+fn parse_version(input: &str) -> IResult<&str, &str> {
+    let (input, _) = take_until("JPL planetary and lunar ephemeris")(input)?;
+    let (input, _) = tag("JPL planetary and lunar ephemeris ")(input)?;
+    let (input, version) = not_line_ending(input)?;
+    let (input, _) = line_ending(input)?;
 
-    let without_ftp_header = skip_ftp_header(&record);
+    Ok((input, version.trim()))
+}
 
-    // Essayons d'afficher uniquement les caractères imprimables
-    let ascii_text = String::from_utf8_lossy(&without_ftp_header).to_string();
+fn parse_creation_date(input: &str) -> IResult<&str, &str> {
+    let (input, _) = take_until("Integrated ")(input)?;
+    let (input, _) = tag("Integrated ")(input)?;
+    let (input, creation_date) = not_line_ending(input)?;
+    let (input, _) = line_ending(input)?;
 
-    let fake_lines = ascii_text
-        .split(|c| c == '\r' || c == '\n' || c == 0 as char) // 0 = NULL, souvent dans binaires
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty());
+    Ok((input, creation_date.trim()))
+}
 
-    let mut version = String::new();
-    let mut creation_date = String::new();
-    let mut start_ephem = String::new();
-    let mut end_ephem = String::new();
-    let mut start_jd = 0.0;
-    let mut end_jd = 0.0;
+fn parse_date_range(input: &str) -> IResult<&str, (&str, &str)> {
+    let (input, _) = take_until("Time span covered by ephemeris:")(input)?;
+    let (input, _) = tag("Time span covered by ephemeris:")(input)?;
+    let (input, _) = (line_ending, line_ending).parse(input)?;
+    let (input, (start_ephem, _, end_ephem)) =
+        (take_until("to"), tag("to   "), not_line_ending).parse(input)?;
 
-    let ephem_date_span = Regex::new(
-        r"(?-u)(\d{2}-[A-Z]{3}-\d{4} \d{2}:\d{2})\s+to\s+(\d{2}-[A-Z]{3}-\d{4} \d{2}:\d{2})",
+    Ok((input, (start_ephem.trim(), end_ephem.trim())))
+}
+
+fn parse_jd_range(input: &str) -> IResult<&str, (f64, f64)> {
+    let (input, (_, _, start_jd, _, end_jd)) = (
+        line_ending,
+        tag("JD   "),
+        |s| double(s),
+        tag("   to   JD   "),
+        |s| double(s),
     )
-    .unwrap();
+        .parse(input)?;
 
-    let ephem_jd_span =
-        Regex::new(r"(?-u)JD\s+([0-9]+\.[0-9]+)\s+to\s+JD\s+([0-9]+\.[0-9]+)").unwrap();
-    for line in fake_lines {
-        if version.is_empty() && line.to_lowercase().contains("ephemeris") {
-            version = line
-                .trim()
-                .to_string()
-                .split("ephemeris")
-                .nth(1)
-                .expect("Failed to split string to get ephemeris version")
-                .trim()
-                .to_string();
-        }
+    Ok((input, (start_jd, end_jd)))
+}
 
-        if creation_date.is_empty() && line.to_lowercase().contains("integrated") {
-            creation_date = line
-                .trim()
-                .to_string()
-                .split("ed")
-                .nth(1)
-                .expect("Failed to split string to get creation date")
-                .trim()
-                .to_string();
-        }
+fn parse_ephem_header(input: &str) -> IResult<&str, JPLEphemHeader> {
+    let (input, version) = parse_version(input)?;
+    let (input, creation_date) = parse_creation_date(input)?;
 
-        if start_ephem.is_empty() && end_ephem.is_empty() {
-            if let Some(caps) = ephem_date_span.captures(line) {
-                start_ephem = caps[1].to_string();
-                end_ephem = caps[2].to_string();
-            }
-        }
+    let (input, (start_ephem, end_ephem)) = parse_date_range(input)?;
+    let (input, (start_jd, end_jd)) = parse_jd_range(input)?;
+    Ok((
+        input,
+        JPLEphemHeader {
+            version: version.to_string(),
+            creation_date: creation_date.trim().to_string(),
+            start_ephem: start_ephem.trim().to_string(),
+            end_ephem: end_ephem.trim().to_string(),
+            start_jd,
+            end_jd,
+        },
+    ))
+}
 
-        if start_jd == 0. && end_jd == 0. {
-            if let Some(caps) = ephem_jd_span.captures(line) {
-                start_jd = caps[1].parse().unwrap();
-                end_jd = caps[2].parse().unwrap();
-            }
+#[derive(Debug)]
+struct JPLEphem {
+    daf_header: DAFHeader,
+    header: JPLEphemHeader,
+}
+
+impl JPLEphem {
+    fn new(jpl_path: &Utf8Path) -> Self {
+        let mut file = BufReader::new(File::open(jpl_path).unwrap());
+
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut temp = [0u8; 1 << 10];
+        file.read_exact(&mut temp)
+            .expect("Failed to read the DAF header. (first 1024 bytes)");
+        buffer.extend_from_slice(&temp[..]);
+        let (_, daf_header) =
+            parse_daf_header(&buffer).expect("Failed to parse the DAF header with nom !");
+
+        let end_ascii_comment = ((daf_header.fward as usize) - 1) * 1024;
+        let mut ascii_buffer = vec![0u8; end_ascii_comment];
+        file.read_exact(&mut ascii_buffer)
+            .expect("Failed to read the ASCII comment area.");
+
+        buffer.extend_from_slice(&ascii_buffer[..]);
+
+        let binding = String::from_utf8_lossy(&buffer).replace('\0', "\n");
+        let ascii_comment = binding.as_str();
+
+        let (_, jpl_header) =
+            parse_ephem_header(&ascii_comment).expect("Failed to parse the JPL header with nom !");
+        JPLEphem {
+            daf_header: daf_header,
+            header: jpl_header,
         }
-    }
-    JPLEphemHeader {
-        version,
-        creation_date,
-        start_ephem,
-        end_ephem,
-        start_jd,
-        end_jd,
     }
 }
 
 #[cfg(test)]
 mod jpl_reader_test {
+    use std::io::BufReader;
     use super::*;
     use crate::jpl_ephem::download_jpl_file::get_ephemeris_file;
-    use crate::outfit::Outfit;
 
     #[test]
     #[cfg(feature = "jpl-download")]
-    fn test_read_jpl_header() {
-        let env_state = Outfit::new();
+    fn test_daf_header() {
         let version = Some("de440");
         let user_path = None;
 
-        let file_path = get_ephemeris_file(&env_state, version, user_path).unwrap();
-        let jpl_header = read_jpl_header(&file_path);
-        assert_eq!(jpl_header.version, "DE440");
-        assert_eq!(jpl_header.creation_date, "25 June 2020");
-        assert_eq!(jpl_header.start_ephem, "31-DEC-1549 00:00");
-        assert_eq!(jpl_header.end_ephem, "25-JAN-2650 00:00");
-        assert_eq!(jpl_header.start_jd, 2287184.5);
-        assert_eq!(jpl_header.end_jd, 2688976.5);
+        let file_path = get_ephemeris_file(version, user_path).unwrap();
+
+        let mut file = BufReader::new(File::open(file_path).unwrap());
+        let mut buffer = [0u8; 1024];
+        file.read_exact(&mut buffer).unwrap();
+        let (_, daf_header) = parse_daf_header(&buffer).unwrap();
+        assert_eq!(daf_header.idword, "DAF/SPK");
+        assert_eq!(daf_header.internal_filename, "NIO2SPK");
+        assert_eq!(daf_header.fward, 62);
+        assert_eq!(daf_header.bward, 62);
+        assert_eq!(daf_header.free, 14974889);
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_new_jpl_ephem() {
+        let version = Some("de440");
+        let user_path = None;
+
+        let file_path = get_ephemeris_file(version, user_path).unwrap();
+        let jpl_ephem = JPLEphem::new(&file_path);
+
+        assert_eq!(jpl_ephem.daf_header.idword, "DAF/SPK");
+        assert_eq!(jpl_ephem.header.version, "DE440");
     }
 }
