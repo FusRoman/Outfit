@@ -1,2 +1,9 @@
 /target
 /orbfit_tests
+.vscode
+deps_tree.txt
+perf.data
+run_perf.sh
+rust_side.txt
+tests/data/asteroid_dataset.parquet
+tests/data/mega_test.parquet
