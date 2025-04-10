@@ -1,8 +1,10 @@
 use camino::Utf8Path;
 use chrono::Duration;
 use chrono::NaiveDateTime;
+use nom::multi::count;
 use nom::number::complete::le_f64;
 use nom::number::complete::le_i32;
+use nom::Input;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -15,6 +17,8 @@ use nom::{
     number::complete::double,
     IResult, Parser,
 };
+
+use super::naif_ids::NaifIds;
 
 #[derive(Debug, PartialEq)]
 struct DAFHeader {
@@ -159,7 +163,7 @@ fn parse_ephem_header(input: &str) -> IResult<&str, JPLEphemHeader> {
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct Summary {
     start_epoch: f64,
     end_epoch: f64,
@@ -195,7 +199,7 @@ fn parse_summary(input: &[u8]) -> IResult<&[u8], Summary> {
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 struct EphemerisRecord {
     mid: f64,
     radius: f64,
@@ -297,12 +301,12 @@ fn format_record_bounds(mid: f64, radius: f64) -> (String, String, String) {
     (format_time(start), format_time(mid), format_time(end))
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct DirectoryData {
     init: f64,
-    intlen: f64,
-    rsize: f64,
-    n_records: f64,
+    intlen: usize,
+    rsize: usize,
+    n_records: usize,
 }
 
 fn parse_directory_record(file: &mut BufReader<File>, end_addr: usize) -> DirectoryData {
@@ -311,15 +315,15 @@ fn parse_directory_record(file: &mut BufReader<File>, end_addr: usize) -> Direct
     file.seek(std::io::SeekFrom::Start(directory_offset_bytes as u64))
         .unwrap();
     file.read_exact(&mut dir_buf).unwrap();
-    let (_, init) = le_f64::<_, nom::error::Error<_>>(&dir_buf[0..8]).unwrap();
-    let (_, intlen) = le_f64::<_, nom::error::Error<_>>(&dir_buf[8..16]).unwrap();
-    let (_, rsize) = le_f64::<_, nom::error::Error<_>>(&dir_buf[16..24]).unwrap();
-    let (_, n_records) = le_f64::<_, nom::error::Error<_>>(&dir_buf[24..32]).unwrap();
+    let (input, init) = le_f64::<_, nom::error::Error<_>>(dir_buf.as_slice()).unwrap();
+    let (input, intlen) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
+    let (input, rsize) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
+    let (_, n_records) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
     DirectoryData {
         init,
-        intlen,
-        rsize,
-        n_records,
+        intlen: intlen as usize,
+        rsize: rsize as usize,
+        n_records: n_records as usize,
     }
 }
 
@@ -381,15 +385,13 @@ impl JPLEphem {
             let (_, summary) =
                 parse_summary(summary_bytes).expect("Failed to parse the summary with nom !");
 
-            dbg!(&summary);
-
             let dir_data = parse_directory_record(&mut file, summary.final_addr as usize);
 
             let records = parse_segment_records(
                 &mut file,
                 summary.initial_addr as usize,
-                dir_data.rsize as usize,
-                dir_data.n_records as usize,
+                dir_data.rsize,
+                dir_data.n_records,
             );
             jpl_data.insert(
                 (summary.target, summary.center),
@@ -403,6 +405,15 @@ impl JPLEphem {
         }
     }
 
+    fn get_records(
+        &self,
+        target: NaifIds,
+        center: NaifIds,
+    ) -> Option<(&Summary, &Vec<EphemerisRecord>, &DirectoryData)> {
+        self.jpl_data
+            .get(&(target.to_id(), center.to_id()))
+            .map(|(summary, records, dir_data)| (summary, records, dir_data))
+    }
 }
 
 #[cfg(test)]
@@ -433,7 +444,11 @@ mod jpl_reader_test {
 
     #[test]
     #[cfg(feature = "jpl-download")]
-    fn test_new_jpl_ephem() {
+    fn test_jpl_ephem() {
+        use crate::jpl_ephem::naif_ids::{
+            planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
+        };
+
         let version = Some("de440");
         let user_path = None;
 
@@ -467,5 +482,95 @@ mod jpl_reader_test {
             }
         );
 
+        let record_earth_sun = jpl_ephem
+            .get_records(
+                NaifIds::PB(PlanetaryBary::EarthMoon),
+                NaifIds::SSB(SolarSystemBary::SSB),
+            )
+            .unwrap();
+
+        assert_eq!(
+            record_earth_sun.0,
+            &Summary {
+                start_epoch: -14200747200.0,
+                end_epoch: 20514081600.0,
+                target: 3,
+                center: 0,
+                frame_id: 1,
+                data_type: 2,
+                initial_addr: 3021513,
+                final_addr: 4051108
+            }
+        );
+
+        assert_eq!(
+            record_earth_sun.1.len(),
+            25112,
+            "Expected 25112 records for Earth-Moon barycenter"
+        );
+
+        assert_eq!(
+            record_earth_sun.2,
+            &DirectoryData {
+                init: -14200747200.0,
+                intlen: 1382400,
+                rsize: 41,
+                n_records: 25112
+            }
+        );
+
+        let first_tchebychev_coeff = record_earth_sun.1[0].clone();
+        assert_eq!(
+            first_tchebychev_coeff,
+            EphemerisRecord {
+                mid: -14200056000.0,
+                radius: 691200.0,
+                x: vec![
+                    -59117487.054044664,
+                    -19163216.532728795,
+                    291991.27938009636,
+                    15847.329699283478,
+                    -133.03948110729542,
+                    -4.459284869049275,
+                    0.03379900481247174,
+                    0.0011716375873243507,
+                    1.4852185006919311e-5,
+                    -1.1096435596643423e-5,
+                    -3.3277738887706986e-6,
+                    -1.7115381406088932e-7,
+                    1.8759402940064767e-7
+                ],
+                y: vec![
+                    122675629.90130842,
+                    -7590835.1393347755,
+                    -614598.6274020968,
+                    6451.054990886844,
+                    265.301332213569,
+                    -1.9960672202990268,
+                    -0.05594323453310299,
+                    0.00034547006847617906,
+                    -7.545272774250726e-5,
+                    -4.915547872121608e-6,
+                    2.9685818368805314e-6,
+                    9.978975536291768e-7,
+                    4.606523495199457e-8
+                ],
+                z: vec![
+                    53352759.40834735,
+                    -3301893.184660649,
+                    -267186.62682516687,
+                    2806.0081419486182,
+                    115.33401330537684,
+                    -0.8678118085367849,
+                    -0.02423486566672119,
+                    0.00012129101423135178,
+                    -4.0581575470237784e-5,
+                    -1.4813269496375633e-6,
+                    1.7525667147619721e-6,
+                    4.996616729595978e-7,
+                    8.008233021055763e-9
+                ]
+            },
+        )
     }
 }
