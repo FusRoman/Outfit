@@ -53,13 +53,13 @@ pub fn print_hex_dump(data: &[u8]) {
     }
 }
 
-
+type daf_records = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>
 
 #[derive(Debug)]
 pub struct JPLEphem {
     daf_header: DAFHeader,
     header: JPLEphemHeader,
-    jpl_data: HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>,
+    jpl_data: daf_records,
 }
 
 impl JPLEphem {
@@ -100,8 +100,7 @@ impl JPLEphem {
         // ss is the size of the summary record
         let ss = daf_header.nd as usize + ((daf_header.ni as usize + 1) / 2);
 
-        let mut jpl_data: HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)> =
-            HashMap::new();
+        let mut jpl_data: daf_records = HashMap::new();
 
         // Read the summary records and the element records
         for i in 0..(nsum as usize) {
