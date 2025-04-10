@@ -1,7 +1,12 @@
+use std::fmt;
+
+use hifitime::Epoch;
 use nom::{
     number::complete::{le_f64, le_i32},
     IResult,
 };
+
+use crate::jpl_ephem::naif_ids::NaifIds;
 
 #[derive(Debug, PartialEq)]
 pub struct Summary {
@@ -39,5 +44,94 @@ impl Summary {
                 final_addr: final_addr,
             },
         ))
+    }
+}
+
+impl fmt::Display for Summary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let start = Epoch::from_et_seconds(self.start_epoch);
+        let end = Epoch::from_et_seconds(self.end_epoch);
+
+        let naif_target = match NaifIds::from_id(self.target) {
+            Ok(target) => target,
+            Err(_) => return Err(fmt::Error),
+        };
+        let naif_center = match NaifIds::from_id(self.center) {
+            Ok(center) => center,
+            Err(_) => return Err(fmt::Error),
+        };
+
+        let fields = vec![
+            ("start_epoch", format!("{}", start)),
+            ("end_epoch", format!("{}", end)),
+            ("target", format!("{}", naif_target)),
+            ("center", format!("{}", naif_center)),
+            ("frame_id", self.frame_id.to_string()),
+            ("data_type", self.data_type.to_string()),
+            ("initial_addr", self.initial_addr.to_string()),
+            ("final_addr", self.final_addr.to_string()),
+        ];
+
+        let label_width = fields.iter().map(|(k, _)| k.len()).max().unwrap_or(10);
+        let value_width = fields.iter().map(|(_, v)| v.len()).max().unwrap_or(10);
+
+        let border = format!(
+            "+{:-<label$}+{:-<value$}+",
+            "",
+            "",
+            label = label_width + 2,
+            value = value_width + 2
+        );
+
+        writeln!(f, "{border}")?;
+        writeln!(
+            f,
+            "| {:<label_width$} | {:<value_width$} |",
+            "Field", "Value",
+        )?;
+        writeln!(f, "{border}")?;
+
+        for (label, value) in fields {
+            writeln!(f, "| {:<label_width$} | {:<value_width$} |", label, value,)?;
+        }
+
+        writeln!(f, "{border}")
+    }
+}
+
+#[cfg(test)]
+mod test_summary {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_summary_display() {
+        let summary = Summary {
+            start_epoch: -14200747200.0,
+            end_epoch: 20514081600.0,
+            target: 3,
+            center: 0,
+            frame_id: 1,
+            data_type: 2,
+            initial_addr: 3021513,
+            final_addr: 4051108,
+        };
+
+        let expected = r#"+--------------+-------------------------+
+| Field        | Value                   |
++--------------+-------------------------+
+| start_epoch  | 1549-12-31T00:00:00 ET  |
+| end_epoch    | 2650-01-25T00:00:00 ET  |
+| target       | EarthMoonBarycenter     |
+| center       | Solar System Barycenter |
+| frame_id     | 1                       |
+| data_type    | 2                       |
+| initial_addr | 3021513                 |
+| final_addr   | 4051108                 |
++--------------+-------------------------+
+"#;
+
+        let output = format!("{}", summary);
+        assert_eq!(output, expected);
     }
 }

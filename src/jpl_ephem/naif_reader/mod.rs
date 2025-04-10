@@ -111,6 +111,8 @@ impl JPLEphem {
 
             let (_, summary) =
                 Summary::parse(summary_bytes).expect("Failed to parse the summary with nom !");
+            
+            dbg!(&summary);
 
             let dir_data = DirectoryData::parse(&mut file, summary.final_addr as usize);
 
