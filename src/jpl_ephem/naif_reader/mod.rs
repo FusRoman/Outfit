@@ -53,7 +53,7 @@ pub fn print_hex_dump(data: &[u8]) {
     }
 }
 
-type daf_records = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>
+type daf_records = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>;
 
 #[derive(Debug)]
 pub struct JPLEphem {
