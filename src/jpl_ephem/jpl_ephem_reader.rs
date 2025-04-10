@@ -361,15 +361,17 @@ impl JPLEphem {
 
         let (input, _) =
             take::<_, _, nom::error::Error<&[u8]>>(16usize)(buffer.as_slice()).unwrap();
+
+        // nsum is the number of summary records
         let (_, nsum) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
 
-        // Taille d'un summary
+        // ss is the size of the summary record
         let ss = daf_header.nd as usize + ((daf_header.ni as usize + 1) / 2);
 
         let mut jpl_data: HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)> =
             HashMap::new();
 
-        // Lire les summaries
+        // Read the summary records and the element records
         for i in 0..(nsum as usize) {
             let start = 24 + i * ss * 8;
             let end = start + ss * 8;
@@ -378,6 +380,8 @@ impl JPLEphem {
 
             let (_, summary) =
                 parse_summary(summary_bytes).expect("Failed to parse the summary with nom !");
+
+            dbg!(&summary);
 
             let dir_data = parse_directory_record(&mut file, summary.final_addr as usize);
 
@@ -398,6 +402,7 @@ impl JPLEphem {
             jpl_data: jpl_data,
         }
     }
+
 }
 
 #[cfg(test)]
@@ -461,5 +466,6 @@ mod jpl_reader_test {
                 end_jd: 2688976.5
             }
         );
+
     }
 }
