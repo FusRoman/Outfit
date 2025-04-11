@@ -216,13 +216,12 @@ impl JPLEphem {
 #[cfg(test)]
 mod jpl_reader_test {
     use super::*;
-    use crate::outfit;
     use std::io::BufReader;
 
     use hifitime::Epoch;
 
     use crate::jpl_ephem::{
-        download_jpl_file::{get_ephemeris_file, EphemFileSource},
+        download_jpl_file::{EphemFilePath, EphemFileSource},
         naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary, NaifIds},
         naif_reader::JPLEphem,
     };
@@ -232,12 +231,11 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_daf_header() {
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("naif:DE440".try_into().unwrap());
+        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
 
-        let file_path = get_ephemeris_file(file_source, user_path).unwrap();
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
 
-        let mut file = BufReader::new(File::open(file_path).unwrap());
+        let mut file = BufReader::new(File::open(file_path.path()).unwrap());
         let mut buffer = [0u8; 1024];
         file.read_exact(&mut buffer).unwrap();
         let (_, daf_header) = DAFHeader::parse(&buffer).unwrap();
@@ -251,12 +249,11 @@ mod jpl_reader_test {
 
     #[test]
     #[cfg(feature = "jpl-download")]
-    fn test_jpl_ephem() {
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("naif:DE440".try_into().unwrap());
+    fn test_jpl_reader_from_naif() {
+        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
 
-        let file_path = get_ephemeris_file(file_source, user_path).unwrap();
-        let jpl_ephem = JPLEphem::read(&file_path);
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_ephem = JPLEphem::read(&file_path.path());
 
         assert_eq!(
             jpl_ephem.daf_header,
@@ -380,11 +377,10 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_get_record() {
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("naif:DE440".try_into().unwrap());
+        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
 
-        let file_path = get_ephemeris_file(file_source, user_path).unwrap();
-        let jpl_ephem = JPLEphem::read(&file_path);
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_ephem = JPLEphem::read(&file_path.path());
 
         let date_str = "2024-04-10T12:30:45";
         let epoch = Epoch::from_gregorian_str(date_str).unwrap();
@@ -455,11 +451,10 @@ mod jpl_reader_test {
     #[cfg(feature = "jpl-download")]
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("naif:DE440".try_into().unwrap());
+        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
 
-        let file_path = get_ephemeris_file(file_source, user_path).unwrap();
-        let jpl_ephem = JPLEphem::read(&file_path);
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_ephem = JPLEphem::read(&file_path.path());
 
         let (position, velocity) = jpl_ephem.ephemeris_prediction(
             NaifIds::PB(PlanetaryBary::EarthMoon),
@@ -505,4 +500,16 @@ mod jpl_reader_test {
             )
         );
     }
+
+    // #[test]
+    // #[cfg(feature = "jpl-download")]
+    // fn test_jpl_reader_from_horizon() {
+    //     let user_path = None;
+    //     let file_source: Option<EphemFileSource> = Some("horizon:DE440".try_into().unwrap());
+
+    //     let file_path = get_ephemeris_file(file_source, user_path).unwrap();
+    //     let jpl_ephem = JPLEphem::read(&file_path);
+
+    //     dbg!(&jpl_ephem.daf_header);
+    // }
 }

@@ -14,6 +14,7 @@ use tokio_stream::StreamExt;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[derive(Debug, Clone)]
 pub enum JPLHorizonVersion {
     DE102,
     DE200,
@@ -119,6 +120,7 @@ impl FromStr for JPLHorizonVersion {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum NAIFVersion {
     DE430,
     DE431p1,
@@ -176,6 +178,7 @@ impl FromStr for NAIFVersion {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum EphemFileSource {
     JPLHorizon(JPLHorizonVersion),
     NAIF(NAIFVersion),
@@ -277,56 +280,28 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
-/// Get the ephemeris file from the JPL
-///
-/// Arguments
-/// ---------
-/// * `env_state`: the Outfit environment state containing the http_client
-/// * `version`: the version of the ephemeris file to download, example: "de442" or "de442s"
-/// * `user_path`: an optional user-provided path to the ephemeris file
-///
-/// Return
-/// ------
-/// * The path to the ephemeris file
-/// * An error if the file cannot be found or downloaded
-pub fn get_ephemeris_file(
-    file_source: Option<EphemFileSource>,
-    user_path: Option<&str>,
-) -> io::Result<Utf8PathBuf> {
-    // If user_path is provided, check if the file exists
-    if let Some(path_str) = user_path {
-        let path = Utf8Path::new(path_str);
-        if path.exists() {
-            return Ok(path.to_path_buf());
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "File not found at the path specified by the user.",
-            ));
-        }
-    }
+pub enum EphemFilePath {
+    JPLHorizon(Utf8PathBuf),
+    NAIF(Utf8PathBuf),
+}
 
+impl EphemFilePath {
+    /// Get the ephemeris file from the JPL
+    ///
+    /// Arguments
+    /// ---------
+    /// * `env_state`: the Outfit environment state containing the http_client
+    /// * `version`: the version of the ephemeris file to download, example: "de442" or "de442s"
+    /// * `user_path`: an optional user-provided path to the ephemeris file
+    ///
+    /// Return
+    /// ------
+    /// * The path to the ephemeris file
+    /// * An error if the file cannot be found or downloaded
     #[cfg(feature = "jpl-download")]
-    {
-        use super::download_jpl_file::download_big_file;
-
-        let base_dir = BaseDirs::new().expect("Cannot find the base directory");
-
-        let Some(file_source) = file_source else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Version de l'éphéméride non spécifiée.",
-            ));
-        };
-
-        // otherwise use the default cache directory and download the file
-        let cache_path = Utf8Path::from_path(base_dir.cache_dir()).expect("Invalid cache path");
-        let cache_path = cache_path.join("outfit_cache").join("jpl_ephem");
-        let cache_dir = file_source.get_cache_dir();
-        let cache_path = cache_path.join(cache_dir);
-        fs::create_dir_all(&cache_path)?;
-
-        let local_file = cache_path.join(file_source.filename());
+    pub fn get_ephemeris_file(file_source: EphemFileSource) -> io::Result<Self> {
+        let local_file = EphemFilePath::try_from(file_source.clone())
+            .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "JPL ephemeris file not found"))?;
 
         if local_file.exists() {
             return Ok(local_file);
@@ -335,7 +310,7 @@ pub fn get_ephemeris_file(
         let url = file_source.get_version_url();
 
         let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        rt.block_on(async { download_big_file(&url, &local_file).await })
+        rt.block_on(async { download_big_file(&url, &local_file.path()).await })
             .map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::Other,
@@ -346,12 +321,52 @@ pub fn get_ephemeris_file(
         Ok(local_file)
     }
 
-    #[cfg(not(feature = "jpl-download"))]
-    {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "JPL ephemeris file not found and download feature is disabled.",
-        ))
+    pub fn exists(&self) -> bool {
+        match self {
+            EphemFilePath::JPLHorizon(path) => path.exists(),
+            EphemFilePath::NAIF(path) => path.exists(),
+        }
+    }
+
+    pub fn path(&self) -> &Utf8Path {
+        match self {
+            EphemFilePath::JPLHorizon(path) => path,
+            EphemFilePath::NAIF(path) => path,
+        }
+    }
+
+    pub fn file_name(&self) -> Option<&str> {
+        match self {
+            EphemFilePath::JPLHorizon(path) => path.file_name(),
+            EphemFilePath::NAIF(path) => path.file_name(),
+        }
+    }
+
+    pub fn extension(&self) -> Option<&str> {
+        match self {
+            EphemFilePath::JPLHorizon(path) => path.extension(),
+            EphemFilePath::NAIF(path) => path.extension(),
+        }
+    }
+}
+
+impl TryFrom<EphemFileSource> for EphemFilePath {
+    type Error = String;
+
+    fn try_from(value: EphemFileSource) -> std::result::Result<Self, Self::Error> {
+        let base_dir = BaseDirs::new().expect("Cannot find the base directory");
+        let cache_path = Utf8Path::from_path(base_dir.cache_dir()).expect("Invalid cache path");
+        let cache_path = cache_path.join("outfit_cache").join("jpl_ephem");
+        let cache_dir = value.get_cache_dir();
+        let cache_path = cache_path.join(cache_dir);
+        fs::create_dir_all(&cache_path).map_err(|e| e.to_string())?;
+
+        let local_file = cache_path.join(value.filename());
+
+        match value {
+            EphemFileSource::JPLHorizon(_) => Ok(EphemFilePath::JPLHorizon(local_file)),
+            EphemFileSource::NAIF(_) => Ok(EphemFilePath::NAIF(local_file)),
+        }
     }
 }
 
@@ -375,10 +390,9 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_feature_download_jpl_ephem_from_naif() {
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("naif:DE442".try_into().unwrap());
+        let file_source = "naif:DE442".try_into().unwrap();
 
-        let result = get_ephemeris_file(file_source, user_path);
+        let result = EphemFilePath::get_ephemeris_file(file_source);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");
         let path = result.unwrap();
         assert!(path.exists(), "JPL ephemeris file not found");
@@ -390,16 +404,15 @@ mod jpl_reader_test {
             path.file_name().unwrap() == "de442.bsp",
             "JPL ephemeris file is not de442.bsp"
         );
-        fs::remove_file(path).expect("Failed to remove JPL ephemeris file after test");
+        fs::remove_file(path.path()).expect("Failed to remove JPL ephemeris file after test");
     }
 
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_feature_download_jpl_ephem_from_horizon() {
-        let user_path = None;
-        let file_source: Option<EphemFileSource> = Some("horizon:DE440".try_into().unwrap());
+        let file_source: EphemFileSource = "horizon:DE440".try_into().unwrap();
 
-        let result = get_ephemeris_file(file_source, user_path);
+        let result = EphemFilePath::get_ephemeris_file(file_source);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");
         let path = result.unwrap();
         assert!(path.exists(), "JPL ephemeris file not found");
@@ -411,6 +424,6 @@ mod jpl_reader_test {
             path.file_name().unwrap() == "DE440.bsp",
             "JPL ephemeris file is not DE440.bsp"
         );
-        fs::remove_file(path).expect("Failed to remove JPL ephemeris file after test");
+        fs::remove_file(path.path()).expect("Failed to remove JPL ephemeris file after test");
     }
 }
