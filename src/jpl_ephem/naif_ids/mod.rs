@@ -2,6 +2,7 @@ pub mod planet_bary;
 pub mod planet_mass;
 pub mod satellite_mass;
 pub mod solar_system_bary;
+pub mod naif_type;
 
 use planet_bary::PlanetaryBary;
 use planet_mass::PlanetMassCenter;

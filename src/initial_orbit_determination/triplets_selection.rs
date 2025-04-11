@@ -77,6 +77,6 @@ mod trajectory_ext_test {
                 .len(),
             10
         );
-        println!("{:?}", triplets);
+        // println!("{:?}", triplets);
     }
 }

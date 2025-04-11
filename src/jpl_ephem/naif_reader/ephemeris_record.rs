@@ -5,6 +5,7 @@ use std::{
 };
 
 use hifitime::{Duration, Epoch};
+use nalgebra::Vector3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EphemerisRecord {
@@ -88,6 +89,119 @@ impl EphemerisRecord {
         }
 
         records
+    }
+
+    /// Interpolate the position and velocity at a given ephemeris time.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `ephem_time` - Ephemeris time at which compute the position and the velocity. The reference time frame is BDT (Barycentric Dynamical Time).
+    ///
+    /// Returns
+    /// -------
+    /// * A tuple containing the position and velocity vectors.
+    ///
+    /// The position and velocity are computed using Chebyshev polynomials.
+    /// The Chebyshev coefficients are stored in the `x`, `y`, and `z` fields of the struct.
+    /// The interpolation is done in the range [-1, 1].
+    /// where `T_n(t)` is the Chebyshev polynomial of degree `n` and `t` is the normalized time.
+    /// The velocity is computed using the derivative of the Chebyshev polynomial
+    /// The position is in kilometers and the velocity is in kilometers per second.
+    /// The Chebyshev coefficients are assumed to be in the order of decreasing degree.
+    /// The Chebyshev polynomials are evaluated using Horner's method for efficiency.
+    pub fn interpolate(&self, ephem_time: f64) -> (Vector3<f64>, Vector3<f64>) {
+        let normalized_time = (ephem_time - self.mid) / self.radius;
+        let clamped_time = normalized_time.clamp(-1.0, 1.0);
+
+        let num_coefficients = self.x.len();
+        let mut chebyshev_polynomials = vec![0.0; num_coefficients];
+        chebyshev_polynomials[0] = 1.0;
+
+        // Chebyshev polynomials are defined for n >= 0
+        // T_0(t) = 1
+        if num_coefficients > 1 {
+            chebyshev_polynomials[1] = clamped_time;
+            for degree in 2..num_coefficients {
+                // T_n(t) = 2 * t * T_(n-1)(t) - T_(n-2)(t)
+                // Horner's method for Chebyshev polynomials
+                chebyshev_polynomials[degree] =
+                    2.0 * clamped_time * chebyshev_polynomials[degree - 1]
+                        - chebyshev_polynomials[degree - 2];
+            }
+        }
+
+        // Compute the position using the Chebyshev coefficients
+        // The position is a linear combination of the Chebyshev polynomials
+        // The coefficients are the Chebyshev coefficients for each axis
+        let position = Vector3::new(
+            self.x
+                .iter()
+                .zip(&chebyshev_polynomials)
+                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .sum(),
+            self.y
+                .iter()
+                .zip(&chebyshev_polynomials)
+                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .sum(),
+            self.z
+                .iter()
+                .zip(&chebyshev_polynomials)
+                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .sum(),
+        );
+
+        // Compute the velocity using the Chebyshev derivatives
+        // The velocity is a linear combination of the Chebyshev derivatives
+        let mut velocity = Vector3::zeros();
+        if num_coefficients > 1 {
+            let mut chebyshev_derivatives = vec![0.0; num_coefficients];
+            chebyshev_derivatives[1] = 1.0;
+
+            if num_coefficients > 2 {
+                chebyshev_derivatives[2] = 4.0 * clamped_time;
+                for degree in 3..num_coefficients {
+                    // T'_n(t) = 2 * T'_(n-1)(t) + 2 * t * T_(n-1)(t) - T'_(n-2)(t)
+                    // Horner's method for Chebyshev derivatives
+                    chebyshev_derivatives[degree] =
+                        2.0 * clamped_time * chebyshev_derivatives[degree - 1]
+                            + 2.0 * chebyshev_polynomials[degree - 1]
+                            - chebyshev_derivatives[degree - 2];
+                }
+            }
+
+            // The velocity is scaled by a factor of 2 / (b - a) = 2 / radius
+            // where b and a are the bounds of the interval [-1, 1]
+            // The radius is the length of the interval
+            let velocity_scaling_factor = 2.0 / self.radius;
+
+            velocity[0] = self
+                .x
+                .iter()
+                .zip(&chebyshev_derivatives)
+                .skip(1)
+                .map(|(coefficient, derivative)| coefficient * derivative)
+                .sum::<f64>()
+                * velocity_scaling_factor;
+            velocity[1] = self
+                .y
+                .iter()
+                .zip(&chebyshev_derivatives)
+                .skip(1)
+                .map(|(coefficient, derivative)| coefficient * derivative)
+                .sum::<f64>()
+                * velocity_scaling_factor;
+            velocity[2] = self
+                .z
+                .iter()
+                .zip(&chebyshev_derivatives)
+                .skip(1)
+                .map(|(coefficient, derivative)| coefficient * derivative)
+                .sum::<f64>()
+                * velocity_scaling_factor;
+        }
+
+        (position, velocity)
     }
 }
 
@@ -265,7 +379,80 @@ mod test_ephemeris_record {
 +------------------+---------------------------------------------------------+
 "#;
         let output = format!("{}", record);
-        println!("{}", output);
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_record_interpolation() {
+        let record = EphemerisRecord {
+            mid: -14200056000.0,
+            radius: 691200.0,
+            x: vec![
+                -59117487.054044664,
+                -19163216.532728795,
+                291991.27938009636,
+                15847.329699283478,
+                -133.03948110729542,
+                -4.459284869049275,
+                0.03379900481247174,
+                0.0011716375873243507,
+                1.4852185006919311e-5,
+                -1.1096435596643423e-5,
+                -3.3277738887706986e-6,
+                -1.7115381406088932e-7,
+                1.8759402940064767e-7,
+            ],
+            y: vec![
+                122675629.90130842,
+                -7590835.1393347755,
+                -614598.6274020968,
+                6451.054990886844,
+                265.301332213569,
+                -1.9960672202990268,
+                -0.05594323453310299,
+                0.00034547006847617906,
+                -7.545272774250726e-5,
+                -4.915547872121608e-6,
+                2.9685818368805314e-6,
+                9.978975536291768e-7,
+                4.606523495199457e-8,
+            ],
+            z: vec![
+                53352759.40834735,
+                -3301893.184660649,
+                -267186.62682516687,
+                2806.0081419486182,
+                115.33401330537684,
+                -0.8678118085367849,
+                -0.02423486566672119,
+                0.00012129101423135178,
+                -4.0581575470237784e-5,
+                -1.4813269496375633e-6,
+                1.7525667147619721e-6,
+                4.996616729595978e-7,
+                8.008233021055763e-9,
+            ],
+        };
+
+        let date_str = "2024-04-10T12:30:45 UTC";
+        let epoch = Epoch::from_gregorian_str(date_str)
+            .unwrap()
+            .to_time_scale(hifitime::TimeScale::UTC);
+
+        let (position, velocity) = record.interpolate(epoch.to_et_seconds());
+
+        assert_eq!(
+            position,
+            Vector3::new(-77973002.44148895, 114476910.4391533, 49786600.04705159)
+        );
+
+        assert_eq!(
+            velocity,
+            Vector3::new(
+                -51.663380462484454,
+                -28.897503577030022,
+                -12.568179510296154
+            )
+        )
     }
 }

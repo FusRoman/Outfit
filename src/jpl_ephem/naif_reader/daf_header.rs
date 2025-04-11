@@ -41,3 +41,134 @@ impl DAFHeader {
         ))
     }
 }
+
+use std::fmt;
+
+impl fmt::Display for DAFHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const LABEL_WIDTH: usize = 18;
+        const VALUE_WIDTH: usize = 50;
+
+        let border = format!(
+            "+{:-<label$}+{:-<value$}+",
+            "",
+            "",
+            label = LABEL_WIDTH + 1,
+            value = VALUE_WIDTH + 1
+        );
+
+        writeln!(f, "{}", border)?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "DAF File Header",
+            "",
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(f, "{}", border)?;
+
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "ID Word",
+            format!("{} (Format ID)", self.idword),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "Internal Name",
+            format!("{}", self.internal_filename),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "ND (doubles)",
+            format!("{} double precision summary components", self.nd),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "NI (integers)",
+            format!("{} integer summary components", self.ni),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "Forward Ptr",
+            format!("Record # of first summary: {}", self.fward),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "Backward Ptr",
+            format!("Record # of last summary: {}", self.bward),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "Free Addr",
+            format!("Next free address: {}", self.free),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+        writeln!(
+            f,
+            "| {:<label$}| {:<value$}|",
+            "Binary Format",
+            format!("{} (e.g., BIG-IEEE or LTL-IEEE)", self.locfmt),
+            label = LABEL_WIDTH,
+            value = VALUE_WIDTH
+        )?;
+
+        writeln!(f, "{}", border)
+    }
+}
+
+#[cfg(test)]
+mod test_daf_header {
+    use super::*;
+
+    #[test]
+    fn test_display_daf_header() {
+        let header = DAFHeader {
+            idword: "DAF/SPK".to_string(),
+            internal_filename: "NIO2SPK".to_string(),
+            nd: 2,
+            ni: 6,
+            fward: 62,
+            bward: 62,
+            free: 14974889,
+            locfmt: "LTL-IEEE".to_string(),
+            fptstr: "FTPSTR:\r:\n:\r\n:\r\0:�:\u{10}�:ENDFTP".to_string(),
+        };
+
+        let expected = r#"+-------------------+---------------------------------------------------+
+| DAF File Header   |                                                   |
++-------------------+---------------------------------------------------+
+| ID Word           | DAF/SPK (Format ID)                               |
+| Internal Name     | NIO2SPK                                           |
+| ND (doubles)      | 2 double precision summary components             |
+| NI (integers)     | 6 integer summary components                      |
+| Forward Ptr       | Record # of first summary: 62                     |
+| Backward Ptr      | Record # of last summary: 62                      |
+| Free Addr         | Next free address: 14974889                       |
+| Binary Format     | LTL-IEEE (e.g., BIG-IEEE or LTL-IEEE)             |
++-------------------+---------------------------------------------------+
+"#;
+        let output = format!("{}", header);
+        assert_eq!(output, expected);
+    }
+}
