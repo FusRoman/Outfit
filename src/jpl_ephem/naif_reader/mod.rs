@@ -5,6 +5,7 @@ mod jpl_ephem_header;
 mod summary_record;
 
 use camino::Utf8Path;
+use nalgebra::Vector3;
 use nom::number::complete::le_f64;
 use std::collections::HashMap;
 use std::fs::File;
@@ -111,8 +112,6 @@ impl JPLEphem {
 
             let (_, summary) =
                 Summary::parse(summary_bytes).expect("Failed to parse the summary with nom !");
-            
-            dbg!(&summary);
 
             let dir_data = DirectoryData::parse(&mut file, summary.final_addr as usize);
 
@@ -143,12 +142,84 @@ impl JPLEphem {
             .get(&(target.to_id(), center.to_id()))
             .map(|(summary, records, dir_data)| (summary, records, dir_data))
     }
+
+    fn get_record(
+        &self,
+        target: NaifIds,
+        center: NaifIds,
+        et_seconds: f64,
+    ) -> Option<&EphemerisRecord> {
+        let (summary, records, directory) = self.get_records(target, center)?;
+        if et_seconds < summary.start_epoch || et_seconds > summary.end_epoch {
+            return None;
+        }
+
+        let idx = ((et_seconds - directory.init) / directory.intlen as f64).floor() as usize;
+
+        records.get(idx)
+    }
+
+    /// Interpolates the ephemeris record for the given target and center at the specified epoch.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `target`: The target NAIF ID.
+    /// * `center`: The center NAIF ID.
+    /// * `et_seconds`: The epoch in seconds since the J2000 epoch.
+    ///
+    /// Returns
+    /// --------
+    /// * A tuple containing the position and velocity vectors in the J2000 frame.
+    /// The position and velocity vectors are in kilometers and kilometers per second, respectively.
+    pub fn ephemeris_prediction(
+        &self,
+        target: NaifIds,
+        center: NaifIds,
+        et_seconds: f64,
+    ) -> (Vector3<f64>, Vector3<f64>) {
+        let record = self.get_record(target, center, et_seconds).expect(
+            format!(
+                "Failed to get ephemeris record for target: {:?}, center: {:?} at epoch: {}",
+                target, center, et_seconds
+            )
+            .as_str(),
+        );
+
+        record.interpolate(et_seconds)
+    }
+
+    /// Prints information about the available targets, centers, and epoch ranges in the ephemeris file.
+    pub fn info(&self) {
+        println!("+{:-^78}+", " Ephemeris File Information ");
+        println!("{}", self.daf_header); // Use `Display` for `DAFHeader`
+        println!("{}", self.header); // Use `Display` for `JPLEphemHeader`
+        println!("+{:-^78}+", " Available Records ");
+
+        for ((target, center), (summary, _, directory)) in &self.jpl_data {
+            println!(
+                "+{:-^78}+",
+                format!(" Target: {}, Center: {} ", target, center)
+            );
+            println!("{}", summary); // Use `Display` for `Summary`
+            println!(
+                "| {:<76} |",
+                format!(
+                    "Directory Data: Init = {:.2}, Interval Length = {:.2}, Records = {}",
+                    directory.init, directory.intlen, directory.n_records
+                )
+            );
+            println!("+{:-^78}+", "");
+        }
+    }
 }
 
 #[cfg(test)]
 mod jpl_reader_test {
     use super::*;
     use crate::jpl_ephem::download_jpl_file::get_ephemeris_file;
+    use crate::jpl_ephem::naif_ids::{
+        planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
+    };
     use std::io::BufReader;
 
     #[test]
@@ -174,10 +245,6 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_jpl_ephem() {
-        use crate::jpl_ephem::naif_ids::{
-            planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
-        };
-
         let version = Some("de440");
         let user_path = None;
 
@@ -300,6 +367,148 @@ mod jpl_reader_test {
                     8.008233021055763e-9
                 ]
             },
-        )
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_record() {
+        use hifitime::Epoch;
+
+        let version = Some("de440");
+        let user_path = None;
+
+        let file_path = get_ephemeris_file(version, user_path).unwrap();
+        let jpl_ephem = JPLEphem::read(&file_path);
+
+        let date_str = "2024-04-10T12:30:45";
+        let epoch = Epoch::from_gregorian_str(date_str).unwrap();
+
+        let record = jpl_ephem
+            .get_record(
+                NaifIds::PB(PlanetaryBary::EarthMoon),
+                NaifIds::SSB(SolarSystemBary::SSB),
+                epoch.to_et_seconds(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            record.clone(),
+            EphemerisRecord {
+                mid: 765806400.0,
+                radius: 691200.0,
+                x: vec![
+                    -142642883.69463348,
+                    6126046.973280299,
+                    669712.3503474531,
+                    -5579.567590155643,
+                    -253.10830382052777,
+                    2.0009704562042607,
+                    0.03311672381410127,
+                    -0.00019248035934527232,
+                    -0.00013487467910304937,
+                    -2.0877032284606548e-5,
+                    9.494283770641653e-6,
+                    1.4492164476747281e-6,
+                    -6.919414478143085e-7
+                ],
+                y: vec![
+                    -43487170.26426978,
+                    -17970535.021323554,
+                    203314.02126174027,
+                    13906.974989740016,
+                    -103.50456842568748,
+                    -2.9828833120574494,
+                    0.031229191202504284,
+                    -4.8443077899008055e-5,
+                    -7.758663306889506e-5,
+                    1.4377880407035774e-5,
+                    4.749883816396439e-6,
+                    -1.0111886939662983e-6,
+                    -3.469900956265658e-7
+                ],
+                z: vec![
+                    -18816839.385616597,
+                    -7790117.51618049,
+                    88129.26429267193,
+                    6028.524885779582,
+                    -44.86708885740644,
+                    -1.2926124793403566,
+                    0.013597938686248697,
+                    -6.981467955749496e-5,
+                    -3.8067570619539636e-5,
+                    9.97884013115029e-6,
+                    2.3463112012575143e-6,
+                    -7.071057213710581e-7,
+                    -1.7106237886381444e-7
+                ]
+            }
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_jpl_ephemeris() {
+        use hifitime::Epoch;
+
+        use crate::jpl_ephem::{
+            download_jpl_file::get_ephemeris_file,
+            naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary, NaifIds},
+            naif_reader::JPLEphem,
+        };
+
+        use crate::constants::AU;
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
+
+        let version = Some("de440");
+        let user_path = None;
+
+        let file_path = get_ephemeris_file(version, user_path).unwrap();
+        let jpl_ephem = JPLEphem::read(&file_path);
+
+        let (position, velocity) = jpl_ephem.ephemeris_prediction(
+            NaifIds::PB(PlanetaryBary::EarthMoon),
+            NaifIds::SSB(SolarSystemBary::SSB),
+            epoch1.to_et_seconds(),
+        );
+
+        assert_eq!(
+            position / AU,
+            Vector3::new(
+                -0.26169997917112875,
+                0.8682243128558709,
+                0.37623815974362734
+            )
+        );
+
+        assert_eq!(
+            velocity / AU,
+            Vector3::new(
+                -3.8995165075699485e-7,
+                -9.957615232661774e-8,
+                -4.316895883931796e-8
+            )
+        );
+
+        let epoch2 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
+        let (position, velocity) = jpl_ephem.ephemeris_prediction(
+            NaifIds::PB(PlanetaryBary::EarthMoon),
+            NaifIds::SSB(SolarSystemBary::SSB),
+            epoch2.to_et_seconds(),
+        );
+        assert_eq!(
+            position / AU,
+            Vector3::new(-0.5860307419898751, 0.7233961430776997, 0.31345193147254585)
+        );
+
+        assert_eq!(
+            velocity / AU,
+            Vector3::new(
+                -3.2554490509465264e-7,
+                -2.1982148078907505e-7,
+                -9.529706060142567e-8
+            )
+        );
     }
 }

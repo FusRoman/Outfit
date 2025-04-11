@@ -54,6 +54,15 @@ impl DirectoryData {
             n_records: n_records as usize,
         }
     }
+
+    /// Returns the number of Tchebychev coefficients per ephemeris record.
+    ///
+    /// Returns
+    /// -------
+    /// The number of Tchebychev coefficients per ephemeris record.
+    pub fn nb_coefficients(&self) -> usize {
+        (self.rsize - 2) / 3
+    }
 }
 
 impl std::fmt::Display for DirectoryData {
@@ -94,26 +103,33 @@ mod test_directory {
     use super::*;
 
     #[test]
-    #[cfg(feature = "jpl-download")]
+    fn test_nb_coeff() {
+        let dir_data = DirectoryData {
+            init: -14200747200.0,
+            intlen: 1382400,
+            rsize: 41,
+            n_records: 25112,
+        };
+        assert_eq!(dir_data.nb_coefficients(), 13);
+    }
+
+    #[test]
     fn test_directory_display() {
-        use crate::jpl_ephem::download_jpl_file::get_ephemeris_file;
+        let dir_data = DirectoryData {
+            init: -14200747200.0,
+            intlen: 1382400,
+            rsize: 41,
+            n_records: 25112,
+        };
 
-        let version = Some("de440");
-        let user_path = None;
-
-        let file_path = get_ephemeris_file(version, user_path).unwrap();
-        let mut file = BufReader::new(File::open(file_path).unwrap());
-        let end_addr = 2217924;
-
-        let dir_data = DirectoryData::parse(&mut file, end_addr);
         let output = format!("{}", dir_data);
         let expected_output = r#"+----------------+----------------------------+
 | Field          | Value                      |
 +----------------+----------------------------+
 | init (epoch)   | 1549-12-31T00:00:00 ET     |
-| intlen         | 8 days                     |
-| rsize          | 44                         |
-| n_records      | 50224                      |
+| intlen         | 16 days                    |
+| rsize          | 41                         |
+| n_records      | 25112                      |
 +----------------+----------------------------+
 "#;
 

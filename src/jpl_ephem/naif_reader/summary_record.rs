@@ -6,7 +6,7 @@ use nom::{
     IResult,
 };
 
-use crate::jpl_ephem::naif_ids::NaifIds;
+use crate::jpl_ephem::naif_ids::{naif_type::SpkDataType, NaifIds};
 
 #[derive(Debug, PartialEq)]
 pub struct Summary {
@@ -61,13 +61,18 @@ impl fmt::Display for Summary {
             Err(_) => return Err(fmt::Error),
         };
 
+        let naif_type = match SpkDataType::from_i32(self.data_type) {
+            Ok(naif_type) => naif_type,
+            Err(_) => return Err(fmt::Error),
+        };
+
         let fields = vec![
             ("start_epoch", format!("{}", start)),
             ("end_epoch", format!("{}", end)),
             ("target", format!("{}", naif_target)),
             ("center", format!("{}", naif_center)),
             ("frame_id", self.frame_id.to_string()),
-            ("data_type", self.data_type.to_string()),
+            ("data_type", format!("{}", naif_type.to_string())),
             ("initial_addr", self.initial_addr.to_string()),
             ("final_addr", self.final_addr.to_string()),
         ];
@@ -104,7 +109,6 @@ mod test_summary {
     use super::*;
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_summary_display() {
         let summary = Summary {
             start_epoch: -14200747200.0,
@@ -125,7 +129,7 @@ mod test_summary {
 | target       | EarthMoonBarycenter     |
 | center       | Solar System Barycenter |
 | frame_id     | 1                       |
-| data_type    | 2                       |
+| data_type    | Chebyshev Position Only |
 | initial_addr | 3021513                 |
 | final_addr   | 4051108                 |
 +--------------+-------------------------+
