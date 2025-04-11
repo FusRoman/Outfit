@@ -29,6 +29,14 @@ impl Outfit {
         &self.env_state.ut1_provider
     }
 
+    pub(crate) fn get_url<U>(&self, url: U) -> String
+    where
+        Uri: TryFrom<U>,
+        <Uri as TryFrom<U>>::Error: Into<http::Error>,
+    {
+        self.env_state.get_from_url(url)
+    }
+
     pub(crate) fn post_url<T, I, K, V>(&self, url: T, form: I) -> String
     where
         Uri: TryFrom<T>,
