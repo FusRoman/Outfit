@@ -14,7 +14,7 @@ use tokio_stream::StreamExt;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum JPLHorizonVersion {
     DE102,
     DE200,
@@ -281,8 +281,8 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
 }
 
 pub enum EphemFilePath {
-    JPLHorizon(Utf8PathBuf),
-    NAIF(Utf8PathBuf),
+    JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
+    NAIF(Utf8PathBuf, NAIFVersion),
 }
 
 impl EphemFilePath {
@@ -323,29 +323,29 @@ impl EphemFilePath {
 
     pub fn exists(&self) -> bool {
         match self {
-            EphemFilePath::JPLHorizon(path) => path.exists(),
-            EphemFilePath::NAIF(path) => path.exists(),
+            EphemFilePath::JPLHorizon(path, _) => path.exists(),
+            EphemFilePath::NAIF(path, _) => path.exists(),
         }
     }
 
     pub fn path(&self) -> &Utf8Path {
         match self {
-            EphemFilePath::JPLHorizon(path) => path,
-            EphemFilePath::NAIF(path) => path,
+            EphemFilePath::JPLHorizon(path, _) => path,
+            EphemFilePath::NAIF(path, _) => path,
         }
     }
 
     pub fn file_name(&self) -> Option<&str> {
         match self {
-            EphemFilePath::JPLHorizon(path) => path.file_name(),
-            EphemFilePath::NAIF(path) => path.file_name(),
+            EphemFilePath::JPLHorizon(path, _) => path.file_name(),
+            EphemFilePath::NAIF(path, _) => path.file_name(),
         }
     }
 
     pub fn extension(&self) -> Option<&str> {
         match self {
-            EphemFilePath::JPLHorizon(path) => path.extension(),
-            EphemFilePath::NAIF(path) => path.extension(),
+            EphemFilePath::JPLHorizon(path, _) => path.extension(),
+            EphemFilePath::NAIF(path, _) => path.extension(),
         }
     }
 }
@@ -364,8 +364,10 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
         let local_file = cache_path.join(value.filename());
 
         match value {
-            EphemFileSource::JPLHorizon(_) => Ok(EphemFilePath::JPLHorizon(local_file)),
-            EphemFileSource::NAIF(_) => Ok(EphemFilePath::NAIF(local_file)),
+            EphemFileSource::JPLHorizon(version) => {
+                Ok(EphemFilePath::JPLHorizon(local_file, version))
+            }
+            EphemFileSource::NAIF(version) => Ok(EphemFilePath::NAIF(local_file, version)),
         }
     }
 }
@@ -410,7 +412,7 @@ mod jpl_reader_test {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_feature_download_jpl_ephem_from_horizon() {
-        let file_source: EphemFileSource = "horizon:DE440".try_into().unwrap();
+        let file_source = "horizon:DE440".try_into().unwrap();
 
         let result = EphemFilePath::get_ephemeris_file(file_source);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");

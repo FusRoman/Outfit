@@ -16,6 +16,17 @@ pub struct JPLEphemHeader {
 }
 
 impl JPLEphemHeader {
+    pub(super) fn new() -> Self {
+        JPLEphemHeader {
+            version: String::new(),
+            creation_date: String::new(),
+            start_ephem: String::new(),
+            end_ephem: String::new(),
+            start_jd: 0.0,
+            end_jd: 0.0,
+        }
+    }
+
     fn parse_version(input: &str) -> IResult<&str, &str> {
         let (input, _) = take_until("JPL planetary and lunar ephemeris")(input)?;
         let (input, _) = tag("JPL planetary and lunar ephemeris ")(input)?;
