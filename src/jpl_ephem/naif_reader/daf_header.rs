@@ -14,6 +14,20 @@ pub struct DAFHeader {
 }
 
 impl DAFHeader {
+    pub(super) fn new() -> Self {
+        DAFHeader {
+            idword: String::new(),
+            internal_filename: String::new(),
+            nd: 0,
+            ni: 0,
+            fward: 0,
+            bward: 0,
+            free: 0,
+            locfmt: String::new(),
+            fptstr: String::new(),
+        }
+    }
+
     pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, id_word) = take(8usize)(input)?; // "DAF/SPK "
         let (input, nd_bytes) = le_i32(input)?; // ND
