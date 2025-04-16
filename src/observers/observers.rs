@@ -1,13 +1,10 @@
-use std::env;
-
 use nalgebra::Vector3;
 use ordered_float::NotNan;
 
 use crate::constants::{Degree, Kilometer};
-use crate::{constants::ERAU, outfit::Outfit};
+use crate::constants::ERAU;
 
-use super::earth_position::get_earth_position;
-use super::observer_position::{geodetic_to_parallax, helio_obs_pos, pvobs};
+use super::observer_position::geodetic_to_parallax;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Observer {

@@ -1,10 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use ordered_float::NotNan;
-use ureq::{
-    http::{self, Response, Uri},
-    Body,
-};
+use ureq::http::{self, Uri};
 
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
