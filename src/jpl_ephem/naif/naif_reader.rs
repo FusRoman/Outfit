@@ -8,6 +8,8 @@ use camino::Utf8Path;
 use nalgebra::Vector3;
 use nom::{bytes::complete::take, number::complete::le_f64};
 
+use crate::jpl_ephem::download_jpl_file::EphemFilePath;
+
 use super::{
     daf_header::DAFHeader, directory::DirectoryData, ephemeris_record::EphemerisRecord,
     jpl_ephem_header::JPLEphemHeader, naif_ids::NaifIds, summary_record::Summary,
@@ -23,9 +25,18 @@ pub struct NaifData {
 }
 
 impl NaifData {
-    fn read_naif_file(file_path: &Utf8Path) -> Self {
+    /// Reads the JPL ephemeris file and parses the DAF header, JPL header, and ephemeris records.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `file_path`: The path to the JPL ephemeris file.
+    ///
+    /// Returns
+    /// -------
+    /// * A `NaifData` instance containing the parsed data.
+    fn read_naif_file(file_path: &EphemFilePath) -> Self {
         let mut file = BufReader::new(
-            File::open(file_path)
+            File::open(file_path.path())
                 .expect(format!("Failed to open the JPL ephemeris file: {}", file_path).as_str()),
         );
 
@@ -95,6 +106,17 @@ impl NaifData {
         }
     }
 
+    /// Retrieves the ephemeris records for the given target and center NAIF IDs.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `target`: The target NAIF ID.
+    /// * `center`: The center NAIF ID.
+    ///
+    /// Returns
+    /// -------
+    /// * An `Option` containing a tuple of the summary, ephemeris records, and directory data.
+    /// If the target and center combination is not found, it returns `None`.
     fn get_records(
         &self,
         target: NaifIds,
@@ -105,6 +127,19 @@ impl NaifData {
             .map(|(summary, records, dir_data)| (summary, records, dir_data))
     }
 
+    /// Retrieves the ephemeris record for the given target and center at the specified epoch.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `target`: The target NAIF ID.
+    /// * `center`: The center NAIF ID.
+    /// * `et_seconds`: The epoch in seconds since the J2000 epoch.
+    ///
+    /// Returns
+    /// -------
+    /// * An `Option` containing a reference to the ephemeris record.
+    /// If the target and center combination is not found, or if the epoch is out of range,
+    /// it returns `None`.
     fn get_record(
         &self,
         target: NaifIds,
@@ -177,6 +212,8 @@ impl NaifData {
 
 #[cfg(test)]
 mod test_naif_file {
+    use std::sync::LazyLock;
+
     use super::*;
     use crate::constants::AU;
     use crate::jpl_ephem::{
@@ -188,33 +225,15 @@ mod test_naif_file {
     };
     use hifitime::Epoch;
 
-    #[test]
-    #[cfg(feature = "jpl-download")]
-    fn test_daf_header() {
+    static jpl_ephem: LazyLock<NaifData> = LazyLock::new(|| {
         let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
-
         let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-
-        let mut file = BufReader::new(File::open(file_path.path()).unwrap());
-        let mut buffer = [0u8; 1024];
-        file.read_exact(&mut buffer).unwrap();
-        let (_, daf_header) = DAFHeader::parse(&buffer).unwrap();
-
-        assert_eq!(daf_header.idword, "DAF/SPK");
-        assert_eq!(daf_header.internal_filename, "NIO2SPK");
-        assert_eq!(daf_header.fward, 62);
-        assert_eq!(daf_header.bward, 62);
-        assert_eq!(daf_header.free, 14974889);
-    }
+        NaifData::read_naif_file(&file_path)
+    });
 
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_naif() {
-        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = NaifData::read_naif_file(&file_path.path());
-
         assert_eq!(
             jpl_ephem.daf_header,
             DAFHeader {
@@ -337,11 +356,6 @@ mod test_naif_file {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_get_record() {
-        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = NaifData::read_naif_file(&file_path.path());
-
         let date_str = "2024-04-10T12:30:45";
         let epoch = Epoch::from_gregorian_str(date_str).unwrap();
 
@@ -411,10 +425,6 @@ mod test_naif_file {
     #[cfg(feature = "jpl-download")]
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
-        let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = NaifData::read_naif_file(&file_path.path());
 
         let (position, velocity) = jpl_ephem.ephemeris_prediction(
             NaifIds::PB(PlanetaryBary::EarthMoon),
