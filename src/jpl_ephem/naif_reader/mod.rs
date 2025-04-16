@@ -30,7 +30,113 @@ use super::download_jpl_file::{EphemFilePath, JPLHorizonVersion};
 
 type daf_records = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>;
 
-type horizon_records = Vec<HashMap<u32, Vec<EphemerisRecord>>>;
+#[derive(Debug, PartialEq)]
+pub struct HorizonRecord {
+    pub start_jd: f64,
+    pub end_jd: f64,
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
+    pub z: Vec<f64>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InterpResult {
+    pub position: [f64; 3],
+    pub velocity: Option<[f64; 3]>,
+    pub acceleration: Option<[f64; 3]>,
+}
+
+impl HorizonRecord {
+    pub fn interpolate(
+        &self,
+        tau: f64,
+        compute_velocity: bool,
+        compute_acceleration: bool,
+        n_subintervals: usize,
+    ) -> InterpResult {
+        let n_coeff = self.x.len();
+
+        let mut tcheb = vec![0.0; n_coeff];
+        tcheb[0] = 1.0;
+        if n_coeff > 1 {
+            tcheb[1] = 2.0 * tau - 1.0;
+            for i in 2..n_coeff {
+                tcheb[i] = 2.0 * tcheb[1] * tcheb[i - 1] - tcheb[i - 2];
+            }
+        }
+
+        let vfac = if compute_velocity || compute_acceleration {
+            (2.0 * n_subintervals as f64) / (self.end_jd - self.start_jd)
+        } else {
+            0.0
+        };
+
+        let afac = vfac * vfac;
+
+        let mut tcheb_deriv = vec![0.0; n_coeff];
+        let mut tcheb_accel = vec![0.0; n_coeff];
+
+        if compute_velocity {
+            tcheb_deriv[0] = 0.0;
+            if n_coeff > 1 {
+                tcheb_deriv[1] = 1.0;
+                for i in 2..n_coeff {
+                    tcheb_deriv[i] = 2.0 * tcheb[1] * tcheb_deriv[i - 1] + 2.0 * tcheb[i - 1]
+                        - tcheb_deriv[i - 2];
+                }
+            }
+        }
+
+        if compute_acceleration {
+            tcheb_accel[0] = 0.0;
+            if n_coeff > 1 {
+                tcheb_accel[1] = 0.0;
+                for i in 2..n_coeff {
+                    tcheb_accel[i] = 2.0 * tcheb[1] * tcheb_accel[i - 1] + 4.0 * tcheb_deriv[i - 1]
+                        - tcheb_accel[i - 2];
+                }
+            }
+        }
+
+        let eval = |coeffs: &Vec<f64>, basis: &Vec<f64>| -> f64 {
+            coeffs.iter().zip(basis.iter()).map(|(c, b)| c * b).sum()
+        };
+
+        let x = eval(&self.x, &tcheb);
+
+        let y = eval(&self.y, &tcheb);
+
+        let z = eval(&self.z, &tcheb);
+
+        let velocity = if compute_velocity {
+            Some([
+                vfac * eval(&self.x, &tcheb_deriv),
+                vfac * eval(&self.y, &tcheb_deriv),
+                vfac * eval(&self.z, &tcheb_deriv),
+            ])
+        } else {
+            None
+        };
+
+        let acceleration = if compute_acceleration {
+            Some([
+                afac * eval(&self.x, &tcheb_accel),
+                afac * eval(&self.y, &tcheb_accel),
+                afac * eval(&self.z, &tcheb_accel),
+            ])
+        } else {
+            None
+        };
+
+        InterpResult {
+            position: [x, y, z],
+            velocity,
+            acceleration,
+        }
+    }
+}
+
+type horizon_records = Vec<HashMap<u32, Vec<HorizonRecord>>>;
 
 /// Structure représentant les 15 triplets IPT
 pub type IPT = [[u32; 3]; 15];
@@ -259,8 +365,6 @@ impl JPLEphem {
         const START_400TH_CONSTANT_NAME: u64 = 2856;
         let offset = START_400TH_CONSTANT_NAME + (ncon as u64 - 400) * 6;
 
-        dbg!(offset);
-
         file.seek(std::io::SeekFrom::Start(offset))?;
         let mut buffer = [0u8; 24]; // 6 * 4
         file.read_exact(&mut buffer)?;
@@ -280,17 +384,15 @@ impl JPLEphem {
         count(le_f64, ncoeff).parse(input)
     }
 
-    pub fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<EphemerisRecord> {
+    pub fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
         let offset = ipt[0] as usize;
         let n_coeffs = ipt[1] as usize;
         let n_subs = ipt[2] as usize;
 
         let jd_start = block[0];
         let jd_end = block[1];
-        let sub_span = (jd_end - jd_start) / n_subs as f64;
 
         let coeffs = &block[2..]; // skip JD start/end
-
         let mut records = Vec::with_capacity(n_subs);
 
         for i in 0..n_subs {
@@ -298,46 +400,29 @@ impl JPLEphem {
             let mut y = Vec::with_capacity(n_coeffs);
             let mut z = Vec::with_capacity(n_coeffs);
 
+            let base = offset - 3 + i * n_coeffs * 3;
+
             for j in 0..n_coeffs {
-                let base = offset - 1 + (i * 3 * n_coeffs);
-                let x_val = coeffs.get(base + j).copied().expect(
-                    format!(
-                        "Failed to get x coefficient at index {} for body {}",
-                        base + j,
-                        i
-                    )
-                    .as_str(),
-                );
-                let y_val = coeffs.get(base + j + n_coeffs).copied().expect(
-                    format!(
-                        "Failed to get y coefficient at index {} for body {}",
-                        base + j + n_coeffs,
-                        i
-                    )
-                    .as_str(),
-                );
-                let z_val = coeffs.get(base + j + 2 * n_coeffs).copied().expect(
-                    format!(
-                        "Failed to get z coefficient at index {} for body {}",
-                        base + j + 2 * n_coeffs,
-                        i
-                    )
-                    .as_str(),
-                );
+                let idx = base + j;
+
+                let x_val = coeffs.get(idx).copied().expect("x coeff out of bounds");
+                let y_val = coeffs
+                    .get(idx + n_coeffs)
+                    .copied()
+                    .expect("y coeff out of bounds");
+                let z_val = coeffs
+                    .get(idx + n_coeffs * 2)
+                    .copied()
+                    .expect("z coeff out of bounds");
 
                 x.push(x_val);
                 y.push(y_val);
                 z.push(z_val);
             }
 
-            let start = jd_start + i as f64 * sub_span;
-            let end = start + sub_span;
-            let mid = (start + end) / 2.0;
-            let radius = sub_span / 2.0;
-
-            records.push(EphemerisRecord {
-                mid,
-                radius,
+            records.push(HorizonRecord {
+                start_jd: jd_start,
+                end_jd: jd_end,
                 x,
                 y,
                 z,
@@ -557,6 +642,58 @@ impl JPLEphem {
                     )
                 );
                 println!("+{:-^78}+", "");
+            }
+        }
+    }
+
+    fn get_record_index(&self, et: f64) -> (usize, f64) {
+        if let Some((ephem_start, ephem_end, ephem_step)) = match self {
+            JPLEphem::NAIF(naif_data) => None,
+            JPLEphem::JPLHorizon(horizon_data) => Some((
+                horizon_data.header.start_period,
+                horizon_data.header.end_period,
+                horizon_data.header.period_lenght,
+            )),
+        } {
+            if et < ephem_start || et > ephem_end {
+                panic!("Time outside ephemeris range");
+            }
+
+            let mut nr = ((et - ephem_start) / ephem_step).floor() as usize;
+
+            if (et - ephem_end).abs() < 1e-10 {
+                nr -= 1;
+            }
+
+            let interval_start = (nr as f64) * ephem_step + ephem_start;
+            let tau = (et - interval_start) / ephem_step;
+
+            (nr, tau)
+        } else {
+            panic!("Invalid ephemeris data");
+        }
+    }
+
+    /// Calcule l’index du record et la position tau ∈ [0, 1]
+    /// dans l’intervalle d’interpolation pour un instant donné.
+    pub fn get_record_horizon(&self, body: u32, et: f64) -> Option<(&HorizonRecord, f64)> {
+        match self {
+            JPLEphem::NAIF(_) => None,
+            JPLEphem::JPLHorizon(horizon_data) => {
+                let (nr, tau) = self.get_record_index(et);
+
+                let records = &horizon_data.records[nr];
+                let record_body = records.get(&body).expect(
+                    format!("Failed to get record for body {} in block {}", body, nr).as_str(),
+                );
+
+                let ipt_body = horizon_data.header.ipt[body as usize];
+                let n_subs = ipt_body[2] as usize;
+
+                let sub_index = (tau * n_subs as f64).floor().min(n_subs as f64 - 1.0) as usize;
+
+                let local_tau = tau * n_subs as f64 - sub_index as f64;
+                Some((&record_body[sub_index], local_tau))
             }
         }
     }
@@ -902,9 +1039,9 @@ mod jpl_reader_test {
 
         assert_eq!(
             &jpl_ephem.records[0].get(&0).unwrap()[0],
-            &EphemerisRecord {
-                mid: 2287188.5,
-                radius: 4.0,
+            &HorizonRecord {
+                start_jd: 2287184.5,
+                end_jd: 2287216.5,
                 x: vec![
                     1231640.71525489,
                     13474.74253284046,
@@ -955,5 +1092,99 @@ mod jpl_reader_test {
                 ],
             }
         );
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_record_from_horizon() {
+        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
+
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_data = JPLEphem::read(&file_path);
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
+        let (record, tau) = jpl_data
+            .get_record_horizon(4, epoch1.to_jde_et_days())
+            .unwrap();
+
+        assert_eq!(tau, 0.639978049788624);
+
+        assert_eq!(
+            record,
+            &HorizonRecord {
+                start_jd: 2457008.5,
+                end_jd: 2457040.5,
+                x: vec![
+                    70236.79190208673,
+                    240.5982017483768,
+                    -0.8633795271054904,
+                    -0.0002571950240619499,
+                    4.544021170810181e-6,
+                    -1.839536840631949e-8,
+                    515866454.9405554,
+                    -10984765.90508825,
+                ],
+                y: vec![
+                    -64874.14676298688,
+                    261.5078409285777,
+                    0.4491808227783525,
+                    -0.001923759413667307,
+                    2.250631406524948e-6,
+                    -6.23548505589978e-8,
+                    234693317.6472925,
+                    -4389890.166800962,
+                ],
+                z: vec![
+                    -29516.72247187927,
+                    106.2324198779676,
+                    0.2135457077378355,
+                    -0.000818018169817293,
+                    9.216197575953068e-7,
+                    -2.484668250013335e-8,
+                    -807952538.0697935,
+                    10483809.23980133,
+                ],
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_record_index() {
+        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
+
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_data = JPLEphem::read(&file_path);
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
+        let (index, tau) = jpl_data.get_record_index(epoch1.to_jde_et_days());
+
+        assert_eq!(index, 5310);
+        assert_eq!(tau, 0.639978049788624);
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_interpolation_from_horizon() {
+        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
+
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let jpl_data = JPLEphem::read(&file_path);
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
+        let (record, tau) = jpl_data
+            .get_record_horizon(10, epoch1.to_jde_et_days())
+            .unwrap();
+
+        let res = record.interpolate(tau, true, true, 2);
+
+        assert_eq!(
+            res,
+            InterpResult {
+                position: [428149.04652967455, -105270.23548367192, -68083.3417805149,],
+                velocity: Some([589.5451313541057, 729.3492107658788, 300.3651374866509,],),
+                acceleration: Some([-0.9192157891864692, 0.8829808730566571, 0.3898414406697089,],),
+            }
+        )
     }
 }
