@@ -19,6 +19,83 @@ pub struct InterpResult {
 }
 
 impl HorizonRecord {
+
+    /// Create a new HorizonRecord instance.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `start_jd`: The Julian date at the start of the time interval.
+    /// * `end_jd`: The Julian date at the end of the time interval.
+    /// * `coeffs`: A slice of Tchebycheff coefficients for the x, y, and z
+    ///   coordinates.
+    /// * `offset`: The offset in the coefficients array where the Tchebycheff
+    ///   coefficients for this record start.
+    /// * `n_subintervals`: The number of subintervals in this record.
+    /// * `n_coeffs`: The number of Tchebycheff coefficients for each coordinate.
+    ///
+    /// Returns
+    /// -------
+    /// * A new HorizonRecord instance.
+    pub fn new(
+        start_jd: f64,
+        end_jd: f64,
+        coeffs: &[f64],
+        offset: usize,
+        n_subintervals: usize,
+        n_coeffs: usize,
+    ) -> Self {
+        let mut x = Vec::with_capacity(n_coeffs);
+        let mut y = Vec::with_capacity(n_coeffs);
+        let mut z = Vec::with_capacity(n_coeffs);
+
+        let base = offset - 3 + n_subintervals * n_coeffs * 3;
+
+        for j in 0..n_coeffs {
+            let idx = base + j;
+
+            let x_val = coeffs.get(idx).copied().expect("x coeff out of bounds");
+            let y_val = coeffs
+                .get(idx + n_coeffs)
+                .copied()
+                .expect("y coeff out of bounds");
+            let z_val = coeffs
+                .get(idx + n_coeffs * 2)
+                .copied()
+                .expect("z coeff out of bounds");
+
+            x.push(x_val);
+            y.push(y_val);
+            z.push(z_val);
+        }
+
+        HorizonRecord {
+            start_jd,
+            end_jd,
+            x,
+            y,
+            z,
+        }
+    }
+
+    /// Compute the position, velocity, and acceleration of a celestial object
+    /// at a given time (tau) using Tchebycheff coefficients.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `tau`: A normalized time value between 0 and 1, representing the
+    ///   position within the time interval defined by `start_jd` and `end_jd`.
+    /// * `compute_velocity`: A boolean flag indicating whether to compute
+    ///   the velocity of the object.
+    /// * `compute_acceleration`: A boolean flag indicating whether to compute
+    ///   the acceleration of the object.
+    /// * `n_subintervals`: The number of subintervals to use for the
+    ///   interpolation. This affects the scaling of the velocity and
+    ///   acceleration calculations.
+    ///
+    /// Returns
+    /// -------
+    /// * An `InterpResult` struct containing the computed position,
+    ///   velocity, and acceleration of the celestial object.
     pub fn interpolate(
         &self,
         tau: f64,

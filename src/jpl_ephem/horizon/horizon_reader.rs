@@ -52,7 +52,15 @@ pub struct HorizonData {
     records: HorizonRecords,
 }
 
-/// Dimensions pour chaque index IPT (indice du corps)
+/// Dimension for each record body
+///
+/// Arguments
+/// ---------
+/// * `index` : Index of the body
+///
+/// Returns
+/// -------
+/// * Dimension of the body
 fn dimension(index: usize) -> usize {
     match index {
         0..=10 => 3, // planètes + Soleil
@@ -64,8 +72,16 @@ fn dimension(index: usize) -> usize {
     }
 }
 
-/// Calcule la taille en octets d'un enregistrement (recsize)
-pub fn compute_recsize(ipt: IPT) -> usize {
+/// Compute the size of the record in bytes
+///
+/// Arguments
+/// ---------
+/// * `ipt` : IPT table
+///
+/// Returns
+/// -------
+/// * Size of the record in bytes
+fn compute_recsize(ipt: IPT) -> usize {
     let mut kernel_size = 4; // mots de 32 bits
 
     for i in 0..15 {
@@ -80,8 +96,16 @@ pub fn compute_recsize(ipt: IPT) -> usize {
     kernel_size * 4
 }
 
-/// Parse les 204 octets du header (à partir de offset 2652) pour récupérer ipt[0..13]
-pub fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
+/// Parse the IPT table from the binary file
+///
+/// Arguments
+/// ---------
+/// * `input` : Input buffer containing the IPT table in bytes to decode
+///
+/// Returns
+/// -------
+/// * A tuple containing the remaining input and the IPT table
+fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     let mut ipt: IPT = [[0; 3]; 15];
 
     // On saute les 5 premiers doubles (5 * 8 = 40 octets)
@@ -109,7 +133,16 @@ pub fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     Ok((input_remaining, (ipt, numde)))
 }
 
-pub fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
+/// Parse the remaining part of the IPT table
+///
+/// Arguments
+/// ---------
+/// * `input` : Input buffer containing the remaining IPT table in bytes to decode
+///
+/// Returns
+/// -------
+/// * A tuple containing the remaining input and the IPT 13 and 14 elements
+fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
     let mut ipt_13 = [0u32; 3];
     let mut ipt_14 = [0u32; 3];
     let mut remaining = input;
@@ -129,20 +162,31 @@ pub fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
     Ok((remaining, [ipt_13, ipt_14]))
 }
 
+/// Read the IPT[13] and IPT[14] elements from the file
+///
+/// Arguments
+/// ---------
+/// * `file` : File to read from
+/// * `ncon` : Number of constants in the jpl file
+/// * `de_version` : JPL Horizon version
+///
+/// Returns
+/// -------
+/// * IPT[13] and IPT[14] elements
 fn read_ipt_13_14(
     file: &mut BufReader<File>,
     ncon: u32,
     de_version: &JPLHorizonVersion,
 ) -> std::io::Result<Option<[[u32; 3]; 2]>> {
     if *de_version < JPLHorizonVersion::DE440 || ncon <= 400 {
-        return Ok(None); // pas présent
+        return Ok(None); // IPT[13] and IPT[14] are not used in version earlier than DE440 or for ncon <= 400
     }
 
     const START_400TH_CONSTANT_NAME: u64 = 2856;
     let offset = START_400TH_CONSTANT_NAME + (ncon as u64 - 400) * 6;
 
     file.seek(std::io::SeekFrom::Start(offset))?;
-    let mut buffer = [0u8; 24]; // 6 * 4
+    let mut buffer = [0u8; 24];
     file.read_exact(&mut buffer)?;
 
     let (_, ipt_extra) = parse_ipt_13_14(&buffer).map_err(|_| {
@@ -155,12 +199,30 @@ fn read_ipt_13_14(
     Ok(Some(ipt_extra))
 }
 
-/// Parse un bloc complet : ncoeff * f64
+/// Parse a block of data from the binary file
+///
+/// Arguments
+/// ---------
+/// * `input` : Input buffer containing the block in bytes to decode
+///
+/// Returns
+/// -------
+/// * A tuple containing the remaining input and the block data
 fn parse_block(input: &[u8], ncoeff: usize) -> IResult<&[u8], Vec<f64>> {
     count(le_f64, ncoeff).parse(input)
 }
 
-pub fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
+/// Extract the body records from a block of data
+///
+/// Arguments
+/// ---------
+/// * `block` : Block of data containing the coefficients
+/// * `ipt` : IPT table for the body
+///
+/// Returns
+/// -------
+/// * A vector of HorizonRecord containing the coefficients for the body
+fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
     let offset = ipt[0] as usize;
     let n_coeffs = ipt[1] as usize;
     let n_subs = ipt[2] as usize;
@@ -171,44 +233,35 @@ pub fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> 
     let coeffs = &block[2..]; // skip JD start/end
     let mut records = Vec::with_capacity(n_subs);
 
-    for i in 0..n_subs {
-        let mut x = Vec::with_capacity(n_coeffs);
-        let mut y = Vec::with_capacity(n_coeffs);
-        let mut z = Vec::with_capacity(n_coeffs);
+    for subinterval_number in 0..n_subs {
+        let record = HorizonRecord::new(
+            jd_start,
+            jd_end,
+            coeffs,
+            offset as usize,
+            subinterval_number,
+            n_coeffs,
+        );
 
-        let base = offset - 3 + i * n_coeffs * 3;
-
-        for j in 0..n_coeffs {
-            let idx = base + j;
-
-            let x_val = coeffs.get(idx).copied().expect("x coeff out of bounds");
-            let y_val = coeffs
-                .get(idx + n_coeffs)
-                .copied()
-                .expect("y coeff out of bounds");
-            let z_val = coeffs
-                .get(idx + n_coeffs * 2)
-                .copied()
-                .expect("z coeff out of bounds");
-
-            x.push(x_val);
-            y.push(y_val);
-            z.push(z_val);
-        }
-
-        records.push(HorizonRecord {
-            start_jd: jd_start,
-            end_jd: jd_end,
-            x,
-            y,
-            z,
-        });
+        records.push(record);
     }
 
     records
 }
 
-pub fn parse_all_blocks(
+/// Parse all blocks from the binary file
+///
+/// Arguments
+/// ---------
+/// * `file` : File to read from
+/// * `recsize` : Size of each record in bytes
+/// * `ncoeff` : Number of coefficients in each record
+/// * `ipt` : IPT table
+///
+/// Returns
+/// -------
+/// * A vector of hashmaps containing the records for each body
+fn parse_all_blocks(
     file: &mut BufReader<File>,
     recsize: usize,
     ncoeff: usize,
@@ -252,7 +305,16 @@ pub fn parse_all_blocks(
 }
 
 impl HorizonData {
-    fn read_horizon_file(ephem_path: &EphemFilePath) -> Self {
+    /// Read the JPL ephemeris file and parse the data
+    ///
+    /// Arguments
+    /// ---------
+    /// * `ephem_path` : Path to the JPL ephemeris file
+    ///
+    /// Returns
+    /// -------
+    /// * A HorizonData struct containing the header and records
+    pub fn read_horizon_file(ephem_path: &EphemFilePath) -> Self {
         let version = match ephem_path {
             EphemFilePath::JPLHorizon(_, version) => version,
             _ => panic!("Invalid ephemeris file path"),
@@ -334,6 +396,17 @@ impl HorizonData {
         }
     }
 
+    /// Get the index of the record corresponding to the given ephemeris time
+    /// The index nr is the number of the block in the file corresponding the the requested time.
+    /// The tau value is the time fraction in the block.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `et` : Ephemeris time in days
+    ///
+    /// Returns
+    /// -------
+    /// * A tuple containing the index of the record and the tau value
     fn get_record_index(&self, et: f64) -> (usize, f64) {
         let (ephem_start, ephem_end, ephem_step) = (
             self.header.start_period,
@@ -356,6 +429,16 @@ impl HorizonData {
         (nr, tau)
     }
 
+    /// Get the record corresponding to the given ephemeris time and body
+    ///
+    /// Arguments
+    /// ---------
+    /// * `body` : Body number (0-14)
+    /// * `et` : Ephemeris time in days
+    ///
+    /// Returns
+    /// -------
+    /// * A tuple containing the record and the tau value
     pub fn get_record_horizon(&self, body: u32, et: f64) -> Option<(&HorizonRecord, f64)> {
         let (nr, tau) = self.get_record_index(et);
 
@@ -376,19 +459,23 @@ impl HorizonData {
 
 #[cfg(test)]
 mod test_horizon_reader {
+
+    use std::sync::LazyLock;
+
     use super::*;
     use crate::jpl_ephem::download_jpl_file::{EphemFilePath, EphemFileSource};
     use crate::jpl_ephem::horizon::horizon_records::InterpResult;
     use hifitime::Epoch;
 
+    static jpl_ephem: LazyLock<HorizonData> = LazyLock::new(|| {
+        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
+        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        HorizonData::read_horizon_file(&file_path)
+    });
+
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_horizon() {
-        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = HorizonData::read_horizon_file(&file_path);
-
         assert_eq!(
             jpl_ephem.header,
             HorizonHeader {
@@ -483,11 +570,6 @@ mod test_horizon_reader {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_get_record_from_horizon() {
-        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = HorizonData::read_horizon_file(&file_path);
-
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
         let (record, tau) = jpl_ephem
             .get_record_horizon(4, epoch1.to_jde_et_days())
@@ -537,11 +619,6 @@ mod test_horizon_reader {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_get_record_index() {
-        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = HorizonData::read_horizon_file(&file_path);
-
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
         let (index, tau) = jpl_ephem.get_record_index(epoch1.to_jde_et_days());
 
@@ -552,11 +629,6 @@ mod test_horizon_reader {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_interpolation_from_horizon() {
-        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
-        let jpl_ephem = HorizonData::read_horizon_file(&file_path);
-
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
         let (record, tau) = jpl_ephem
             .get_record_horizon(10, epoch1.to_jde_et_days())
