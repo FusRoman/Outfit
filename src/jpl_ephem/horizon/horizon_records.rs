@@ -1,3 +1,7 @@
+use nalgebra::Vector3;
+
+/// The HorizonRecord struct represents a record of Tchebycheff coefficients
+/// to derive a celestial object's position over a specified time interval.
 #[derive(Debug, PartialEq)]
 pub struct HorizonRecord {
     pub start_jd: f64,
@@ -9,9 +13,9 @@ pub struct HorizonRecord {
 
 #[derive(Debug, PartialEq)]
 pub struct InterpResult {
-    pub position: [f64; 3],
-    pub velocity: Option<[f64; 3]>,
-    pub acceleration: Option<[f64; 3]>,
+    pub position: Vector3<f64>,
+    pub velocity: Option<Vector3<f64>>,
+    pub acceleration: Option<Vector3<f64>>,
 }
 
 impl HorizonRecord {
@@ -77,27 +81,27 @@ impl HorizonRecord {
         let z = eval(&self.z, &tcheb);
 
         let velocity = if compute_velocity {
-            Some([
+            Some(Vector3::new(
                 vfac * eval(&self.x, &tcheb_deriv),
                 vfac * eval(&self.y, &tcheb_deriv),
                 vfac * eval(&self.z, &tcheb_deriv),
-            ])
+            ))
         } else {
             None
         };
 
         let acceleration = if compute_acceleration {
-            Some([
+            Some(Vector3::new(
                 afac * eval(&self.x, &tcheb_accel),
                 afac * eval(&self.y, &tcheb_accel),
                 afac * eval(&self.z, &tcheb_accel),
-            ])
+            ))
         } else {
             None
         };
 
         InterpResult {
-            position: [x, y, z],
+            position: Vector3::new(x, y, z),
             velocity,
             acceleration,
         }
