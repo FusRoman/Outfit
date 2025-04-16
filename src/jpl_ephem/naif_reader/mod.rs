@@ -1185,6 +1185,37 @@ mod jpl_reader_test {
                 velocity: Some([589.5451313541057, 729.3492107658788, 300.3651374866509,],),
                 acceleration: Some([-0.9192157891864692, 0.8829808730566571, 0.3898414406697089,],),
             }
+        );
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
+        let (record, tau) = jpl_data
+            .get_record_horizon(10, epoch1.to_jde_et_days())
+            .unwrap();
+
+        let res = record.interpolate(tau, true, true, 2);
+
+        assert_eq!(
+            res,
+            InterpResult {
+                position: [440183.15997859894, -89933.41046126859, -61760.6145039215],
+                velocity: Some([569.7900066764879, 749.1773000869151, 309.2398409158924]),
+                acceleration: Some([-1.038549415912712, 0.9990469757280209, 0.45539282811508386])
+            }
+        );
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
+        let (record, tau) = jpl_data
+            .get_record_horizon(10, epoch1.to_jde_et_days())
+            .unwrap();
+        let res = record.interpolate(tau, true, true, 2);
+
+        assert_eq!(
+            res,
+            InterpResult {
+                position: [-742814.3000137291, -727671.3536906336, -288321.5373338285],
+                velocity: Some([1085.625632474908, -327.2648113002942, -162.1316622153563]),
+                acceleration: Some([-0.06525161081610019, 1.2611973281426831, 0.5376907387399421])
+            }
         )
     }
 }
