@@ -3,6 +3,7 @@ use directories::BaseDirs;
 use std::{
     fs,
     io::{self},
+    path::Display,
     str::FromStr,
 };
 
@@ -283,6 +284,19 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<()> {
 pub enum EphemFilePath {
     JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
     NAIF(Utf8PathBuf, NAIFVersion),
+}
+
+impl std::fmt::Display for EphemFilePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EphemFilePath::JPLHorizon(path, version) => {
+                write!(f, "JPL Horizon: {} ({})", path, version.get_filename())
+            }
+            EphemFilePath::NAIF(path, version) => {
+                write!(f, "NAIF: {} ({})", path, version.get_filename())
+            }
+        }
+    }
 }
 
 impl EphemFilePath {

@@ -6,7 +6,7 @@ use nom::{
     IResult,
 };
 
-use crate::jpl_ephem::naif_ids::{naif_type::SpkDataType, NaifIds};
+use crate::jpl_ephem::naif::naif_ids::{naif_type::SpkDataType, NaifIds};
 
 #[derive(Debug, PartialEq)]
 pub struct Summary {
