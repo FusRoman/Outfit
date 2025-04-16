@@ -9,5 +9,5 @@ mod ref_system;
 pub mod time;
 mod conversion;
 pub mod outfit;
-mod initial_orbit_determination;
-mod jpl_ephem;
+pub mod initial_orbit_determination;
+pub mod jpl_ephem;

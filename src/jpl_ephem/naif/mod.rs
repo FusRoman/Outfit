@@ -3,7 +3,7 @@ mod directory;
 mod ephemeris_record;
 mod jpl_ephem_header;
 mod naif_ids;
-mod naif_reader;
+pub mod naif_reader;
 mod summary_record;
 
 pub fn print_hex_dump(data: &[u8]) {
