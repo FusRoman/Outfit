@@ -15,21 +15,37 @@ use std::{
     io::{BufReader, Read, Seek},
 };
 
+/// Type for the JPL ephemeris file
+/// The file is a binary file containing the ephemeris data
+/// The file is divided into blocks, each block contains the data for a specific time interval
+/// Each block is in the following vec type and can be accessed by the index
+/// The HashMap contains the body number (0-14) as the key
+/// and a vector of HorizonRecord as the value
 type HorizonRecords = Vec<HashMap<u32, Vec<HorizonRecord>>>;
 
-/// Structure représentant les 15 triplets IPT
+/// Header containing informations for each solar system body
+/// The first index is the body number (0-14)
+/// The second index is a three element array
+/// The first element is the offset in the block corresponding to the body
+/// The second element is the number of Tchebyshev coefficients
+/// The third element is the number of subintervals
 pub type IPT = [[u32; 3]; 15];
 
 #[derive(Debug, PartialEq)]
 pub struct HorizonHeader {
     jpl_version: String,
-    ipt: [[u32; 3]; 15],
+    ipt: IPT,
     start_period: f64,
     end_period: f64,
     period_lenght: f64,
-    ksize: usize,
+    recsize: usize,
 }
 
+/// Structure to hold the data from the JPL ephemeris file
+/// The header contains the JPL version and the IPT table
+/// The records are stored in a vector of hashmaps
+/// where the key is the body number (0-14) and the value is a vector of HorizonRecord
+/// Each HorizonRecord contains the start and end JD, and the coefficients for the Tchebyshev polynomial
 #[derive(Debug)]
 pub struct HorizonData {
     header: HorizonHeader,
@@ -49,7 +65,7 @@ fn dimension(index: usize) -> usize {
 }
 
 /// Calcule la taille en octets d'un enregistrement (recsize)
-pub fn compute_recsize(ipt: [[u32; 3]; 15]) -> usize {
+pub fn compute_recsize(ipt: IPT) -> usize {
     let mut kernel_size = 4; // mots de 32 bits
 
     for i in 0..15 {
@@ -312,7 +328,7 @@ impl HorizonData {
                 start_period: ss[0],
                 end_period: ss[1],
                 period_lenght: ss[2],
-                ksize: 0,
+                recsize: recsize,
             },
             records: blocks,
         }
@@ -397,7 +413,7 @@ mod test_horizon_reader {
                 start_period: 2287184.5,
                 end_period: 2688976.5,
                 period_lenght: 32.0,
-                ksize: 0,
+                recsize: 0,
             }
         );
 
@@ -551,9 +567,11 @@ mod test_horizon_reader {
         assert_eq!(
             res,
             InterpResult {
-                position: [428149.04652967455, -105270.23548367192, -68083.3417805149,],
-                velocity: Some([589.5451313541057, 729.3492107658788, 300.3651374866509,],),
-                acceleration: Some([-0.9192157891864692, 0.8829808730566571, 0.3898414406697089,],),
+                position: [428149.04652967455, -105270.23548367192, -68083.3417805149,].into(),
+                velocity: Some([589.5451313541057, 729.3492107658788, 300.3651374866509,].into(),),
+                acceleration: Some(
+                    [-0.9192157891864692, 0.8829808730566571, 0.3898414406697089,].into(),
+                ),
             }
         );
 
@@ -567,9 +585,11 @@ mod test_horizon_reader {
         assert_eq!(
             res,
             InterpResult {
-                position: [440183.15997859894, -89933.41046126859, -61760.6145039215],
-                velocity: Some([569.7900066764879, 749.1773000869151, 309.2398409158924]),
-                acceleration: Some([-1.038549415912712, 0.9990469757280209, 0.45539282811508386])
+                position: [440183.15997859894, -89933.41046126859, -61760.6145039215].into(),
+                velocity: Some([569.7900066764879, 749.1773000869151, 309.2398409158924].into()),
+                acceleration: Some(
+                    [-1.038549415912712, 0.9990469757280209, 0.45539282811508386].into()
+                )
             }
         );
 
@@ -582,9 +602,11 @@ mod test_horizon_reader {
         assert_eq!(
             res,
             InterpResult {
-                position: [-742814.3000137291, -727671.3536906336, -288321.5373338285],
-                velocity: Some([1085.625632474908, -327.2648113002942, -162.1316622153563]),
-                acceleration: Some([-0.06525161081610019, 1.2611973281426831, 0.5376907387399421])
+                position: [-742814.3000137291, -727671.3536906336, -288321.5373338285].into(),
+                velocity: Some([1085.625632474908, -327.2648113002942, -162.1316622153563].into()),
+                acceleration: Some(
+                    [-0.06525161081610019, 1.2611973281426831, 0.5376907387399421].into()
+                )
             }
         )
     }
