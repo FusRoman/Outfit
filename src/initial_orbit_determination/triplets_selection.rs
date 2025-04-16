@@ -7,7 +7,7 @@ use crate::constants::{TrajectorySet, Triplets};
 
 use super::gauss::GaussObs;
 
-fn triplets_selection(
+pub fn triplets_selection(
     trajectory_set: &mut TrajectorySet,
     dt_min: Option<f64>,
     dt_max: Option<f64>,

@@ -1,2 +1,2 @@
 pub (crate) mod gauss;
-mod triplets_selection;
+pub mod triplets_selection;

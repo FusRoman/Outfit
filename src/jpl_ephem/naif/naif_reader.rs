@@ -3,8 +3,6 @@ use std::{
     fs::File,
     io::{BufReader, Read, Seek},
 };
-
-use camino::Utf8Path;
 use nalgebra::Vector3;
 use nom::{bytes::complete::take, number::complete::le_f64};
 
@@ -34,7 +32,7 @@ impl NaifData {
     /// Returns
     /// -------
     /// * A `NaifData` instance containing the parsed data.
-    fn read_naif_file(file_path: &EphemFilePath) -> Self {
+    pub fn read_naif_file(file_path: &EphemFilePath) -> Self {
         let mut file = BufReader::new(
             File::open(file_path.path())
                 .expect(format!("Failed to open the JPL ephemeris file: {}", file_path).as_str()),
@@ -225,7 +223,7 @@ mod test_naif_file {
     };
     use hifitime::Epoch;
 
-    static jpl_ephem: LazyLock<NaifData> = LazyLock::new(|| {
+    static JPL_EPHEM: LazyLock<NaifData> = LazyLock::new(|| {
         let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
         let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
         NaifData::read_naif_file(&file_path)
@@ -235,7 +233,7 @@ mod test_naif_file {
     #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_naif() {
         assert_eq!(
-            jpl_ephem.daf_header,
+            JPL_EPHEM.daf_header,
             DAFHeader {
                 idword: "DAF/SPK".to_string(),
                 internal_filename: "NIO2SPK".to_string(),
@@ -250,7 +248,7 @@ mod test_naif_file {
         );
 
         assert_eq!(
-            jpl_ephem.header,
+            JPL_EPHEM.header,
             JPLEphemHeader {
                 version: "DE440".to_string(),
                 creation_date: "25 June 2020".to_string(),
@@ -261,7 +259,7 @@ mod test_naif_file {
             }
         );
 
-        let record_earth_sun = jpl_ephem
+        let record_earth_sun = JPL_EPHEM
             .get_records(
                 NaifIds::PB(PlanetaryBary::EarthMoon),
                 NaifIds::SSB(SolarSystemBary::SSB),
@@ -359,7 +357,7 @@ mod test_naif_file {
         let date_str = "2024-04-10T12:30:45";
         let epoch = Epoch::from_gregorian_str(date_str).unwrap();
 
-        let record = jpl_ephem
+        let record = JPL_EPHEM
             .get_record(
                 NaifIds::PB(PlanetaryBary::EarthMoon),
                 NaifIds::SSB(SolarSystemBary::SSB),
@@ -426,7 +424,7 @@ mod test_naif_file {
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
 
-        let (position, velocity) = jpl_ephem.ephemeris_prediction(
+        let (position, velocity) = JPL_EPHEM.ephemeris_prediction(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch1.to_et_seconds(),
@@ -451,7 +449,7 @@ mod test_naif_file {
         );
 
         let epoch2 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
-        let (position, velocity) = jpl_ephem.ephemeris_prediction(
+        let (position, velocity) = JPL_EPHEM.ephemeris_prediction(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch2.to_et_seconds(),

@@ -3,11 +3,9 @@ use directories::BaseDirs;
 use std::{
     fs,
     io::{self},
-    path::Display,
     str::FromStr,
 };
 
-use crate::outfit::Outfit;
 #[cfg(feature = "jpl-download")]
 use tokio::{fs::File, io::AsyncWriteExt};
 #[cfg(feature = "jpl-download")]
