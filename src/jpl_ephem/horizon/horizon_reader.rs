@@ -413,7 +413,7 @@ mod test_horizon_reader {
                 start_period: 2287184.5,
                 end_period: 2688976.5,
                 period_lenght: 32.0,
-                recsize: 0,
+                recsize: 8144,
             }
         );
 
