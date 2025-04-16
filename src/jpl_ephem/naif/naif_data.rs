@@ -218,7 +218,7 @@ mod test_naif_file {
         download_jpl_file::{EphemFilePath, EphemFileSource},
         naif::{
             naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary},
-            naif_reader::NaifData,
+            naif_data::NaifData,
         },
     };
     use hifitime::Epoch;
