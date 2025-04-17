@@ -11,171 +11,9 @@ use tokio::{fs::File, io::AsyncWriteExt};
 #[cfg(feature = "jpl-download")]
 use tokio_stream::StreamExt;
 
+use super::{horizon::horizon_version::JPLHorizonVersion, naif::naif_version::NAIFVersion};
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum JPLHorizonVersion {
-    DE102,
-    DE200,
-    DE202,
-    DE403,
-    DE405,
-    DE406,
-    DE410,
-    DE413,
-    DE414,
-    DE418,
-    DE421,
-    DE422,
-    DE423,
-    DE430,
-    DE430t,
-    DE431,
-    DE440,
-    DE440t,
-    DE441,
-}
-
-impl JPLHorizonVersion {
-    fn get_filename(&self) -> &str {
-        match self {
-            JPLHorizonVersion::DE102 => "de102/lnxm1410p3002.102",
-            JPLHorizonVersion::DE200 => "de200/lnxm1600p2170.200",
-            JPLHorizonVersion::DE202 => "de202/lnxp1900p2050.202",
-            JPLHorizonVersion::DE403 => "de403/lnxp1600p2200.403",
-            JPLHorizonVersion::DE405 => "de405/lnxp1600p2200.405",
-            JPLHorizonVersion::DE406 => "de406/lnxm3000p3000.406",
-            JPLHorizonVersion::DE410 => "de410/lnxp1960p2020.410",
-            JPLHorizonVersion::DE413 => "de413/lnxp1900p2050.413",
-            JPLHorizonVersion::DE414 => "de414/lnxp1600p2200.414",
-            JPLHorizonVersion::DE418 => "de418/lnxp1900p2050.418",
-            JPLHorizonVersion::DE421 => "de421/lnxp1900p2053.421",
-            JPLHorizonVersion::DE422 => "de422/lnxm3000p3000.422",
-            JPLHorizonVersion::DE423 => "de423/lnxp1800p2200.423",
-            JPLHorizonVersion::DE430 => "de430/linux_p1550p2650.430",
-            JPLHorizonVersion::DE430t => "de430t/linux_p1550p2650.430t",
-            JPLHorizonVersion::DE431 => "de431/lnxm13000p17000.431",
-            JPLHorizonVersion::DE440 => "de440/linux_p1550p2650.440",
-            JPLHorizonVersion::DE440t => "de440t/linux_p1550p2650.440t",
-            JPLHorizonVersion::DE441 => "de441/linux_m13000p17000.441",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "DE102" => Some(JPLHorizonVersion::DE102),
-            "DE200" => Some(JPLHorizonVersion::DE200),
-            "DE202" => Some(JPLHorizonVersion::DE202),
-            "DE403" => Some(JPLHorizonVersion::DE403),
-            "DE405" => Some(JPLHorizonVersion::DE405),
-            "DE406" => Some(JPLHorizonVersion::DE406),
-            "DE410" => Some(JPLHorizonVersion::DE410),
-            "DE413" => Some(JPLHorizonVersion::DE413),
-            "DE414" => Some(JPLHorizonVersion::DE414),
-            "DE418" => Some(JPLHorizonVersion::DE418),
-            "DE421" => Some(JPLHorizonVersion::DE421),
-            "DE422" => Some(JPLHorizonVersion::DE422),
-            "DE423" => Some(JPLHorizonVersion::DE423),
-            "DE430" => Some(JPLHorizonVersion::DE430),
-            "DE430t" => Some(JPLHorizonVersion::DE430t),
-            "DE431" => Some(JPLHorizonVersion::DE431),
-            "DE440" => Some(JPLHorizonVersion::DE440),
-            "DE440t" => Some(JPLHorizonVersion::DE440t),
-            "DE441" => Some(JPLHorizonVersion::DE441),
-            _ => None,
-        }
-    }
-
-    fn to_filename(&self) -> &str {
-        match self {
-            JPLHorizonVersion::DE102 => "DE102.bsp",
-            JPLHorizonVersion::DE200 => "DE200.bsp",
-            JPLHorizonVersion::DE202 => "DE202.bsp",
-            JPLHorizonVersion::DE403 => "DE403.bsp",
-            JPLHorizonVersion::DE405 => "DE405.bsp",
-            JPLHorizonVersion::DE406 => "DE406.bsp",
-            JPLHorizonVersion::DE410 => "DE410.bsp",
-            JPLHorizonVersion::DE413 => "DE413.bsp",
-            JPLHorizonVersion::DE414 => "DE414.bsp",
-            JPLHorizonVersion::DE418 => "DE418.bsp",
-            JPLHorizonVersion::DE421 => "DE421.bsp",
-            JPLHorizonVersion::DE422 => "DE422.bsp",
-            JPLHorizonVersion::DE423 => "DE423.bsp",
-            JPLHorizonVersion::DE430 => "DE430.bsp",
-            JPLHorizonVersion::DE430t => "DE430t.bsp",
-            JPLHorizonVersion::DE431 => "DE431.bsp",
-            JPLHorizonVersion::DE440 => "DE440.bsp",
-            JPLHorizonVersion::DE440t => "DE440t.bsp",
-            JPLHorizonVersion::DE441 => "DE441.bsp",
-        }
-    }
-}
-
-impl FromStr for JPLHorizonVersion {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        JPLHorizonVersion::from_str(s).ok_or_else(|| format!("Invalid JPL Horizon version: {}", s))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum NAIFVersion {
-    DE430,
-    DE431p1,
-    DE431p2,
-    DE432,
-    DE435,
-    DE438,
-    DE440,
-    DE440s,
-    DE441p1,
-    DE441p2,
-    DE442,
-}
-
-impl NAIFVersion {
-    fn get_filename(&self) -> &str {
-        match self {
-            NAIFVersion::DE430 => "de430.bsp",
-            NAIFVersion::DE431p1 => "de431_part-1.bsp",
-            NAIFVersion::DE431p2 => "de431_part-2.bsp",
-            NAIFVersion::DE432 => "de432.bsp",
-            NAIFVersion::DE435 => "de435.bsp",
-            NAIFVersion::DE438 => "de438.bsp",
-            NAIFVersion::DE440 => "de440.bsp",
-            NAIFVersion::DE440s => "de440s.bsp",
-            NAIFVersion::DE441p1 => "de441_part-1.bsp",
-            NAIFVersion::DE441p2 => "de441_part-2.bsp",
-            NAIFVersion::DE442 => "de442.bsp",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "DE430" => Some(NAIFVersion::DE430),
-            "DE431_part-1" => Some(NAIFVersion::DE431p1),
-            "DE431_part-2" => Some(NAIFVersion::DE431p2),
-            "DE432" => Some(NAIFVersion::DE432),
-            "DE435" => Some(NAIFVersion::DE435),
-            "DE438" => Some(NAIFVersion::DE438),
-            "DE440" => Some(NAIFVersion::DE440),
-            "DE440s" => Some(NAIFVersion::DE440s),
-            "DE441_part-1" => Some(NAIFVersion::DE441p1),
-            "DE441_part-2" => Some(NAIFVersion::DE441p2),
-            "DE442" => Some(NAIFVersion::DE442),
-            _ => None,
-        }
-    }
-}
-
-impl FromStr for NAIFVersion {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        NAIFVersion::from_str(s).ok_or_else(|| format!("Invalid NAIF version: {}", s))
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum EphemFileSource {
@@ -189,19 +27,19 @@ impl TryFrom<&str> for EphemFileSource {
     fn try_from(value: &str) -> std::result::Result<EphemFileSource, std::string::String> {
         let parts: Vec<&str> = value.split(':').collect();
         if parts.len() != 2 {
-            return Err("Expected format: 'naif:DE440' or 'jpl:DE440t'".to_string());
+            return Err("Expected format: {source}:{version}, example: 'naif:DE440' or 'horizon:DE440'".to_string());
         }
 
         match parts[0].to_lowercase().as_str() {
             "horizon" => {
-                if let Some(version) = JPLHorizonVersion::from_str(parts[1]) {
+                if let Ok(version) = JPLHorizonVersion::from_str(parts[1]) {
                     Ok(EphemFileSource::JPLHorizon(version))
                 } else {
                     Err(format!("Invalid JPL Horizon version: {}", parts[1]))
                 }
             }
             "naif" => {
-                if let Some(version) = NAIFVersion::from_str(parts[1]) {
+                if let Ok(version) = NAIFVersion::from_str(parts[1]) {
                     Ok(EphemFileSource::NAIF(version))
                 } else {
                     Err(format!("Invalid NAIF version: {}", parts[1]))
@@ -310,27 +148,36 @@ impl EphemFilePath {
     /// ------
     /// * The path to the ephemeris file
     /// * An error if the file cannot be found or downloaded
-    #[cfg(feature = "jpl-download")]
-    pub fn get_ephemeris_file(file_source: EphemFileSource) -> io::Result<Self> {
+    pub fn get_ephemeris_file(file_source: &EphemFileSource) -> io::Result<Self> {
         let local_file = EphemFilePath::try_from(file_source.clone())
-            .map_err(|_| io::Error::new(io::ErrorKind::NotFound, "JPL ephemeris file not found"))?;
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
         if local_file.exists() {
             return Ok(local_file);
+        } else {
+            #[cfg(feature = "jpl-download")]
+            {
+                let url = file_source.get_version_url();
+
+                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+                rt.block_on(async { download_big_file(&url, &local_file.path()).await })
+                    .map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            "Failed to download JPL ephemeris file",
+                        )
+                    })?;
+
+                return Ok(local_file);
+            }
+            #[cfg(not(feature = "jpl-download"))]
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "JPL ephemeris file not found",
+                ));
+            }
         }
-
-        let url = file_source.get_version_url();
-
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-        rt.block_on(async { download_big_file(&url, &local_file.path()).await })
-            .map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "Failed to download JPL ephemeris file",
-                )
-            })?;
-
-        Ok(local_file)
     }
 
     pub fn exists(&self) -> bool {
@@ -366,8 +213,10 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
     type Error = String;
 
     fn try_from(value: EphemFileSource) -> std::result::Result<Self, Self::Error> {
-        let base_dir = BaseDirs::new().expect("Cannot find the base directory");
-        let cache_path = Utf8Path::from_path(base_dir.cache_dir()).expect("Invalid cache path");
+        let base_dir =
+            BaseDirs::new().ok_or_else(|| "Failed to retrieve base directory".to_string())?;
+        let cache_path = Utf8Path::from_path(base_dir.cache_dir())
+            .ok_or_else(|| "Failed to convert base directory path to Utf8Path".to_string())?;
         let cache_path = cache_path.join("outfit_cache").join("jpl_ephem");
         let cache_dir = value.get_cache_dir();
         let cache_path = cache_path.join(cache_dir);
@@ -391,10 +240,9 @@ mod jpl_reader_test {
     #[test]
     #[cfg(not(feature = "jpl-download"))]
     fn test_no_feature_download_jpl_ephem() {
-        let version = Some("de442");
-        let user_path = None;
+        let file_source = "naif:DE442".try_into().unwrap();
 
-        let result = get_ephemeris_file(version, user_path);
+        let result = EphemFilePath::get_ephemeris_file(&file_source);
         assert!(
             result.is_err(),
             "feature jpl-download is enabled, weird ..."
@@ -406,7 +254,7 @@ mod jpl_reader_test {
     fn test_feature_download_jpl_ephem_from_naif() {
         let file_source = "naif:DE442".try_into().unwrap();
 
-        let result = EphemFilePath::get_ephemeris_file(file_source);
+        let result = EphemFilePath::get_ephemeris_file(&file_source);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");
         let path = result.unwrap();
         assert!(path.exists(), "JPL ephemeris file not found");
@@ -418,7 +266,6 @@ mod jpl_reader_test {
             path.file_name().unwrap() == "de442.bsp",
             "JPL ephemeris file is not de442.bsp"
         );
-        fs::remove_file(path.path()).expect("Failed to remove JPL ephemeris file after test");
     }
 
     #[test]
@@ -426,7 +273,7 @@ mod jpl_reader_test {
     fn test_feature_download_jpl_ephem_from_horizon() {
         let file_source = "horizon:DE440".try_into().unwrap();
 
-        let result = EphemFilePath::get_ephemeris_file(file_source);
+        let result = EphemFilePath::get_ephemeris_file(&file_source);
         assert!(result.is_ok(), "Failed to download JPL ephemeris file");
         let path = result.unwrap();
         assert!(path.exists(), "JPL ephemeris file not found");
@@ -438,6 +285,5 @@ mod jpl_reader_test {
             path.file_name().unwrap() == "DE440.bsp",
             "JPL ephemeris file is not DE440.bsp"
         );
-        fs::remove_file(path.path()).expect("Failed to remove JPL ephemeris file after test");
     }
 }

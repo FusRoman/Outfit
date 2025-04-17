@@ -5,10 +5,11 @@ use nom::{
     IResult, Parser,
 };
 
-use crate::jpl_ephem::download_jpl_file::{EphemFilePath, JPLHorizonVersion};
+use crate::jpl_ephem::download_jpl_file::EphemFilePath;
 
 use super::{
-    horizon_ids::HorizonID, horizon_records::HorizonRecord, interpolation_result::InterpResult,
+    horizon_ids::HorizonID, horizon_records::HorizonRecord, horizon_version::JPLHorizonVersion,
+    interpolation_result::InterpResult,
 };
 use std::{
     collections::HashMap,
@@ -536,7 +537,7 @@ mod test_horizon_reader {
 
     static JPL_EPHEM: LazyLock<HorizonData> = LazyLock::new(|| {
         let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let file_path = EphemFilePath::get_ephemeris_file(&file_source).unwrap();
         HorizonData::read_horizon_file(&file_path)
     });
 

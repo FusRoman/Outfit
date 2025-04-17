@@ -148,8 +148,9 @@ mod jpl_request_test {
     }
 
     #[test]
+    #[ignore]
     fn test_jplvector_request() {
-        let state = Outfit::new();
+        let state = Outfit::new("horizon:DE440");
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let mjd_list = date_to_mjd(&date_list);
         let response_data = request_vector(&mjd_list, &state);

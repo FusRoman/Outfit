@@ -4,7 +4,7 @@ use outfit::outfit::Outfit;
 
 #[test]
 fn test_trajectories_from_vec() {
-    let mut env_state = Outfit::new();
+    let mut env_state = Outfit::new("horizon:DE440");
     let object_number = "33803";
     let ra = vec![359.7403333333333];
     let dec = vec![-0.5039444444444444];

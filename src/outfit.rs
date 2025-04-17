@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock, OnceLock},
+};
 
 use ordered_float::NotNan;
 use ureq::http::{self, Uri};
@@ -6,20 +9,34 @@ use ureq::http::{self, Uri};
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
+    jpl_ephem::download_jpl_file::EphemFileSource,
     observers::{observatories::Observatories, observers::Observer},
 };
+
+use crate::jpl_ephem::JPLEphem;
 
 pub struct Outfit {
     env_state: OutfitEnv,
     observatories: Observatories,
+    jpl_source: EphemFileSource,
+    jpl_ephem: OnceLock<JPLEphem>,
 }
 
 impl Outfit {
-    pub fn new() -> Self {
+    pub fn new(jpl_file: &str) -> Self {
         Outfit {
             env_state: OutfitEnv::new(),
             observatories: Observatories::new(),
+            jpl_source: jpl_file
+                .try_into()
+                .expect(format!("JPL ephemeris file path is not valid: {jpl_file}").as_str()),
+            jpl_ephem: OnceLock::new(),
         }
+    }
+
+    pub fn get_jpl_ephem(&self) -> &JPLEphem {
+        self.jpl_ephem
+            .get_or_init(|| JPLEphem::new(&self.jpl_source))
     }
 
     pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
@@ -197,13 +214,14 @@ fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
 
 #[cfg(test)]
 mod outfit_struct_test {
+    use hifitime::Epoch;
     use ordered_float::NotNan;
 
     use crate::{observers::observers::Observer, outfit::Outfit};
 
     #[test]
     fn test_observer_from_mpc_code() {
-        let outfit = Outfit::new();
+        let outfit = Outfit::new("horizon:DE440");
 
         let observer = outfit.get_observer_from_mpc_code(&"000".into());
         let test = Observer {
@@ -235,7 +253,7 @@ mod outfit_struct_test {
 
     #[test]
     fn test_add_observer() {
-        let mut outfit = Outfit::new();
+        let mut outfit = Outfit::new("horizon:DE440");
         let obs = outfit.new_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
         assert_eq!(obs.longitude, 1.0);
         assert_eq!(obs.rho_cos_phi, 0.999395371426802);
@@ -245,5 +263,24 @@ mod outfit_struct_test {
 
         let obs2 = outfit.new_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
         assert_eq!(outfit.observatories.uint16_from_observer(obs2), 1);
+    }
+
+    #[test]
+    #[cfg(not(feature = "jpl-download"))]
+    fn test_get_jpl_ephem() {
+        let outfit = Outfit::new("horizon:DE440");
+        let jpl_ephem = outfit.get_jpl_ephem();
+
+        let epoch = Epoch::from_mjd_in_time_scale(40422.845601851855, hifitime::TimeScale::TT);
+
+        let position = jpl_ephem.earth_position_ephemeris(&epoch);
+        assert_eq!(
+            position,
+            nalgebra::Vector3::from([[
+                0.4823543946106914,
+                -0.8204796149900725,
+                -0.35578368195764337
+            ]])
+        );
     }
 }
