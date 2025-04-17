@@ -7,7 +7,9 @@ use nom::{
 
 use crate::jpl_ephem::download_jpl_file::{EphemFilePath, JPLHorizonVersion};
 
-use super::{horizon_records::HorizonRecord, interpolation_result::InterpResult};
+use super::{
+    horizon_ids::HorizonID, horizon_records::HorizonRecord, interpolation_result::InterpResult,
+};
 use std::{
     collections::HashMap,
     fs::File,
@@ -20,7 +22,7 @@ use std::{
 /// Each block is in the following vec type and can be accessed by the index
 /// The HashMap contains the body number (0-14) as the key
 /// and a vector of HorizonRecord as the value
-type HorizonRecords = Vec<HashMap<u32, Vec<HorizonRecord>>>;
+type HorizonRecords = Vec<HashMap<u8, Vec<HorizonRecord>>>;
 
 /// Header containing informations for each solar system body
 /// The first index is the body number (0-14)
@@ -296,7 +298,7 @@ fn parse_all_blocks(
             let ipt_body = ipt[body];
 
             let body_rec = extract_body_records(&block, ipt_body);
-            records.insert(body as u32, body_rec);
+            records.insert(body as u8, body_rec);
         }
         blocks.push(records);
     }
@@ -445,7 +447,7 @@ impl HorizonData {
     /// Returns
     /// -------
     /// * A tuple containing the record and the tau value
-    pub fn get_record_horizon(&self, body: u32, et: f64) -> Option<(&HorizonRecord, f64)> {
+    fn get_record_horizon(&self, body: u8, et: f64) -> Option<(&HorizonRecord, f64)> {
         let (nr, tau) = self.get_record_index(et);
 
         let records = &self.records[nr];
@@ -484,15 +486,15 @@ impl HorizonData {
     /// * The velocity and acceleration are optional, depending on the user request.
     pub fn ephemeris(
         &self,
-        target: u32,
-        center: u32,
+        target: HorizonID,
+        center: HorizonID,
         et: f64,
         compute_velocity: bool,
         compute_acceleration: bool,
     ) -> InterpResult {
         let ipt_target = self.header.ipt[target as usize];
         let ipt_center = self.header.ipt[center as usize];
-        let (record, tau) = self.get_record_horizon(target, et).unwrap();
+        let (record, tau) = self.get_record_horizon(target.into(), et).unwrap();
         let mut interp_target = record.interpolate(
             tau,
             compute_velocity,
@@ -500,8 +502,8 @@ impl HorizonData {
             ipt_target[2] as usize,
         );
 
-        if target == 2 {
-            let (record, tau) = self.get_record_horizon(9, et).unwrap();
+        if target == HorizonID::Earth {
+            let (record, tau) = self.get_record_horizon(HorizonID::Moon.into(), et).unwrap();
             let interp_moon = record.interpolate(
                 tau,
                 compute_velocity,
@@ -511,7 +513,7 @@ impl HorizonData {
             interp_target = interp_target - interp_moon / (1. + self.header.earth_moon_mass_ratio);
         }
 
-        let (record, tau) = self.get_record_horizon(center, et).unwrap();
+        let (record, tau) = self.get_record_horizon(center.into(), et).unwrap();
         let interp_center = record.interpolate(
             tau,
             compute_velocity,
@@ -753,7 +755,13 @@ mod test_horizon_reader {
     #[cfg(feature = "jpl-download")]
     fn test_target_center_interpolation() {
         let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(2, 10, epoch1.to_jde_et_days(), true, true);
+        let interp = JPL_EPHEM.ephemeris(
+            HorizonID::Earth,
+            HorizonID::Sun,
+            epoch1.to_jde_et_days(),
+            true,
+            true,
+        );
 
         // Warning:
         // The values from these tests (velocity) differ from the original OrbFit code.
@@ -812,7 +820,13 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(3, 10, epoch1.to_jde_et_days(), true, true);
+        let interp = JPL_EPHEM.ephemeris(
+            HorizonID::Mars,
+            HorizonID::Sun,
+            epoch1.to_jde_et_days(),
+            true,
+            true,
+        );
 
         // ----------------
         // ##1       #:1   <== -1.5211490584063214
@@ -862,7 +876,13 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(52550.18467592593, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(2, 10, epoch1.to_jde_et_days(), true, true);
+        let interp = JPL_EPHEM.ephemeris(
+            HorizonID::Earth,
+            HorizonID::Sun,
+            epoch1.to_jde_et_days(),
+            true,
+            true,
+        );
 
         // ----------------
         // ##1       #:1   <== 0.9861809593769886
