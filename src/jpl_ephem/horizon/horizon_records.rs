@@ -1,5 +1,7 @@
 use nalgebra::Vector3;
 
+use super::interpolation_result::InterpResult;
+
 /// The HorizonRecord struct represents a record of Tchebycheff coefficients
 /// to derive a celestial object's position over a specified time interval.
 #[derive(Debug, PartialEq)]
@@ -11,15 +13,7 @@ pub struct HorizonRecord {
     pub z: Vec<f64>,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct InterpResult {
-    pub position: Vector3<f64>,
-    pub velocity: Option<Vector3<f64>>,
-    pub acceleration: Option<Vector3<f64>>,
-}
-
 impl HorizonRecord {
-
     /// Create a new HorizonRecord instance.
     ///
     /// Arguments

@@ -7,7 +7,7 @@ use nom::{
 
 use crate::jpl_ephem::download_jpl_file::{EphemFilePath, JPLHorizonVersion};
 
-use super::horizon_records::HorizonRecord;
+use super::{horizon_records::HorizonRecord, interpolation_result::InterpResult};
 use std::{
     collections::HashMap,
     fs::File,
@@ -38,6 +38,7 @@ pub struct HorizonHeader {
     end_period: f64,
     period_lenght: f64,
     recsize: usize,
+    earth_moon_mass_ratio: f64,
 }
 
 /// Structure to hold the data from the JPL ephemeris file
@@ -354,7 +355,12 @@ impl HorizonData {
             .parse(input)
             .expect("failed to parse SS");
 
-        let (_, ncon) = le_i32::<_, nom::error::Error<_>>(input).expect("failed to parse NCON");
+        let (input, ncon) = le_i32::<_, nom::error::Error<_>>(input).expect("failed to parse NCON");
+
+        let (input, _) =
+            take::<_, _, nom::error::Error<_>>(8usize)(input).expect("failed to parse 4 bytes");
+        let (_, earth_moon_mass_ratio) = le_f64::<_, nom::error::Error<_>>(input)
+            .expect("failed to parse Earth-Moon mass ratio");
 
         file.seek(std::io::SeekFrom::Start(2696))
             .expect("Failed to seek to the JPL ephemeris file IPT.");
@@ -390,6 +396,7 @@ impl HorizonData {
                 end_period: ss[1],
                 period_lenght: ss[2],
                 recsize: recsize,
+                earth_moon_mass_ratio,
             },
             records: blocks,
         }
@@ -454,6 +461,66 @@ impl HorizonData {
         let local_tau = tau * n_subs as f64 - sub_index as f64;
         Some((&record_body[sub_index], local_tau))
     }
+
+    /// Get the ephemeris data for a given target and center body at a given ephemeris time
+    /// The target and center bodies are specified by their IDs (0-14).
+    /// The ephemeris data is computed by interpolating the records for the target and center bodies
+    /// at the given ephemeris time.
+    /// The result is the difference between the target and center ephemeris data.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `target` : Target body number (0-14)
+    /// * `center` : Center body number (0-14)
+    /// * `et` : Ephemeris time in days
+    /// * `compute_velocity` : Flag to compute velocity
+    /// * `compute_acceleration` : Flag to compute acceleration
+    ///
+    /// Returns
+    /// -------
+    /// * An InterpResult struct containing the position, velocity, and acceleration
+    ///   of the target body relative to the center body at the given ephemeris time.
+    ///  The position is in Km, velocity in Km/day, and acceleration in Km/day^2.
+    /// * The velocity and acceleration are optional, depending on the user request.
+    pub fn ephemeris(
+        &self,
+        target: u32,
+        center: u32,
+        et: f64,
+        compute_velocity: bool,
+        compute_acceleration: bool,
+    ) -> InterpResult {
+        let ipt_target = self.header.ipt[target as usize];
+        let ipt_center = self.header.ipt[center as usize];
+        let (record, tau) = self.get_record_horizon(target, et).unwrap();
+        let mut interp_target = record.interpolate(
+            tau,
+            compute_velocity,
+            compute_acceleration,
+            ipt_target[2] as usize,
+        );
+
+        if target == 2 {
+            let (record, tau) = self.get_record_horizon(9, et).unwrap();
+            let interp_moon = record.interpolate(
+                tau,
+                compute_velocity,
+                compute_acceleration,
+                ipt_target[2] as usize,
+            );
+            interp_target = interp_target - interp_moon / (1. + self.header.earth_moon_mass_ratio);
+        }
+
+        let (record, tau) = self.get_record_horizon(center, et).unwrap();
+        let interp_center = record.interpolate(
+            tau,
+            compute_velocity,
+            compute_acceleration,
+            ipt_center[2] as usize,
+        );
+
+        interp_target - interp_center
+    }
 }
 
 #[cfg(test)]
@@ -463,7 +530,6 @@ mod test_horizon_reader {
 
     use super::*;
     use crate::jpl_ephem::download_jpl_file::{EphemFilePath, EphemFileSource};
-    use crate::jpl_ephem::horizon::horizon_records::InterpResult;
     use hifitime::Epoch;
 
     static JPL_EPHEM: LazyLock<HorizonData> = LazyLock::new(|| {
@@ -500,6 +566,7 @@ mod test_horizon_reader {
                 end_period: 2688976.5,
                 period_lenght: 32.0,
                 recsize: 8144,
+                earth_moon_mass_ratio: 81.30056822149722,
             }
         );
 
@@ -680,5 +747,168 @@ mod test_horizon_reader {
                 )
             }
         )
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_target_center_interpolation() {
+        let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
+        let interp = JPL_EPHEM.ephemeris(2, 10, epoch1.to_jde_et_days(), true, true);
+
+        // Warning:
+        // The values from these tests (velocity) differ from the original OrbFit code.
+
+        // --- Error compare to the original code output ---
+        // ----------------
+        // ##1       #:1   <== -0.8988034554221999
+        // ##1       #:1   ==> -0.89880345556106200
+        // @ Absolute error = 1.3886210000e-10, Relative error = 1.5449662455e-10
+        // ----------------
+        // ##2       #:1   <== -0.40964296717561455
+        // ##2       #:1   ==> -0.40964296690814295
+        // @ Absolute error = 2.6747160000e-10, Relative error = 6.5293834292e-10
+        // ----------------
+        // ##3       #:1   <== -0.1775645884678087
+        // ##3       #:1   ==> -0.17756458835186803
+        // @ Absolute error = 1.1594067000e-10, Relative error = 6.5294927934e-10
+        // ----------------
+        // ##4       #:1   <== 0.007373437134924321
+        // ##4       #:1   ==> 7.3687561003931458E-003
+        // @ Absolute error = 4.6810345312e-6, Relative error = 6.3525437230e-4
+        // ----------------
+        // ##5       #:1   <== -0.014195294772116394
+        // ##5       #:1   ==> -1.4193450423040193E-002
+        // @ Absolute error = 1.8443490762e-6, Relative error = 1.2994367270e-4
+        // ----------------
+        // ##6       #:1   <== -0.00615339867737908
+        // ##6       #:1   ==> -6.1524192963133516E-003
+        // @ Absolute error = 9.7938106573e-7, Relative error = 1.5918633282e-4
+        assert_eq!(
+            interp.to_au(),
+            InterpResult {
+                position: [[
+                    -0.8988034554221999,
+                    -0.40964296717561455,
+                    -0.1775645884678087
+                ]]
+                .into(),
+                velocity: Some(
+                    [[
+                        0.007373437134924321,
+                        -0.014195294772116394,
+                        -0.00615339867737908
+                    ]]
+                    .into()
+                ),
+                acceleration: Some(
+                    [[
+                        0.00026307966146370303,
+                        0.00011984679205707006,
+                        5.194163155015295e-5
+                    ]]
+                    .into()
+                )
+            }
+        );
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
+        let interp = JPL_EPHEM.ephemeris(3, 10, epoch1.to_jde_et_days(), true, true);
+
+        // ----------------
+        // ##1       #:1   <== -1.5211490584063214
+        // ##1       #:1   ==> -1.5211490583088891
+        // @ Absolute error = 9.7432300000e-11, Relative error = 6.4051776825e-11
+        // ----------------
+        // ##2       #:1   <== 0.6012490191524654
+        // ##2       #:1   ==> 0.60124901935193298
+        // @ Absolute error = 1.9946758000e-10, Relative error = 3.3175535202e-10
+        // ----------------
+        // ##3       #:1   <== 0.3168091824834757
+        // ##3       #:1   ==> 0.31680918257233875
+        // @ Absolute error = 8.8863050000e-11, Relative error = 2.8049392162e-10
+        // ----------------
+        // ##4       #:1   <== -0.005170287249980722
+        // ##4       #:1   ==> -5.1702872518150584E-003
+        // @ Absolute error = 1.8343364000e-12, Relative error = 3.5478423370e-10
+        // ----------------
+        // ##5       #:1   <== -0.010584792922491279
+        // ##5       #:1   ==> -1.0584792921766313E-002
+        // @ Absolute error = 7.2496600000e-13, Relative error = 6.8491278512e-11
+        // ----------------
+        // ##6       #:1   <== -0.0047155422863481965
+        // ##6       #:1   ==> -4.7155422859661913E-003
+        // @ Absolute error = 3.8200520000e-13, Relative error = 8.1009813259e-11
+        assert_eq!(
+            interp.to_au(),
+            InterpResult {
+                position: [[-1.5211490584063214, 0.6012490191524654, 0.3168091824834757]].into(),
+                velocity: Some(
+                    [[
+                        -0.005170287249980722,
+                        -0.010584792922491279,
+                        -0.0047155422863481965
+                    ]]
+                    .into()
+                ),
+                acceleration: Some(
+                    [[
+                        9.733944178834527e-5,
+                        -3.847044274980559e-5,
+                        -2.027114024748412e-5
+                    ]]
+                    .into()
+                )
+            }
+        );
+
+        let epoch1 = Epoch::from_mjd_in_time_scale(52550.18467592593, hifitime::TimeScale::TT);
+        let interp = JPL_EPHEM.ephemeris(2, 10, epoch1.to_jde_et_days(), true, true);
+
+        // ----------------
+        // ##1       #:1   <== 0.9861809593769886
+        // ##1       #:1   ==> 0.98618095931585270
+        // @ Absolute error = 6.1135900000e-11, Relative error = 6.1992577957e-11
+        // ----------------
+        // ##2       #:1   <== 0.15571307494189152
+        // ##2       #:1   ==> 0.15571307523866329
+        // @ Absolute error = 2.9677177000e-10, Relative error = 1.9058885717e-9
+        // ----------------
+        // ##3       #:1   <== 0.06750574435265419
+        // ##3       #:1   ==> 6.7505744481314980E-002
+        // @ Absolute error = 1.2866079000e-10, Relative error = 1.9059235808e-9
+        // ----------------
+        // ##4       #:1   <== -0.00319669467729019
+        // ##4       #:1   ==> -3.1936358165062678E-003
+        // @ Absolute error = 3.0588607839e-6, Relative error = 9.5779887241e-4
+        // ----------------
+        // ##5       #:1   <== 0.01549846762102015
+        // ##5       #:1   ==> 1.5502851910183760E-002
+        // @ Absolute error = 4.3842891636e-6, Relative error = 2.8288533233e-4
+        // ----------------
+        // ##6       #:1   <== 0.006719249051926452
+        // ##6       #:1   ==> 6.7210214323836712E-003
+        // @ Absolute error = 1.7723804572e-6, Relative error = 2.6377656841e-4
+        assert_eq!(
+            interp.to_au(),
+            InterpResult {
+                position: [[0.9861809593769886, 0.15571307494189152, 0.06750574435265419]].into(),
+                velocity: Some(
+                    [[
+                        -0.00319669467729019,
+                        0.01549846762102015,
+                        0.006719249051926452
+                    ]]
+                    .into()
+                ),
+                acceleration: Some(
+                    [[
+                        -0.00029133812669633266,
+                        -4.593824279587534e-5,
+                        -1.990630578209618e-5
+                    ]]
+                    .into()
+                )
+            }
+        );
     }
 }
