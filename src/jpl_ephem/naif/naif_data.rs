@@ -1,12 +1,13 @@
+use nom::{bytes::complete::take, number::complete::le_f64};
 use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, Read, Seek},
 };
-use nalgebra::Vector3;
-use nom::{bytes::complete::take, number::complete::le_f64};
 
-use crate::jpl_ephem::download_jpl_file::EphemFilePath;
+use crate::jpl_ephem::{
+    download_jpl_file::EphemFilePath, horizon::interpolation_result::InterpResult,
+};
 
 use super::{
     daf_header::DAFHeader, directory::DirectoryData, ephemeris_record::EphemerisRecord,
@@ -166,12 +167,7 @@ impl NaifData {
     /// --------
     /// * A tuple containing the position and velocity vectors in the J2000 frame.
     /// The position and velocity vectors are in kilometers and kilometers per second, respectively.
-    pub fn ephemeris_prediction(
-        &self,
-        target: NaifIds,
-        center: NaifIds,
-        et_seconds: f64,
-    ) -> (Vector3<f64>, Vector3<f64>) {
+    pub fn ephemeris(&self, target: NaifIds, center: NaifIds, et_seconds: f64) -> InterpResult {
         let record = self.get_record(target, center, et_seconds).expect(
             format!(
                 "Failed to get ephemeris record for target: {:?}, center: {:?} at epoch: {}",
@@ -180,7 +176,12 @@ impl NaifData {
             .as_str(),
         );
 
-        record.interpolate(et_seconds)
+        let (position, velocity) = record.interpolate(et_seconds);
+        InterpResult {
+            position: position,
+            velocity: Some(velocity),
+            acceleration: None,
+        }
     }
 
     /// Prints information about the available targets, centers, and epoch ranges in the ephemeris file.
@@ -213,19 +214,18 @@ mod test_naif_file {
     use std::sync::LazyLock;
 
     use super::*;
-    use crate::constants::AU;
     use crate::jpl_ephem::{
         download_jpl_file::{EphemFilePath, EphemFileSource},
         naif::{
-            naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary},
             naif_data::NaifData,
+            naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary},
         },
     };
     use hifitime::Epoch;
 
     static JPL_EPHEM: LazyLock<NaifData> = LazyLock::new(|| {
         let file_source: EphemFileSource = "naif:DE440".try_into().unwrap();
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+        let file_path = EphemFilePath::get_ephemeris_file(&file_source).unwrap();
         NaifData::read_naif_file(&file_path)
     });
 
@@ -424,48 +424,53 @@ mod test_naif_file {
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
 
-        let (position, velocity) = JPL_EPHEM.ephemeris_prediction(
+        let interp = JPL_EPHEM.ephemeris(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch1.to_et_seconds(),
         );
 
         assert_eq!(
-            position / AU,
-            Vector3::new(
-                -0.26169997917112875,
-                0.8682243128558709,
-                0.37623815974362734
-            )
-        );
-
-        assert_eq!(
-            velocity / AU,
-            Vector3::new(
-                -3.8995165075699485e-7,
-                -9.957615232661774e-8,
-                -4.316895883931796e-8
-            )
+            interp.to_au(),
+            InterpResult {
+                position: [[
+                    -0.26169997917112875,
+                    0.8682243128558709,
+                    0.37623815974362734
+                ]]
+                .into(),
+                velocity: Some(
+                    [[
+                        -3.8995165075699485e-7,
+                        -9.957615232661774e-8,
+                        -4.316895883931796e-8
+                    ]]
+                    .into()
+                ),
+                acceleration: None
+            }
         );
 
         let epoch2 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
-        let (position, velocity) = JPL_EPHEM.ephemeris_prediction(
+        let interp = JPL_EPHEM.ephemeris(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch2.to_et_seconds(),
         );
         assert_eq!(
-            position / AU,
-            Vector3::new(-0.5860307419898751, 0.7233961430776997, 0.31345193147254585)
-        );
-
-        assert_eq!(
-            velocity / AU,
-            Vector3::new(
-                -3.2554490509465264e-7,
-                -2.1982148078907505e-7,
-                -9.529706060142567e-8
-            )
+            interp.to_au(),
+            InterpResult {
+                position: [[-0.5860307419898751, 0.7233961430776997, 0.31345193147254585]].into(),
+                velocity: Some(
+                    [[
+                        -3.2554490509465264e-7,
+                        -2.1982148078907505e-7,
+                        -9.529706060142567e-8
+                    ]]
+                    .into()
+                ),
+                acceleration: None
+            }
         );
     }
 }

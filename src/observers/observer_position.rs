@@ -1,7 +1,7 @@
 use crate::outfit::Outfit;
 
 use super::super::observers::observers::Observer;
-use super::earth_position::get_earth_position;
+use super::earth_position::earth_position_from_jpl_horizon;
 use nalgebra::{Matrix3, Vector3};
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
@@ -36,7 +36,7 @@ pub(in crate::observers) fn helio_obs_pos(
     let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
 
     let time_vec = vec![mjd_tt.x, mjd_tt.y, mjd_tt.z];
-    let earth_helio_position = get_earth_position(&time_vec, &state);
+    let earth_helio_position = earth_position_from_jpl_horizon(&time_vec, &state);
 
     let earth_pos_vec = earth_helio_position
         .iter()
@@ -66,7 +66,7 @@ pub(in crate::observers) fn helio_obs_pos(
 /// ------
 /// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
 /// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
-pub (in crate::observers) fn pvobs(
+pub(in crate::observers) fn pvobs(
     observer: &Observer,
     tmjd: f64,
     ut1_provider: &Ut1Provider,
@@ -232,7 +232,7 @@ mod observer_pos_tests {
 
     #[test]
     fn pvobs_test() {
-        let state = Outfit::new();
+        let state = Outfit::new("horizon:DE440");
         let tmjd = 57028.479297592596;
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
@@ -261,7 +261,7 @@ mod observer_pos_tests {
 
     #[test]
     fn test_helio_pos_obs() {
-        let state = Outfit::new();
+        let state = Outfit::new("horizon:DE440");
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala

@@ -2,9 +2,10 @@ mod daf_header;
 mod directory;
 mod ephemeris_record;
 mod jpl_ephem_header;
-mod naif_ids;
+pub mod naif_ids;
 pub mod naif_data;
 mod summary_record;
+pub mod naif_version;
 
 pub fn print_hex_dump(data: &[u8]) {
     const BYTES_PER_LINE: usize = 40;

@@ -64,7 +64,7 @@ mod trajectory_ext_test {
 
     #[test]
     fn test_triplets_selection() {
-        let mut env_state = Outfit::new();
+        let mut env_state = Outfit::new("horizon:DE440");
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/8467.obs"));
 
