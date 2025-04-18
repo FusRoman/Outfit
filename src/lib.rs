@@ -15,7 +15,7 @@ pub mod time;
 
 #[cfg(all(test, feature = "jpl-download"))]
 pub(crate) mod unit_test_global {
-    use std::sync::{LazyLock, Once};
+    use std::sync::LazyLock;
 
     use crate::{
         jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
