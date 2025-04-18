@@ -1,29 +1,54 @@
 use std::{collections::HashMap, sync::Arc};
 
+use once_cell::sync::OnceCell;
+
 use ordered_float::NotNan;
 use ureq::http::{self, Uri};
 
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
+    jpl_ephem::download_jpl_file::EphemFileSource,
     observers::{observatories::Observatories, observers::Observer},
+    outfit_errors::OutfitError,
 };
+
+use crate::jpl_ephem::JPLEphem;
 
 pub struct Outfit {
     env_state: OutfitEnv,
     observatories: Observatories,
+    jpl_source: EphemFileSource,
+    jpl_ephem: OnceCell<JPLEphem>,
 }
 
 impl Outfit {
-    pub fn new() -> Self {
+    pub fn new(jpl_file: &str) -> Self {
         Outfit {
             env_state: OutfitEnv::new(),
             observatories: Observatories::new(),
+            jpl_source: jpl_file
+                .try_into()
+                .expect(format!("JPL ephemeris file path is not valid: {jpl_file}").as_str()),
+            jpl_ephem: OnceCell::new(),
         }
+    }
+
+    pub fn get_jpl_ephem(&self) -> Result<&JPLEphem, OutfitError> {
+        self.jpl_ephem
+            .get_or_try_init(|| JPLEphem::new(&self.jpl_source))
     }
 
     pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
         &self.env_state.ut1_provider
+    }
+
+    pub(crate) fn get_url<U>(&self, url: U) -> String
+    where
+        Uri: TryFrom<U>,
+        <Uri as TryFrom<U>>::Error: Into<http::Error>,
+    {
+        self.env_state.get_from_url(url)
     }
 
     pub(crate) fn post_url<T, I, K, V>(&self, url: T, form: I) -> String
@@ -195,7 +220,7 @@ mod outfit_struct_test {
 
     #[test]
     fn test_observer_from_mpc_code() {
-        let outfit = Outfit::new();
+        let outfit = Outfit::new("horizon:DE440");
 
         let observer = outfit.get_observer_from_mpc_code(&"000".into());
         let test = Observer {
@@ -227,7 +252,7 @@ mod outfit_struct_test {
 
     #[test]
     fn test_add_observer() {
-        let mut outfit = Outfit::new();
+        let mut outfit = Outfit::new("horizon:DE440");
         let obs = outfit.new_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
         assert_eq!(obs.longitude, 1.0);
         assert_eq!(obs.rho_cos_phi, 0.999395371426802);
@@ -237,5 +262,21 @@ mod outfit_struct_test {
 
         let obs2 = outfit.new_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
         assert_eq!(outfit.observatories.uint16_from_observer(obs2), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_jpl_ephem_from_horizon() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        let jpl_ephem = OUTFIT_HORIZON_TEST.get_jpl_ephem();
+        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_jpl_ephem_from_naif() {
+        use crate::unit_test_global::OUTFIT_NAIF_TEST;
+        let jpl_ephem = OUTFIT_NAIF_TEST.get_jpl_ephem();
+        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
     }
 }

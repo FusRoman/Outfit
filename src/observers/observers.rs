@@ -1,10 +1,10 @@
 use nalgebra::Vector3;
 use ordered_float::NotNan;
 
+use crate::constants::{Degree, Kilometer};
 use crate::constants::ERAU;
 
-use super::super::jpl_request::observer_pos::geodetic_to_parallax;
-use crate::constants::{Degree, Kilometer};
+use super::observer_position::geodetic_to_parallax;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Observer {

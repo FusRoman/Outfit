@@ -5,7 +5,7 @@ use outfit::outfit::Outfit;
 
 #[test]
 fn test_read_ades() {
-    let mut outfit = Outfit::new();
+    let mut outfit = Outfit::new("horizon:DE440");
 
     let mut traj_set =
         TrajectorySet::new_from_ades(&mut outfit, &Utf8Path::new("tests/data/example_ades.xml"));

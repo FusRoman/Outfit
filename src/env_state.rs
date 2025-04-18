@@ -45,7 +45,7 @@ impl OutfitEnv {
     }
 
     fn initialize_ut1_provider() -> Ut1Provider {
-        Ut1Provider::download_short_from_jpl()
+        Ut1Provider::download_from_jpl("latest_eop2.long")
             .expect("Download of the JPL short time scale UT1 data failed")
     }
 

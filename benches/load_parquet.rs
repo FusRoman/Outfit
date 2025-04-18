@@ -6,7 +6,7 @@ use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
 fn bench_load_parquet(c: &mut Criterion) {
-    let mut outfit = Outfit::new();
+    let mut outfit = Outfit::new("horizon:DE440");
     let path = Utf8Path::new("tests/data/test_from_fink.parquet");
     let ztf_observer = outfit.get_observer_from_mpc_code(&"I41".into());
 

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::outfit::Outfit;
 
 use super::super::observers::observers::Observer;
@@ -5,7 +7,6 @@ use nalgebra::{Matrix3, Vector3};
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
 use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
-use super::earth_pos::get_earth_position;
 use hifitime::prelude::Epoch;
 use hifitime::ut1::Ut1Provider;
 
@@ -23,28 +24,48 @@ use hifitime::ut1::Ut1Provider;
 /// ------
 /// * a 3x3 matrix containing the x,y,z coordinates of the observer at the time of the three
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
-pub fn helio_obs_pos(
-    observer: &Vector3<&Observer>,
+pub(in crate::observers) fn helio_obs_pos(
+    observer: &Observer,
     mjd_tt: &Vector3<f64>,
     state: &Outfit,
 ) -> Matrix3<f64> {
-    let position_obs_time = mjd_tt
-        .iter()
-        .zip(observer.iter())
-        .map(|(mjd_el, obs)| pvobs(obs, *mjd_el, &state.get_ut1_provider()).0)
-        .collect::<Vec<Vector3<f64>>>();
+    let mjd_tt_first_obs = Epoch::from_mjd_in_time_scale(mjd_tt.x, hifitime::TimeScale::TT);
+    let mjd_tt_second_obs = Epoch::from_mjd_in_time_scale(mjd_tt.y, hifitime::TimeScale::TT);
+    let mjd_tt_third_obs = Epoch::from_mjd_in_time_scale(mjd_tt.z, hifitime::TimeScale::TT);
 
-    let pos_obs_matrix = Matrix3::from_columns(&position_obs_time);
+    let observer_position_first_obs =
+        pvobs(observer, mjd_tt_first_obs, &state.get_ut1_provider()).0;
+    let observer_position_second_obs =
+        pvobs(observer, mjd_tt_second_obs, &state.get_ut1_provider()).0;
+    let observer_position_third_obs =
+        pvobs(observer, mjd_tt_third_obs, &state.get_ut1_provider()).0;
 
-    let time_vec = vec![mjd_tt.x, mjd_tt.y, mjd_tt.z];
-    let earth_helio_position = get_earth_position(&time_vec, &state);
+    let pos_obs_matrix = Matrix3::from_columns(&vec![
+        observer_position_first_obs,
+        observer_position_second_obs,
+        observer_position_third_obs,
+    ]);
 
-    let earth_pos_vec = earth_helio_position
-        .iter()
-        .map(|pos_record| pos_record.pos_vector())
-        .collect::<Vec<Vector3<f64>>>();
+    let earth_position_first_obs = state
+        .get_jpl_ephem()
+        .unwrap()
+        .earth_position_ephemeris(&mjd_tt_first_obs);
 
-    let earth_pos_matrix = Matrix3::from_columns(&earth_pos_vec);
+    let earth_position_second_obs = state
+        .get_jpl_ephem()
+        .unwrap()
+        .earth_position_ephemeris(&mjd_tt_second_obs);
+
+    let earth_position_third_obs = state
+        .get_jpl_ephem()
+        .unwrap()
+        .earth_position_ephemeris(&mjd_tt_third_obs);
+
+    let earth_pos_matrix = Matrix3::from_columns(&vec![
+        earth_position_first_obs,
+        earth_position_second_obs,
+        earth_position_third_obs,
+    ]);
 
     let mut rot = [[0.; 3]; 3];
     rotpn(&mut rot, "ECLM", "J2000", 0., "EQUM", "J2000", 0.);
@@ -67,9 +88,9 @@ pub fn helio_obs_pos(
 /// ------
 /// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
 /// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
-fn pvobs(
+pub(in crate::observers) fn pvobs(
     observer: &Observer,
-    tmjd: f64,
+    tmjd: Epoch,
     ut1_provider: &Ut1Provider,
 ) -> (Vector3<f64>, Vector3<f64>) {
     // Initialisation
@@ -83,19 +104,26 @@ fn pvobs(
 
     // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
     // based on the hifitime crate
-    let epoch_mjd = Epoch::from_mjd_utc(tmjd);
-    let mjd_ut1 = epoch_mjd.to_ut1(ut1_provider.to_owned());
-    let tut = mjd_ut1.to_mjd_utc_days();
+    let mjd_ut1 = tmjd.to_ut1(ut1_provider.to_owned());
+    let tut = mjd_ut1.to_mjd_tai_days();
 
     // Compute the Greenwich sideral apparent time
-    let gast = gmst(tut) + equequ(tmjd);
+    let gast = gmst(tut) + equequ(tmjd.to_mjd_tt_days());
 
     // Earth rotation matrix
     let rot = rotmt(-gast, 2);
 
     // Transformation in the ecliptic mean J2000
     let mut rot1 = [[0.; 3]; 3];
-    rotpn(&mut rot1, "EQUT", "OFDATE", tmjd, "ECLM", "J2000", 0.);
+    rotpn(
+        &mut rot1,
+        "EQUT",
+        "OFDATE",
+        tmjd.to_mjd_tt_days(),
+        "ECLM",
+        "J2000",
+        0.,
+    );
 
     let rot1_mat = Matrix3::from(rot1).transpose();
     let rot_mat = Matrix3::from(rot).transpose();
@@ -233,36 +261,39 @@ mod observer_pos_tests {
 
     #[test]
     fn pvobs_test() {
-        let state = Outfit::new();
+        let state = Outfit::new("horizon:DE440");
         let tmjd = 57028.479297592596;
+        let epoch = Epoch::from_mjd_in_time_scale(tmjd, hifitime::TimeScale::TT);
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
         let (observer_position, observer_velocity) =
-            pvobs(&pan_starrs, tmjd, state.get_ut1_provider());
+            pvobs(&pan_starrs, epoch, state.get_ut1_provider());
 
         assert_eq!(
             observer_position.as_slice(),
             [
-                -2.1029664445055886e-5,
-                3.7089965349631534e-5,
-                2.911548164794497e-7
+                -2.086211182493635e-5, 
+                3.718476815327979e-5, 
+                2.4978996447997476e-7
             ]
         );
         assert_eq!(
             observer_velocity.as_slice(),
             [
-                -0.00021367298085517918,
-                -0.00012156695591212987,
-                5.304083328775301e-5
+                -0.0002143246535691577, 
+                -0.00012059801691431748, 
+                5.262184624215718e-5
             ]
         );
     }
 
     #[test]
+    #[cfg(feature = "jpl-download")]
     fn test_helio_pos_obs() {
-        let state = Outfit::new();
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
         let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
@@ -270,21 +301,20 @@ mod observer_pos_tests {
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
         // Create a vector of observers
-        let pan_starrs = Vector3::new(&pan_starrs, &pan_starrs, &pan_starrs);
-        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &state);
+        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &OUTFIT_HORIZON_TEST);
 
         assert_eq!(
             helio_pos.as_slice(),
             [
-                -0.26456678469889994,
-                0.8689350609363788,
-                0.3766996213519332,
-                -0.5891633520067185,
-                0.7238873564700253,
-                0.31381865190488956,
-                -0.7743279501475471,
-                0.5612534464162001,
-                0.24333415468923875
+                -0.2645666171572263,
+                0.8689351643674214,
+                0.3766996211095918,
+                -0.5891631853157056,
+                0.7238872516134827,
+                0.31381865162416517,
+                -0.7743280307598619,
+                0.561253266432187,
+                0.24333415473530776
             ]
         )
     }
