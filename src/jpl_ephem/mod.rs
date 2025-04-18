@@ -7,6 +7,8 @@ use naif::{
 };
 use nalgebra::Vector3;
 
+use crate::outfit_errors::OutfitError;
+
 pub(super) mod download_jpl_file;
 pub mod horizon;
 pub mod jpl_request;
@@ -18,16 +20,16 @@ pub enum JPLEphem {
 }
 
 impl JPLEphem {
-    pub fn new(file_source: &EphemFileSource) -> Self {
-        let file_path = EphemFilePath::get_ephemeris_file(file_source).unwrap();
+    pub fn new(file_source: &EphemFileSource) -> Result<Self, OutfitError> {
+        let file_path = EphemFilePath::get_ephemeris_file(file_source)?;
         match file_path {
             EphemFilePath::JPLHorizon(..) => {
                 let horizon_data = HorizonData::read_horizon_file(&file_path);
-                JPLEphem::HorizonFile(horizon_data)
+                Ok(JPLEphem::HorizonFile(horizon_data))
             }
             EphemFilePath::NAIF(..) => {
                 let naif_data = NaifData::read_naif_file(&file_path);
-                JPLEphem::NaifFile(naif_data)
+                Ok(JPLEphem::NaifFile(naif_data))
             }
         }
     }
