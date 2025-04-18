@@ -528,24 +528,16 @@ impl HorizonData {
 
 #[cfg(test)]
 mod test_horizon_reader {
-
-    use std::sync::LazyLock;
-
     use super::*;
-    use crate::jpl_ephem::download_jpl_file::{EphemFilePath, EphemFileSource};
     use hifitime::Epoch;
-
-    static JPL_EPHEM: LazyLock<HorizonData> = LazyLock::new(|| {
-        let file_source: EphemFileSource = Some("horizon:DE440".try_into().unwrap()).unwrap();
-        let file_path = EphemFilePath::get_ephemeris_file(&file_source).unwrap();
-        HorizonData::read_horizon_file(&file_path)
-    });
+    #[cfg(feature = "jpl-download")]
+    use crate::unit_test_global::JPL_EPHEM_HORIZON;
 
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_horizon() {
         assert_eq!(
-            JPL_EPHEM.header,
+            JPL_EPHEM_HORIZON.header,
             HorizonHeader {
                 jpl_version: "DE440".to_string(),
                 ipt: [
@@ -573,14 +565,14 @@ mod test_horizon_reader {
             }
         );
 
-        assert_eq!(JPL_EPHEM.records.len(), 12556);
+        assert_eq!(JPL_EPHEM_HORIZON.records.len(), 12556);
         assert_eq!(
-            JPL_EPHEM.records.iter().fold(0, |acc, x| acc + x.len()),
+            JPL_EPHEM_HORIZON.records.iter().fold(0, |acc, x| acc + x.len()),
             150672
         );
 
         assert_eq!(
-            &JPL_EPHEM.records[0].get(&0).unwrap()[0],
+            &JPL_EPHEM_HORIZON.records[0].get(&0).unwrap()[0],
             &HorizonRecord {
                 start_jd: 2287184.5,
                 end_jd: 2287216.5,
@@ -640,7 +632,7 @@ mod test_horizon_reader {
     #[cfg(feature = "jpl-download")]
     fn test_get_record_from_horizon() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
-        let (record, tau) = JPL_EPHEM
+        let (record, tau) = JPL_EPHEM_HORIZON
             .get_record_horizon(4, epoch1.to_jde_et_days())
             .unwrap();
 
@@ -689,7 +681,7 @@ mod test_horizon_reader {
     #[cfg(feature = "jpl-download")]
     fn test_get_record_index() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
-        let (index, tau) = JPL_EPHEM.get_record_index(epoch1.to_jde_et_days());
+        let (index, tau) = JPL_EPHEM_HORIZON.get_record_index(epoch1.to_jde_et_days());
 
         assert_eq!(index, 5307);
         assert_eq!(tau, 0.639978049788624);
@@ -699,7 +691,7 @@ mod test_horizon_reader {
     #[cfg(feature = "jpl-download")]
     fn test_interpolation_from_horizon() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
-        let (record, tau) = JPL_EPHEM
+        let (record, tau) = JPL_EPHEM_HORIZON
             .get_record_horizon(10, epoch1.to_jde_et_days())
             .unwrap();
 
@@ -717,7 +709,7 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
-        let (record, tau) = JPL_EPHEM
+        let (record, tau) = JPL_EPHEM_HORIZON
             .get_record_horizon(10, epoch1.to_jde_et_days())
             .unwrap();
 
@@ -735,7 +727,7 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
-        let (record, tau) = JPL_EPHEM
+        let (record, tau) = JPL_EPHEM_HORIZON
             .get_record_horizon(10, epoch1.to_jde_et_days())
             .unwrap();
         let res = record.interpolate(tau, true, true, 2);
@@ -756,7 +748,7 @@ mod test_horizon_reader {
     #[cfg(feature = "jpl-download")]
     fn test_target_center_interpolation() {
         let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(
+        let interp = JPL_EPHEM_HORIZON.ephemeris(
             HorizonID::Earth,
             HorizonID::Sun,
             epoch1.to_jde_et_days(),
@@ -821,7 +813,7 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(60781.51949044435, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(
+        let interp = JPL_EPHEM_HORIZON.ephemeris(
             HorizonID::Mars,
             HorizonID::Sun,
             epoch1.to_jde_et_days(),
@@ -877,7 +869,7 @@ mod test_horizon_reader {
         );
 
         let epoch1 = Epoch::from_mjd_in_time_scale(52550.18467592593, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM.ephemeris(
+        let interp = JPL_EPHEM_HORIZON.ephemeris(
             HorizonID::Earth,
             HorizonID::Sun,
             epoch1.to_jde_et_days(),

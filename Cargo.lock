@@ -1461,6 +1461,7 @@ dependencies = [
  "itertools 0.14.0",
  "nalgebra",
  "nom",
+ "once_cell",
  "ordered-float 5.0.0",
  "parquet",
  "quick-xml",

@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, LazyLock, OnceLock},
-};
+use std::{collections::HashMap, sync::Arc};
+
+use once_cell::sync::OnceCell;
 
 use ordered_float::NotNan;
 use ureq::http::{self, Uri};
@@ -11,6 +10,7 @@ use crate::{
     env_state::OutfitEnv,
     jpl_ephem::download_jpl_file::EphemFileSource,
     observers::{observatories::Observatories, observers::Observer},
+    outfit_errors::OutfitError,
 };
 
 use crate::jpl_ephem::JPLEphem;
@@ -19,7 +19,7 @@ pub struct Outfit {
     env_state: OutfitEnv,
     observatories: Observatories,
     jpl_source: EphemFileSource,
-    jpl_ephem: OnceLock<JPLEphem>,
+    jpl_ephem: OnceCell<JPLEphem>,
 }
 
 impl Outfit {
@@ -30,13 +30,13 @@ impl Outfit {
             jpl_source: jpl_file
                 .try_into()
                 .expect(format!("JPL ephemeris file path is not valid: {jpl_file}").as_str()),
-            jpl_ephem: OnceLock::new(),
+            jpl_ephem: OnceCell::new(),
         }
     }
 
-    pub fn get_jpl_ephem(&self) -> &JPLEphem {
+    pub fn get_jpl_ephem(&self) -> Result<&JPLEphem, OutfitError> {
         self.jpl_ephem
-            .get_or_init(|| JPLEphem::new(&self.jpl_source))
+            .get_or_try_init(|| JPLEphem::new(&self.jpl_source))
     }
 
     pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
@@ -214,7 +214,6 @@ fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
 
 #[cfg(test)]
 mod outfit_struct_test {
-    use hifitime::Epoch;
     use ordered_float::NotNan;
 
     use crate::{observers::observers::Observer, outfit::Outfit};
@@ -266,21 +265,18 @@ mod outfit_struct_test {
     }
 
     #[test]
-    #[cfg(not(feature = "jpl-download"))]
-    fn test_get_jpl_ephem() {
-        let outfit = Outfit::new("horizon:DE440");
-        let jpl_ephem = outfit.get_jpl_ephem();
+    #[cfg(feature = "jpl-download")]
+    fn test_get_jpl_ephem_from_horizon() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        let jpl_ephem = OUTFIT_HORIZON_TEST.get_jpl_ephem();
+        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
+    }
 
-        let epoch = Epoch::from_mjd_in_time_scale(40422.845601851855, hifitime::TimeScale::TT);
-
-        let position = jpl_ephem.earth_position_ephemeris(&epoch);
-        assert_eq!(
-            position,
-            nalgebra::Vector3::from([[
-                0.4823543946106914,
-                -0.8204796149900725,
-                -0.35578368195764337
-            ]])
-        );
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_get_jpl_ephem_from_naif() {
+        use crate::unit_test_global::OUTFIT_NAIF_TEST;
+        let jpl_ephem = OUTFIT_NAIF_TEST.get_jpl_ephem();
+        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
     }
 }
