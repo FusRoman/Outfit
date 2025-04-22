@@ -39,6 +39,23 @@ pub(crate) trait ObservationsExt {
 }
 
 impl ObservationsExt for Observations {
+
+    /// Compute triplets of observations.
+    /// 
+    /// This function computes triplets of observations from the given set of observations.
+    /// It filters the observations based on the time difference between the first and last observation in the triplet,
+    /// and sorts the triplets based on their weights.
+    /// 
+    /// Arguments
+    /// ---------
+    /// * `dt_min`: An optional minimum time difference between the first and last observation in the triplet. (default: 0.03)
+    /// * `dt_max`: An optional maximum time difference between the first and last observation in the triplet. (default: 150.0)
+    /// * `optimal_interval_time`: An optional optimal interval time requested between the observations of the triplet. (default: 20.0)
+    /// * `max_triplet`: An optional maximum number of triplets to return. (default: 10)
+    /// 
+    /// Return
+    /// ------
+    /// * A vector of `GaussObs` representing the computed triplets of observations.
     fn compute_triplets(
         &mut self,
         dt_min: Option<f64>,
