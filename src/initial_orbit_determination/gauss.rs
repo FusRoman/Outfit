@@ -6,7 +6,7 @@ use nalgebra::Vector3;
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::kepler::velocity_correction;
-use crate::keplerian_element::KeplerianOrbit;
+use crate::keplerian_element::KeplerianElements;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
 use crate::ref_system::rotpn;
@@ -301,7 +301,7 @@ impl GaussObs {
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
-    ) -> KeplerianOrbit {
+    ) -> KeplerianElements {
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
 
@@ -316,7 +316,7 @@ impl GaussObs {
         let mut elem = [0.0; 6];
         let mut type_ = String::new();
         ccek1(&mut elem, &mut type_, &ast_pos_vel);
-        KeplerianOrbit {
+        KeplerianElements {
             reference_epoch: reference_epoch,
             semi_major_axis: elem[0],
             eccentricity: elem[1],
@@ -327,11 +327,11 @@ impl GaussObs {
         }
     }
 
-    // TODO: remplacer le return de Option<KeplerianOrbit> en enum avec 3 champs
+    // TODO: remplacer le return de Option<KeplerianElements> en enum avec 3 champs
     // un champ PrelimOrbit(KeplerienOrbit)
-    // un champ CorrectedOrbit(KeplerianOrbit)
+    // un champ CorrectedOrbit(KeplerianElements)
     // un champ FailOrbit
-    pub fn prelim_orbit(&self) -> Option<KeplerianOrbit> {
+    pub fn prelim_orbit(&self) -> Option<KeplerianElements> {
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) =
             self.gauss_prelim().unwrap();
 
@@ -712,7 +712,7 @@ mod gauss_test {
         let prelim_orbit = gauss.prelim_orbit().unwrap();
         assert_eq!(
             prelim_orbit,
-            KeplerianOrbit {
+            KeplerianElements {
                 reference_epoch: 57049.24233491307,
                 semi_major_axis: 1.8015109749705496,
                 eccentricity: 0.2835090890769234,

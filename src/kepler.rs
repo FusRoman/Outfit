@@ -100,7 +100,7 @@ fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
 }
 
 /// Retourne la valeur principale d'un angle en radians dans [0, 2π].
-fn principal_angle(a: f64) -> f64 {
+pub (crate) fn principal_angle(a: f64) -> f64 {
     a.rem_euclid(DPI) // rem_euclid assure un résultat dans [0, 2π]
 }
 
