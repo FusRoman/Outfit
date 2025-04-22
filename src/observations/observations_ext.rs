@@ -13,7 +13,7 @@ use crate::{constants::Observations, initial_orbit_determination::gauss::GaussOb
 /// Return
 /// ------
 /// * A `f64` representing the weight of the triplet.
-pub fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
+fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     fn s3dtw(dt: f64, dtw: f64) -> f64 {
         if dt <= dtw {
             dtw / dt
