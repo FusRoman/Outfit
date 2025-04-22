@@ -18,7 +18,7 @@ use aberth::aberth;
 /// time is the observation time in modified julian date (MJD
 /// observer_position is the position of the observer from where the observation have been taken.
 /// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct GaussObs {
     ra: Vector3<f64>,
     dec: Vector3<f64>,

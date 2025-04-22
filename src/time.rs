@@ -46,27 +46,27 @@ pub fn jd_to_mjd(jd: &Vec<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// Transformation from date in the format YYYY MM DD.FFFFF to modified julian date (MJD)
+/// Transformation from date in the format YYYY MM DD.FFFFF UTC frame to modified julian date (MJD) TT frame
 ///
 /// Argument
 /// --------
-/// * `date_str`: a string representing the date in the format YYYY MM DD.FFFFF
+/// * `date_str`: a string representing the date in the format YYYY MM DD.FFFFF in the UTC frame
 ///
 /// Return
 /// ------
-/// * a float representing the input date in modified julian date (MJD)
+/// * a float representing the input date in modified julian date (MJD) in the TT frame
 pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     let parts: Vec<&str> = date_str.split_whitespace().collect();
     if parts.len() != 3 {
-        return Err("Format invalide, attendu: YYYY MM DD.FFFFF".to_string());
+        return Err("Invalid format, expected: YYYY MM DD.FFFFF".to_string());
     }
 
-    // Extraction des valeurs
-    let year = i32::from_str(parts[0]).map_err(|_| "Année invalide")?;
-    let month = u8::from_str(parts[1]).map_err(|_| "Mois invalide")?;
-    let day_fraction = f64::from_str(parts[2]).map_err(|_| "Jour fractionnaire invalide")?;
+    // Extract values
+    let year = i32::from_str(parts[0]).map_err(|_| "invalid year")?;
+    let month = u8::from_str(parts[1]).map_err(|_| "invalid month")?;
+    let day_fraction = f64::from_str(parts[2]).map_err(|_| "invalid frac day")?;
     
-    // Séparation du jour et de la fraction du jour
+    // Separation of day and fraction day
     let day = day_fraction.trunc() as u8;
     let fraction = day_fraction - day as f64;
 
@@ -75,11 +75,11 @@ pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     let second = (((fraction * 24.0 - hour as f64) * 60.0 - minute as f64) * 60.0) as u8;
     let nano = ((((fraction * 24.0 - hour as f64) * 60.0 - minute as f64) * 60.0 - second as f64) * 1e9) as u32;
 
-    // Création de l'Epoch
+    // Creation of epoch
     let epoch = Epoch::from_gregorian(year, month, day, hour, minute, second, nano, TimeScale::UTC);
 
-    // Conversion en MJD
-    Ok(epoch.to_mjd_utc_days())
+    // Convert to MJD
+    Ok(epoch.to_mjd_tt_days())
 }
 
 
@@ -111,24 +111,24 @@ mod time_test {
     #[test]
     fn test_frac_date_to_mjd() {
         let mjd = frac_date_to_mjd("2021 1 1.0").unwrap();
-        assert_eq!(mjd, 59215.0);
+        assert_eq!(mjd, 59215.00080074074);
 
         let mjd = frac_date_to_mjd("2021 1 1.5").unwrap();
-        assert_eq!(mjd, 59215.5);
+        assert_eq!(mjd, 59215.50080074074);
 
         let mjd = frac_date_to_mjd("2021 1 1.75").unwrap();
-        assert_eq!(mjd, 59215.75);
+        assert_eq!(mjd, 59215.75080074074);
 
         let mjd = frac_date_to_mjd("2021 1 1.875").unwrap();
-        assert_eq!(mjd, 59215.875);
+        assert_eq!(mjd, 59215.87580074074);
 
         let mjd = frac_date_to_mjd("2021 1 1.999").unwrap();
-        assert_eq!(mjd, 59215.999);
+        assert_eq!(mjd, 59215.99980074074);
 
         let mjd = frac_date_to_mjd("2021 1 1.9999").unwrap();
-        assert_eq!(mjd, 59215.999899999995);
+        assert_eq!(mjd, 59216.00070074073);
 
         let mjd = frac_date_to_mjd("1976 09 20.93878").unwrap();
-        assert_eq!(mjd, 43041.93878);
+        assert_eq!(mjd, 43041.93932611111);
     }
 }
