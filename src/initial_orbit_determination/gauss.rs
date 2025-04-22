@@ -6,7 +6,7 @@ use nalgebra::Vector3;
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::kepler::velocity_correction;
-use crate::keplerian_orbit::KeplerianOrbit;
+use crate::keplerian_element::KeplerianOrbit;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
 use crate::ref_system::rotpn;
