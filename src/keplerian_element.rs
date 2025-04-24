@@ -20,43 +20,84 @@ pub struct KeplerianElements {
     pub mean_anomaly: f64,
 }
 
-impl From<KeplerianElements> for EquinoctialElements {
-    fn from(kepler: KeplerianElements) -> Self {
-        let KeplerianElements {
-            reference_epoch,
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node_longitude,
-            periapsis_argument,
-            mean_anomaly,
-        } = kepler;
+impl KeplerianElements {
+    pub (crate) fn from_equinoctial_internal(
+        reference_epoch: f64,
+        semi_major_axis: f64,
+        eccentricity_sin_lon: f64,
+        eccentricity_cos_lon: f64,
+        tan_half_incl_sin_node: f64,
+        tan_half_incl_cos_node: f64,
+        mean_longitude: f64,
+    ) -> Self {
+        let eps = 1.0e-12; // small value for near-circular/near-equatorial tests
+        let a = semi_major_axis;
+        let ecc = (eccentricity_sin_lon.powi(2) + eccentricity_cos_lon.powi(2)).sqrt();
 
-        let dig = ascending_node_longitude + periapsis_argument;
-        let h = eccentricity * dig.sin();
-        let k = eccentricity * dig.cos();
+        // Compute dig = ω + Ω (or set to 0 if eccentricity ≈ 0)
+        let dig = if ecc < eps {
+            0.0
+        } else {
+            eccentricity_sin_lon.atan2(eccentricity_cos_lon)
+        };
 
-        let tan_half_i = (inclination / 2.0).tan();
-        let p = tan_half_i * ascending_node_longitude.sin();
-        let q = tan_half_i * ascending_node_longitude.cos();
+        let tgi2 = (tan_half_incl_sin_node.powi(2) + tan_half_incl_cos_node.powi(2)).sqrt();
 
-        let mut lambda = dig + mean_anomaly;
-        lambda = principal_angle(lambda);
+        // Compute Ω (ascending node longitude)
+        let omega_node = if tgi2 < eps {
+            0.0
+        } else {
+            tan_half_incl_sin_node.atan2(tan_half_incl_cos_node)
+        };
 
-        EquinoctialElements {
-            reference_epoch,
-            semi_major_axis,
-            eccentricity_sin_lon: h,
-            eccentricity_cos_lon: k,
-            tan_half_incl_sin_node: p,
-            tan_half_incl_cos_node: q,
-            mean_longitude: lambda,
+        let inclination = 2.0 * tgi2.atan(); // radians
+
+        // Compute angular elements
+        let periapsis_arg = principal_angle(dig - omega_node);
+        let mean_anomaly = principal_angle(mean_longitude - dig);
+
+        Self {
+            reference_epoch: reference_epoch,
+            semi_major_axis: a,
+            eccentricity: ecc,
+            inclination: inclination,
+            ascending_node_longitude: omega_node,
+            periapsis_argument: periapsis_arg,
+            mean_anomaly: mean_anomaly,
         }
     }
 }
 
+impl From<KeplerianElements> for EquinoctialElements {
+    fn from(k: KeplerianElements) -> Self {
+        EquinoctialElements::from_kepler_internal(
+            k.reference_epoch,
+            k.semi_major_axis,
+            k.eccentricity,
+            k.inclination,
+            k.ascending_node_longitude,
+            k.periapsis_argument,
+            k.mean_anomaly,
+        )
+    }
+}
+
+impl From<&KeplerianElements> for EquinoctialElements {
+    fn from(k: &KeplerianElements) -> Self {
+        EquinoctialElements::from_kepler_internal(
+            k.reference_epoch,
+            k.semi_major_axis,
+            k.eccentricity,
+            k.inclination,
+            k.ascending_node_longitude,
+            k.periapsis_argument,
+            k.mean_anomaly,
+        )
+    }
+}
+
 #[cfg(test)]
-mod test_equinoctial_element {
+mod test_keplerian_element {
     use super::*;
     use crate::equinoctial_element::EquinoctialElements;
 

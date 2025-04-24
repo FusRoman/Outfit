@@ -1,8 +1,13 @@
+use hifitime::Epoch;
 use itertools::Itertools;
 use nalgebra::Vector3;
 
 use crate::{
-    constants::Observations, initial_orbit_determination::gauss::GaussObs, outfit::Outfit,
+    constants::Observations,
+    equinoctial_element::{self, EquinoctialElements},
+    initial_orbit_determination::gauss::GaussObs,
+    keplerian_element::KeplerianElements,
+    outfit::Outfit,
     outfit_errors::OutfitError,
 };
 
@@ -46,6 +51,15 @@ pub(crate) trait ObservationsExt {
         extf: f64,
         dtmax: f64,
     ) -> Result<(usize, usize), OutfitError>;
+
+    fn rms_orbit_error(
+        &self,
+        state: &Outfit,
+        triplets: &GaussObs,
+        orbit_element: &KeplerianElements,
+        extf: f64,
+        dtmax: f64,
+    ) -> Result<f64, OutfitError>;
 }
 
 impl ObservationsExt for Observations {
@@ -131,7 +145,7 @@ impl ObservationsExt for Observations {
     /// * `triplets`: A reference to a `GaussObs` representing the triplet of observations.
     /// * `extf`: A `f64` representing the external factor for the interval calculation.
     /// * `dtmax`: A `f64` representing the maximum allowed interval.
-    /// 
+    ///
     /// Return
     /// ------
     /// * A `Result` containing a tuple of start and end indices of the observations within the interval,
@@ -192,6 +206,37 @@ impl ObservationsExt for Observations {
         }
 
         Ok((i_start, i_end))
+    }
+
+    fn rms_orbit_error(
+        &self,
+        state: &Outfit,
+        triplets: &GaussObs,
+        orbit_element: &KeplerianElements,
+        extf: f64,
+        dtmax: f64,
+    ) -> Result<f64, OutfitError> {
+        let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
+        let equinoctial_elements: EquinoctialElements = orbit_element.into();
+
+        for i in start_obs_rms..=end_obs_rms {
+            let obs = self.get(i).ok_or(OutfitError::ObservationNotFound(i))?;
+
+            let (cart_pos_ast, cart_pos_vel, _) = equinoctial_elements.solve_two_body_problem(
+                0.,
+                obs.time - orbit_element.reference_epoch,
+                false,
+            )?;
+
+            let obs_mjd = Epoch::from_mjd_in_time_scale(obs.time, hifitime::TimeScale::TT);
+            let (earth_position, earth_velocity) = state
+                .get_jpl_ephem()
+                .unwrap()
+                .earth_ephemeris(&obs_mjd, true);
+
+            dbg!(earth_position);
+        }
+        Ok(0.0)
     }
 }
 
@@ -265,14 +310,14 @@ mod test_obs_ext {
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), 10., 30.)
             .unwrap();
-        
+
         assert_eq!(u1, 14);
         assert_eq!(u2, 36);
 
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), 0.001, 3.)
             .unwrap();
-        
+
         assert_eq!(u1, 17);
         assert_eq!(u2, 33);
     }
