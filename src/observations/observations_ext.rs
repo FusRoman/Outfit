@@ -120,6 +120,22 @@ impl ObservationsExt for Observations {
             .collect::<Vec<GaussObs>>()
     }
 
+    /// Select the interval of observations for RMS calculation.
+    ///
+    /// This function selects the interval of observations for RMS calculation based on the provided triplet.
+    /// It computes the maximum allowed interval and finds the start and end indices of the observations
+    /// within that interval.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `triplets`: A reference to a `GaussObs` representing the triplet of observations.
+    /// * `extf`: A `f64` representing the external factor for the interval calculation.
+    /// * `dtmax`: A `f64` representing the maximum allowed interval.
+    /// 
+    /// Return
+    /// ------
+    /// * A `Result` containing a tuple of start and end indices of the observations within the interval,
+    ///   or an `OutfitError` if an error occurs.
     fn select_rms_interval(
         &self,
         triplets: &GaussObs,
