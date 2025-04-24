@@ -35,4 +35,7 @@ pub enum OutfitError {
 
     #[error("ROOTS finding error: {0}")]
     RootFindingError(#[from] roots::SearchError),
+
+    #[error("Observation not found: {0}")]
+    ObservationNotFound(usize),
 }

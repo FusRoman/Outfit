@@ -141,14 +141,15 @@ impl EquinoctialElements {
 
         let r = (xe.powi(2) + ye.powi(2)).sqrt();
         let inv_r = 1.0 / r;
+        let inv_1_beta = 1.0 / (1. - beta);
 
         let tmp1 = mean_longitude_t1 - eccentric_anomaly;
-        let tmp2 = beta + self.eccentricity_sin_lon.powi(2) * beta.powi(3) / (1. - beta);
+        let tmp2 = beta + self.eccentricity_sin_lon.powi(2) * beta.powi(3) * inv_1_beta;
         let tmp3 =
-            self.eccentricity_sin_lon * self.eccentricity_cos_lon * beta.powi(3) / (1. - beta);
+            self.eccentricity_sin_lon * self.eccentricity_cos_lon * beta.powi(3) * inv_1_beta;
         let tmp4 = beta * self.eccentricity_sin_lon - sin_ecc_anom;
         let tmp5 = beta * self.eccentricity_cos_lon - cos_ecc_anom;
-        let tmp6 = beta + self.eccentricity_cos_lon.powi(2) * beta.powi(3) / (1. - beta);
+        let tmp6 = beta + self.eccentricity_cos_lon.powi(2) * beta.powi(3) * inv_1_beta;
         let tmp7 = 1. - r / self.semi_major_axis;
         let tmp8 = sin_ecc_anom - self.eccentricity_sin_lon;
         let tmp9 = cos_ecc_anom - self.eccentricity_cos_lon;
