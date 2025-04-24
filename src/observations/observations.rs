@@ -1,11 +1,16 @@
 use crate::{
     constants::{Degree, ObjectNumber, Observations, MJD},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
+    equinoctial_element::EquinoctialElements,
     observers::observers::Observer,
     outfit::Outfit,
+    outfit_errors::OutfitError,
+    ref_system::rotpn,
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
+use hifitime::Epoch;
+use nalgebra::Matrix3;
 use std::{ops::Range, sync::Arc};
 use thiserror::Error;
 
@@ -26,7 +31,6 @@ pub struct Observation {
 }
 
 impl Observation {
-
     /// Create a new observation
     ///
     /// Arguments
@@ -59,6 +63,43 @@ impl Observation {
     /// * The observer
     pub fn get_observer<'a>(&self, env_state: &'a Outfit) -> &'a Observer {
         env_state.get_observer_from_uint16(self.observer)
+    }
+
+    fn ephemeris_error(
+        &self,
+        state: &Outfit,
+        equinoctial_element: &EquinoctialElements,
+        observer: &Observer,
+    ) -> Result<f64, OutfitError> {
+        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
+            0.,
+            self.time - equinoctial_element.reference_epoch,
+            false,
+        )?;
+
+        let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
+        let (earth_position, earth_velocity) = state
+            .get_jpl_ephem()
+            .unwrap()
+            .earth_ephemeris(&obs_mjd, true);
+
+        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+        let matrix_elc_transform = Matrix3::from(roteqec).transpose();
+
+        let earth_pos_eclJ2000 = matrix_elc_transform * earth_position;
+        let earth_vel_eclJ2000 = matrix_elc_transform * earth_velocity.unwrap();
+
+        let obs_pos = observer.body_fixed_coord();
+
+        dbg!(earth_position);
+        dbg!(earth_velocity.unwrap());
+        dbg!(earth_pos_eclJ2000);
+        dbg!(earth_vel_eclJ2000);
+
+        dbg!(obs_pos);
+
+        Ok(0.)
     }
 }
 
@@ -175,4 +216,37 @@ pub(crate) fn observation_from_vec(
             observer: obs_uin16,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod test_observations {
+    use super::*;
+
+    use crate::{equinoctial_element, unit_test_global::OUTFIT_HORIZON_TEST};
+
+    #[test]
+    fn test_ephem_error() {
+        let obs = Observation {
+            observer: 0,
+            ra: 1.7899347771316527,
+            dec: 0.77899653810797365,
+            time: 57070.262067592594,
+        };
+
+        let observer = OUTFIT_HORIZON_TEST.get_observer_from_mpc_code(&"F51".to_string());
+
+        dbg!(&observer);
+
+        let equinoctial_element = EquinoctialElements {
+            reference_epoch: 57049.242334573748,
+            semi_major_axis: 1.8017360713154256,
+            eccentricity_sin_lon: 0.28355914566870571,
+            eccentricity_cos_lon: 0.20267383288689386,
+            tan_half_incl_sin_node: 7.9559790236937815E-003,
+            tan_half_incl_cos_node: 1.2451951387589135,
+            mean_longitude: 0.44054589015887125,
+        };
+
+        let t = obs.ephemeris_error(&OUTFIT_HORIZON_TEST, &equinoctial_element, &observer);
+    }
 }

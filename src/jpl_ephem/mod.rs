@@ -34,29 +34,33 @@ impl JPLEphem {
         }
     }
 
-    pub fn earth_position_ephemeris(&self, ephem_time: &Epoch) -> Vector3<f64> {
+    pub fn earth_ephemeris(
+        &self,
+        ephem_time: &Epoch,
+        compute_velocity: bool,
+    ) -> (Vector3<f64>, Option<Vector3<f64>>) {
         match self {
             JPLEphem::HorizonFile(horizon_data) => {
-                horizon_data
+                let ephem_res = horizon_data
                     .ephemeris(
                         HorizonID::Earth,
                         HorizonID::Sun,
                         ephem_time.to_jde_et_days(),
-                        false,
+                        compute_velocity,
                         false,
                     )
-                    .to_au()
-                    .position
+                    .to_au();
+                (ephem_res.position, ephem_res.velocity)
             }
             JPLEphem::NaifFile(naif_data) => {
-                naif_data
+                let ephem_res = naif_data
                     .ephemeris(
                         NaifIds::PB(PlanetaryBary::EarthMoon),
                         NaifIds::SSB(SolarSystemBary::SSB),
                         ephem_time.to_et_seconds(),
                     )
-                    .to_au()
-                    .position
+                    .to_au();
+                (ephem_res.position, ephem_res.velocity)
             }
         }
     }

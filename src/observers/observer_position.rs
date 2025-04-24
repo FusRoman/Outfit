@@ -46,20 +46,20 @@ pub(in crate::observers) fn helio_obs_pos(
         observer_position_third_obs,
     ]);
 
-    let earth_position_first_obs = state
+    let (earth_position_first_obs, _) = state
         .get_jpl_ephem()
         .unwrap()
-        .earth_position_ephemeris(&mjd_tt_first_obs);
+        .earth_ephemeris(&mjd_tt_first_obs, false);
 
-    let earth_position_second_obs = state
+    let (earth_position_second_obs, _) = state
         .get_jpl_ephem()
         .unwrap()
-        .earth_position_ephemeris(&mjd_tt_second_obs);
+        .earth_ephemeris(&mjd_tt_second_obs, false);
 
-    let earth_position_third_obs = state
+    let (earth_position_third_obs, _) = state
         .get_jpl_ephem()
         .unwrap()
-        .earth_position_ephemeris(&mjd_tt_third_obs);
+        .earth_ephemeris(&mjd_tt_third_obs, false);
 
     let earth_pos_matrix = Matrix3::from_columns(&vec![
         earth_position_first_obs,
@@ -274,16 +274,16 @@ mod observer_pos_tests {
         assert_eq!(
             observer_position.as_slice(),
             [
-                -2.086211182493635e-5, 
-                3.718476815327979e-5, 
+                -2.086211182493635e-5,
+                3.718476815327979e-5,
                 2.4978996447997476e-7
             ]
         );
         assert_eq!(
             observer_velocity.as_slice(),
             [
-                -0.0002143246535691577, 
-                -0.00012059801691431748, 
+                -0.0002143246535691577,
+                -0.00012059801691431748,
                 5.262184624215718e-5
             ]
         );

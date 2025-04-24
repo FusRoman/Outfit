@@ -36,6 +36,51 @@ pub struct EquinoctialElements {
 }
 
 impl EquinoctialElements {
+    /// Create a new instance of `EquinoctialElements` from Keplerian elements.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `reference_epoch`: Reference epoch (MJD)
+    /// * `semi_major_axis`: Semi-major axis (AU)
+    /// * `eccentricity`: Eccentricity (dimensionless)
+    /// * `inclination`: Inclination (radians)
+    /// * `ascending_node_longitude`: Ascending node longitude (radians)
+    /// * `periapsis_argument`: Argument of periapsis (radians)
+    /// * `mean_anomaly`: Mean anomaly (radians)
+    ///
+    /// Return
+    /// ------
+    /// * A new instance of `EquinoctialElements`
+    pub(crate) fn from_kepler_internal(
+        reference_epoch: f64,
+        semi_major_axis: f64,
+        eccentricity: f64,
+        inclination: f64,
+        ascending_node_longitude: f64,
+        periapsis_argument: f64,
+        mean_anomaly: f64,
+    ) -> Self {
+        let dig = ascending_node_longitude + periapsis_argument;
+        let h = eccentricity * dig.sin();
+        let k = eccentricity * dig.cos();
+
+        let tan_half_i = (inclination / 2.0).tan();
+        let p = tan_half_i * ascending_node_longitude.sin();
+        let q = tan_half_i * ascending_node_longitude.cos();
+
+        let lambda = principal_angle(dig + mean_anomaly);
+
+        Self {
+            reference_epoch,
+            semi_major_axis,
+            eccentricity_sin_lon: h,
+            eccentricity_cos_lon: k,
+            tan_half_incl_sin_node: p,
+            tan_half_incl_cos_node: q,
+            mean_longitude: lambda,
+        }
+    }
+
     /// Find the eccentric anomaly from the mean longitude and the longitude of periapsis.
     /// Solve the general kepler equation using equinoctial elements and the Newton-Raphson method.
     ///
@@ -82,7 +127,7 @@ impl EquinoctialElements {
 
     /// Computes partial derivatives of the position and velocity vectors
     /// with respect to equinoctial orbital elements.
-    /// 
+    ///
     /// This function evaluates how the Cartesian state vector of an orbiting body
     /// (position and velocity in 3D space) changes when each of its orbital elements
     /// is perturbed. It returns the Jacobian matrices of partial derivatives:
@@ -465,51 +510,29 @@ impl EquinoctialElements {
 
 impl From<EquinoctialElements> for KeplerianElements {
     fn from(equinoctial: EquinoctialElements) -> Self {
-        let EquinoctialElements {
-            reference_epoch,
-            semi_major_axis,
-            eccentricity_sin_lon,
-            eccentricity_cos_lon,
-            tan_half_incl_sin_node,
-            tan_half_incl_cos_node,
-            mean_longitude,
-        } = equinoctial;
+        KeplerianElements::from_equinoctial_internal(
+            equinoctial.reference_epoch,
+            equinoctial.semi_major_axis,
+            equinoctial.eccentricity_sin_lon,
+            equinoctial.eccentricity_cos_lon,
+            equinoctial.tan_half_incl_sin_node,
+            equinoctial.tan_half_incl_cos_node,
+            equinoctial.mean_longitude,
+        )
+    }
+}
 
-        let eps = 1.0e-12; // small value for near-circular/near-equatorial tests
-        let a = semi_major_axis;
-        let ecc = (eccentricity_sin_lon.powi(2) + eccentricity_cos_lon.powi(2)).sqrt();
-
-        // Compute dig = ω + Ω (or set to 0 if eccentricity ≈ 0)
-        let dig = if ecc < eps {
-            0.0
-        } else {
-            eccentricity_sin_lon.atan2(eccentricity_cos_lon)
-        };
-
-        let tgi2 = (tan_half_incl_sin_node.powi(2) + tan_half_incl_cos_node.powi(2)).sqrt();
-
-        // Compute Ω (ascending node longitude)
-        let omega_node = if tgi2 < eps {
-            0.0
-        } else {
-            tan_half_incl_sin_node.atan2(tan_half_incl_cos_node)
-        };
-
-        let inclination = 2.0 * tgi2.atan(); // radians
-
-        // Compute angular elements
-        let periapsis_arg = principal_angle(dig - omega_node);
-        let mean_anomaly = principal_angle(mean_longitude - dig);
-
-        KeplerianElements {
-            reference_epoch: reference_epoch,
-            semi_major_axis: a,
-            eccentricity: ecc,
-            inclination: inclination,
-            ascending_node_longitude: omega_node,
-            periapsis_argument: periapsis_arg,
-            mean_anomaly: mean_anomaly,
-        }
+impl From<&EquinoctialElements> for KeplerianElements {
+    fn from(equinoctial: &EquinoctialElements) -> Self {
+        KeplerianElements::from_equinoctial_internal(
+            equinoctial.reference_epoch,
+            equinoctial.semi_major_axis,
+            equinoctial.eccentricity_sin_lon,
+            equinoctial.eccentricity_cos_lon,
+            equinoctial.tan_half_incl_sin_node,
+            equinoctial.tan_half_incl_cos_node,
+            equinoctial.mean_longitude,
+        )
     }
 }
 
