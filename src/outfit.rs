@@ -268,7 +268,7 @@ mod outfit_struct_test {
     #[cfg(feature = "jpl-download")]
     fn test_get_jpl_ephem_from_horizon() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-        let jpl_ephem = OUTFIT_HORIZON_TEST.get_jpl_ephem();
+        let jpl_ephem = OUTFIT_HORIZON_TEST.0.get_jpl_ephem();
         assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
     }
 

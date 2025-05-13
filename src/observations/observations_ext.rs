@@ -1,14 +1,10 @@
-use hifitime::Epoch;
 use itertools::Itertools;
 use nalgebra::Vector3;
 
 use crate::{
-    constants::Observations,
-    equinoctial_element::{self, EquinoctialElements},
-    initial_orbit_determination::gauss::GaussObs,
-    keplerian_element::KeplerianElements,
-    outfit::Outfit,
-    outfit_errors::OutfitError,
+    constants::Observations, equinoctial_element::EquinoctialElements,
+    initial_orbit_determination::gauss::GaussObs, keplerian_element::KeplerianElements,
+    outfit::Outfit, outfit_errors::OutfitError,
 };
 
 /// Calculate the weight of a triplet of observations based on the time difference.
@@ -126,8 +122,8 @@ impl ObservationsExt for Observations {
 
                 GaussObs::new(
                     Vector3::new(idx1, idx2, idx3),
-                    Vector3::new(obs1.ra, obs2.ra, obs3.ra),
-                    Vector3::new(obs1.dec, obs2.dec, obs3.dec),
+                    Vector3::new(obs1.ra.to_radians(), obs2.ra.to_radians(), obs3.ra.to_radians()),
+                    Vector3::new(obs1.dec.to_radians(), obs2.dec.to_radians(), obs3.dec.to_radians()),
                     Vector3::new(obs1.time, obs2.time, obs3.time),
                 )
             })
@@ -217,24 +213,17 @@ impl ObservationsExt for Observations {
         dtmax: f64,
     ) -> Result<f64, OutfitError> {
         let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
+
+        dbg!("RMS interval: {} - {}", start_obs_rms, end_obs_rms);
+
         let equinoctial_elements: EquinoctialElements = orbit_element.into();
 
-        for i in start_obs_rms..=end_obs_rms {
-            let obs = self.get(i).ok_or(OutfitError::ObservationNotFound(i))?;
+        let rms_all_obs = self[start_obs_rms..=end_obs_rms]
+            .iter()
+            .map(|obs| obs.ephemeris_error(state, &equinoctial_elements, obs.get_observer(state)))
+            .try_fold(0.0, |acc, rms_obs| rms_obs.map(|rms| acc + rms))?;
 
-            let (cart_pos_ast, cart_pos_vel, _) = equinoctial_elements.solve_two_body_problem(
-                0.,
-                obs.time - orbit_element.reference_epoch,
-                false,
-            )?;
-
-            let obs_mjd = Epoch::from_mjd_in_time_scale(obs.time, hifitime::TimeScale::TT);
-            let (earth_position, earth_velocity) = state
-                .get_jpl_ephem()
-                .unwrap()
-                .earth_ephemeris(&obs_mjd, true);
-        }
-        Ok(0.0)
+        Ok((rms_all_obs / (2. * (end_obs_rms - start_obs_rms + 1) as f64)).sqrt())
     }
 }
 
@@ -318,5 +307,45 @@ mod test_obs_ext {
 
         assert_eq!(u1, 17);
         assert_eq!(u2, 33);
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_rms_trajectory() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let traj_set = &OUTFIT_HORIZON_TEST.1;
+
+        let traj = traj_set
+            .get(&crate::constants::ObjectNumber::String("K09R05F".into()))
+            .expect("Failed to get trajectory");
+
+        let triplets = GaussObs::new(
+            Vector3::new(34, 35, 36),
+            [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
+            [[
+                0.77917805235018101,
+                0.77908666497129186,
+                0.77899653810797365,
+            ]]
+            .into(),
+            [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
+        );
+
+        let kepler = KeplerianElements {
+            reference_epoch: 57049.242334573748,
+            semi_major_axis: 1.8017360713154256,
+            eccentricity: 0.28355914566870571,
+            inclination: 0.20267383288689386,
+            ascending_node_longitude: 7.9559790236937815E-003,
+            periapsis_argument: 1.2451951387589135,
+            mean_anomaly: 0.44054589015887125,
+        };
+
+        let rms = traj
+            .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler, -1.0, 30.)
+            .unwrap();
+
+        dbg!(rms);
     }
 }

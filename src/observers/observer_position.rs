@@ -346,7 +346,7 @@ mod observer_pos_tests {
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
         // Create a vector of observers
-        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &OUTFIT_HORIZON_TEST);
+        let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &OUTFIT_HORIZON_TEST.0);
 
         assert_eq!(
             helio_pos.as_slice(),
