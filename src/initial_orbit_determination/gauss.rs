@@ -13,8 +13,8 @@ use crate::ref_system::rotpn;
 use aberth::aberth;
 
 /// Gauss struct data
-/// ra is right ascension in degree
-/// dec is declination in degree
+/// ra is right ascension in radians
+/// dec is declination in radians
 /// time is the observation time in modified julian date (MJD
 /// observer_position is the position of the observer from where the observation have been taken.
 /// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
