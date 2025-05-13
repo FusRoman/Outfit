@@ -2,11 +2,7 @@ use crate::{
     constants::{Degree, ObjectNumber, Observations, DPI, MJD},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
-    kepler::principal_angle,
-    observers::{
-        observer_position::{geo_obs_pos, pvobs},
-        observers::Observer,
-    },
+    observers::{observer_position::geo_obs_pos, observers::Observer},
     outfit::Outfit,
     outfit_errors::OutfitError,
     ref_system::{cartesian_to_radec, correct_aberration, rotpn},
@@ -73,7 +69,7 @@ impl Observation {
         env_state.get_observer_from_uint16(self.observer)
     }
 
-    fn ephemeris_error(
+    pub(crate) fn ephemeris_error(
         &self,
         state: &Outfit,
         equinoctial_element: &EquinoctialElements,
@@ -87,9 +83,7 @@ impl Observation {
 
         let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
 
-        let (earth_position, _) = state
-            .get_jpl_ephem()?
-            .earth_ephemeris(&obs_mjd, true);
+        let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
 
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
@@ -156,18 +150,15 @@ fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, ParseOb
     }
 
     // TODO: replace error_ra and error_dec with the correct values
-    let observation = Observation {
-        time: frac_date_to_mjd(line[15..32].trim())
-            .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
-        ra: parse_ra_to_deg(line[32..44].trim())
+    let observation = Observation::new(
+        env_state.uint16_from_mpc_code(&line[77..80].trim().into()),
+        parse_ra_to_deg(line[32..44].trim())
             .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str()),
-        error_ra: 0.,
-        dec: parse_dec_to_deg(line[44..56].trim())
+        parse_dec_to_deg(line[44..56].trim())
             .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str()),
-        error_dec: 0.,
-        observer: env_state.uint16_from_mpc_code(&line[77..80].trim().into()),
-    };
-
+        frac_date_to_mjd(line[15..32].trim())
+            .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
+    );
     Ok(observation)
 }
 
@@ -239,14 +230,7 @@ pub(crate) fn observation_from_vec(
     ra.iter()
         .zip(dec.iter())
         .zip(time.iter())
-        .map(|((ra, dec), time)| Observation {
-            ra: *ra,
-            error_ra: 0.,
-            dec: *dec,
-            error_dec: 0.,
-            time: *time,
-            observer: obs_uin16,
-        })
+        .map(|((ra, dec), time)| Observation::new(obs_uin16, *ra, *dec, *time))
         .collect()
 }
 
@@ -254,10 +238,11 @@ pub(crate) fn observation_from_vec(
 mod test_observations {
     use super::*;
 
-    use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-
     #[test]
+    #[cfg(feature = "jpl-download")]
     fn test_ephem_error() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
         let obs = Observation {
             observer: 0,
             ra: 1.7899347771316527,
@@ -267,7 +252,9 @@ mod test_observations {
             time: 57070.262067592594,
         };
 
-        let observer = OUTFIT_HORIZON_TEST.get_observer_from_mpc_code(&"F51".to_string());
+        let observer = OUTFIT_HORIZON_TEST
+            .0
+            .get_observer_from_mpc_code(&"F51".to_string());
 
         let equinoctial_element = EquinoctialElements {
             reference_epoch: 57049.242334573748,
@@ -279,7 +266,8 @@ mod test_observations {
             mean_longitude: 1.6936970079414786,
         };
 
-        let rms_error = obs.ephemeris_error(&OUTFIT_HORIZON_TEST, &equinoctial_element, &observer);
+        let rms_error =
+            obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element, &observer);
         assert_eq!(rms_error.unwrap(), 75.00445641224026);
     }
 }
