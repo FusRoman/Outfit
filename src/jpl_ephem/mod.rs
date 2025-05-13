@@ -45,7 +45,7 @@ impl JPLEphem {
                     .ephemeris(
                         HorizonID::Earth,
                         HorizonID::Sun,
-                        ephem_time.to_jde_et_days(),
+                        ephem_time.to_mjd_tt_days(),
                         compute_velocity,
                         false,
                     )

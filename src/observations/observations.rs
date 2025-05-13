@@ -1,17 +1,21 @@
 use crate::{
-    constants::{Degree, ObjectNumber, Observations, MJD},
+    constants::{Degree, ObjectNumber, Observations, DPI, MJD},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
-    observers::observers::Observer,
+    kepler::principal_angle,
+    observers::{
+        observer_position::{geo_obs_pos, pvobs},
+        observers::Observer,
+    },
     outfit::Outfit,
     outfit_errors::OutfitError,
-    ref_system::rotpn,
+    ref_system::{cartesian_to_radec, correct_aberration, rotpn},
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
 use hifitime::Epoch;
 use nalgebra::Matrix3;
-use std::{ops::Range, sync::Arc};
+use std::{f64::consts::PI, ops::Range, sync::Arc};
 use thiserror::Error;
 
 /// A struct containing the observer and the time, ra, dec, and rms of an observation
@@ -26,7 +30,9 @@ use thiserror::Error;
 pub struct Observation {
     observer: u16,
     pub ra: Degree,
+    pub error_ra: Degree,
     pub dec: Degree,
+    pub error_dec: Degree,
     pub time: MJD,
 }
 
@@ -47,7 +53,9 @@ impl Observation {
         Observation {
             observer,
             ra,
+            error_ra: 0.,
             dec,
+            error_dec: 0.,
             time,
         }
     }
@@ -78,28 +86,46 @@ impl Observation {
         )?;
 
         let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
-        let (earth_position, earth_velocity) = state
-            .get_jpl_ephem()
-            .unwrap()
+
+        let (earth_position, _) = state
+            .get_jpl_ephem()?
             .earth_ephemeris(&obs_mjd, true);
 
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
-        let matrix_elc_transform = Matrix3::from(roteqec).transpose();
+        let matrix_elc_transform = Matrix3::from(roteqec);
 
-        let earth_pos_eclJ2000 = matrix_elc_transform * earth_position;
-        let earth_vel_eclJ2000 = matrix_elc_transform * earth_velocity.unwrap();
+        let earth_pos_eclj2000 = matrix_elc_transform.transpose() * earth_position;
 
-        let obs_pos = observer.body_fixed_coord();
+        let cart_pos_ast_eclj2000 = matrix_elc_transform * cart_pos_ast;
+        let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
-        dbg!(earth_position);
-        dbg!(earth_velocity.unwrap());
-        dbg!(earth_pos_eclJ2000);
-        dbg!(earth_vel_eclJ2000);
+        let (geo_obs_pos, _) = geo_obs_pos(&observer, &obs_mjd, &state.get_ut1_provider());
 
-        dbg!(obs_pos);
+        let xobs = geo_obs_pos + earth_pos_eclj2000;
 
-        Ok(0.)
+        let obs_on_earth = matrix_elc_transform * xobs;
+
+        let relative_position = cart_pos_ast_eclj2000 - obs_on_earth;
+
+        let corrected_pos = correct_aberration(relative_position, cart_pos_vel_eclj2000);
+        let (alpha, delta, _) = cartesian_to_radec(corrected_pos);
+
+        // -----
+        // floating point error between orbfit anf outfit is around 1e-5 in absolute and 1e-7 in relative
+        // this is something to check in the future for reproducing the same results
+        // -----
+        let diff_alpha = (self.ra - alpha) % DPI;
+        let diff_alpha = if diff_alpha > PI {
+            diff_alpha - DPI
+        } else {
+            diff_alpha
+        };
+
+        let diff_delta = self.dec - delta;
+        let rms_ra = (self.dec.cos() * (diff_alpha / self.error_ra)).powi(2);
+        let rms_dec = (diff_delta / self.error_dec).powi(2);
+        Ok(rms_ra + rms_dec)
     }
 }
 
@@ -129,13 +155,16 @@ fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, ParseOb
         return Err(ParseObsError::NotCCDObs);
     }
 
+    // TODO: replace error_ra and error_dec with the correct values
     let observation = Observation {
         time: frac_date_to_mjd(line[15..32].trim())
             .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
         ra: parse_ra_to_deg(line[32..44].trim())
             .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str()),
+        error_ra: 0.,
         dec: parse_dec_to_deg(line[44..56].trim())
             .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str()),
+        error_dec: 0.,
         observer: env_state.uint16_from_mpc_code(&line[77..80].trim().into()),
     };
 
@@ -206,12 +235,15 @@ pub(crate) fn observation_from_vec(
     observer: Arc<Observer>,
 ) -> Observations {
     let obs_uin16 = env_state.uint16_from_observer(observer);
+    // TODO: replace error_ra and error_dec with the correct values
     ra.iter()
         .zip(dec.iter())
         .zip(time.iter())
         .map(|((ra, dec), time)| Observation {
             ra: *ra,
+            error_ra: 0.,
             dec: *dec,
+            error_dec: 0.,
             time: *time,
             observer: obs_uin16,
         })
@@ -222,31 +254,32 @@ pub(crate) fn observation_from_vec(
 mod test_observations {
     use super::*;
 
-    use crate::{equinoctial_element, unit_test_global::OUTFIT_HORIZON_TEST};
+    use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
     #[test]
     fn test_ephem_error() {
         let obs = Observation {
             observer: 0,
             ra: 1.7899347771316527,
+            error_ra: 1.7700245206085460E-006,
             dec: 0.77899653810797365,
+            error_dec: 1.2595828918293177E-006,
             time: 57070.262067592594,
         };
 
         let observer = OUTFIT_HORIZON_TEST.get_observer_from_mpc_code(&"F51".to_string());
 
-        dbg!(&observer);
-
         let equinoctial_element = EquinoctialElements {
             reference_epoch: 57049.242334573748,
             semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.28355914566870571,
-            eccentricity_cos_lon: 0.20267383288689386,
-            tan_half_incl_sin_node: 7.9559790236937815E-003,
-            tan_half_incl_cos_node: 1.2451951387589135,
-            mean_longitude: 0.44054589015887125,
+            eccentricity_sin_lon: 0.26937368090922720,
+            eccentricity_cos_lon: 8.8564152600135601E-002,
+            tan_half_incl_sin_node: 8.0899701663963020E-004,
+            tan_half_incl_cos_node: 0.10168201109730375,
+            mean_longitude: 1.6936970079414786,
         };
 
-        let t = obs.ephemeris_error(&OUTFIT_HORIZON_TEST, &equinoctial_element, &observer);
+        let rms_error = obs.ephemeris_error(&OUTFIT_HORIZON_TEST, &equinoctial_element, &observer);
+        assert_eq!(rms_error.unwrap(), 75.00445641224026);
     }
 }

@@ -1,4 +1,8 @@
-use super::constants::{EPS, RADEG, RADSEC, T2000, DPI};
+use nalgebra::Vector3;
+
+use crate::constants::{VLIGHT, VLIGHT_AU};
+
+use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 
 // TBD: will be used later in the project
 // enum RefEpoch {
@@ -526,6 +530,32 @@ fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
         }
     }
     result
+}
+
+pub(crate) fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
+    let norm_vector = xrel.norm();
+    let dt = norm_vector / VLIGHT_AU;
+    xrel - dt * vrel
+}
+
+pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
+    let pos_norm = cartesian_position.norm();
+    if pos_norm == 0. {
+        return (0.0, 0.0, pos_norm);
+    }
+
+    let delta = (cartesian_position.z / pos_norm).asin();
+
+    let cos_delta = delta.cos();
+    if cos_delta == 0.0 {
+        return (0.0, delta, pos_norm);
+    }
+
+    let cos_alpha = cartesian_position.x / (pos_norm * cos_delta);
+    let sin_alpha = cartesian_position.y / (pos_norm * cos_delta);
+    let alpha = sin_alpha.atan2(cos_alpha);
+    let alpha = if alpha < 0.0 { alpha + DPI } else { alpha };
+    (alpha, delta, pos_norm)
 }
 
 #[cfg(test)]
