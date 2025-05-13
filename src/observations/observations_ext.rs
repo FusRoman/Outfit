@@ -233,8 +233,6 @@ impl ObservationsExt for Observations {
                 .get_jpl_ephem()
                 .unwrap()
                 .earth_ephemeris(&obs_mjd, true);
-
-            dbg!(earth_position);
         }
         Ok(0.0)
     }

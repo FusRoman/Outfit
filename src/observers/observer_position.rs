@@ -1,5 +1,4 @@
-use std::str::FromStr;
-
+use crate::constants::MJD;
 use crate::outfit::Outfit;
 
 use super::super::observers::observers::Observer;
@@ -26,7 +25,7 @@ use hifitime::ut1::Ut1Provider;
 ///     observations (reference frame: Equatorial mean J2000, units: AU)
 pub(in crate::observers) fn helio_obs_pos(
     observer: &Observer,
-    mjd_tt: &Vector3<f64>,
+    mjd_tt: &Vector3<MJD>,
     state: &Outfit,
 ) -> Matrix3<f64> {
     let mjd_tt_first_obs = Epoch::from_mjd_in_time_scale(mjd_tt.x, hifitime::TimeScale::TT);
@@ -34,11 +33,11 @@ pub(in crate::observers) fn helio_obs_pos(
     let mjd_tt_third_obs = Epoch::from_mjd_in_time_scale(mjd_tt.z, hifitime::TimeScale::TT);
 
     let observer_position_first_obs =
-        pvobs(observer, mjd_tt_first_obs, &state.get_ut1_provider()).0;
+        pvobs(observer, &mjd_tt_first_obs, &state.get_ut1_provider()).0;
     let observer_position_second_obs =
-        pvobs(observer, mjd_tt_second_obs, &state.get_ut1_provider()).0;
+        pvobs(observer, &mjd_tt_second_obs, &state.get_ut1_provider()).0;
     let observer_position_third_obs =
-        pvobs(observer, mjd_tt_third_obs, &state.get_ut1_provider()).0;
+        pvobs(observer, &mjd_tt_third_obs, &state.get_ut1_provider()).0;
 
     let pos_obs_matrix = Matrix3::from_columns(&vec![
         observer_position_first_obs,
@@ -74,6 +73,52 @@ pub(in crate::observers) fn helio_obs_pos(
     earth_pos_matrix + dx
 }
 
+pub(crate) fn geo_obs_pos(
+    observer: &Observer,
+    tmjd: &Epoch,
+    ut1_provider: &Ut1Provider,
+) -> (Vector3<f64>, Vector3<f64>) {
+    // Initialisation
+    let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
+
+    // Get the coordinates of the observer on Earth
+    let dxbf = observer.body_fixed_coord();
+
+    // Get the observer velocity due to Earth rotation
+    let dvbf = omega.cross(&dxbf);
+
+    // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
+    // based on the hifitime crate
+    let mjd_ut1 = tmjd.to_ut1(ut1_provider.to_owned());
+    let tut = mjd_ut1.to_mjd_tai_days();
+
+    // Compute the Greenwich sideral apparent time
+    let gast = gmst(tut) + equequ(tmjd.to_mjd_tt_days());
+
+    // Earth rotation matrix
+    let rot = rotmt(-gast, 2);
+    let rot_mat = Matrix3::from(rot).transpose();
+
+    let obs_pos = rot_mat * dxbf;
+    let obs_vel = rot_mat * dvbf;
+
+    // Transformation in the ecliptic mean J2000
+    let mut rot1 = [[0.; 3]; 3];
+    rotpn(
+        &mut rot1,
+        "EQUT",
+        "OFDATE",
+        tmjd.to_mjd_tt_days(),
+        "ECLM",
+        "J2000",
+        0.,
+    );
+    let rot1_mat = Matrix3::from(rot1).transpose();
+    let obs_pos = rot1_mat * obs_pos;
+    let obs_vel = rot1_mat * obs_vel;
+    (obs_pos, obs_vel)
+}
+
 /// Get the observer position and velocity on the Earth
 ///
 /// Argument
@@ -88,9 +133,9 @@ pub(in crate::observers) fn helio_obs_pos(
 /// ------
 /// * `dx`: corrected observer position with respect to the center of mass of Earth (in ecliptic J2000)
 /// * `dy`: corrected observer velocity with respect to the center of mass of Earth (in ecliptic J2000)
-pub(in crate::observers) fn pvobs(
+pub(crate) fn pvobs(
     observer: &Observer,
-    tmjd: Epoch,
+    tmjd: &Epoch,
     ut1_provider: &Ut1Provider,
 ) -> (Vector3<f64>, Vector3<f64>) {
     // Initialisation
@@ -269,7 +314,7 @@ mod observer_pos_tests {
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
 
         let (observer_position, observer_velocity) =
-            pvobs(&pan_starrs, epoch, state.get_ut1_provider());
+            pvobs(&pan_starrs, &epoch, state.get_ut1_provider());
 
         assert_eq!(
             observer_position.as_slice(),
@@ -306,15 +351,15 @@ mod observer_pos_tests {
         assert_eq!(
             helio_pos.as_slice(),
             [
-                -0.2645666171572263,
-                0.8689351643674214,
-                0.3766996211095918,
-                -0.5891631853157056,
-                0.7238872516134827,
-                0.31381865162416517,
-                -0.7743280307598619,
-                0.561253266432187,
-                0.24333415473530776
+                -0.2645666171464416,
+                0.8689351643701766,
+                0.3766996211107864,
+                -0.5891631852137064,
+                0.7238872516824697,
+                0.3138186516540669,
+                -0.7743280306286537,
+                0.5612532665812755,
+                0.24333415479994636
             ]
         )
     }

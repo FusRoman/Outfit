@@ -1,5 +1,5 @@
 pub mod observers;
 pub mod observatories;
 pub mod bimap;
-mod observer_position;
+pub(crate) mod observer_position;
 mod earth_position;

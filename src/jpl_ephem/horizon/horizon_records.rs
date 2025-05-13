@@ -97,14 +97,23 @@ impl HorizonRecord {
         compute_acceleration: bool,
         n_subintervals: usize,
     ) -> InterpResult {
+        let dt1 = tau as i64;
+        let temp = n_subintervals as f64 * tau;
+        let tc = 2.0 * (temp.rem_euclid(1.0) + dt1 as f64) - 1.0;
+        let mut twot = 0.;
         let n_coeff = self.x.len();
 
         let mut tcheb = vec![0.0; n_coeff];
         tcheb[0] = 1.0;
+
+        if tc != tcheb[1] {
+            tcheb[1] = tc;
+            twot = tc + tc;
+        }
+
         if n_coeff > 1 {
-            tcheb[1] = 2.0 * tau - 1.0;
             for i in 2..n_coeff {
-                tcheb[i] = 2.0 * tcheb[1] * tcheb[i - 1] - tcheb[i - 2];
+                tcheb[i] = twot * tcheb[i - 1] - tcheb[i - 2];
             }
         }
 
@@ -117,14 +126,15 @@ impl HorizonRecord {
         let afac = vfac * vfac;
 
         let mut tcheb_deriv = vec![0.0; n_coeff];
+        tcheb_deriv[1] = 1.0;
+        tcheb_deriv[2] = twot + twot;
+
         let mut tcheb_accel = vec![0.0; n_coeff];
 
         if compute_velocity {
-            tcheb_deriv[0] = 0.0;
             if n_coeff > 1 {
-                tcheb_deriv[1] = 1.0;
-                for i in 2..n_coeff {
-                    tcheb_deriv[i] = 2.0 * tcheb[1] * tcheb_deriv[i - 1] + 2.0 * tcheb[i - 1]
+                for i in 3..n_coeff {
+                    tcheb_deriv[i] = twot * tcheb_deriv[i - 1] + 2.0 * tcheb[i - 1]
                         - tcheb_deriv[i - 2];
                 }
             }
