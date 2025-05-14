@@ -4,6 +4,7 @@ use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
+use nom::error;
 
 use super::ades_reader::parse_ades;
 use super::observations::{extract_80col, observation_from_vec};
@@ -172,12 +173,19 @@ pub trait TrajectoryExt {
     /// ---------
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `ades`: a path to an ADES file
+    /// * `error_ra`: the error in right ascension (if some values are given, the error ra is supposed to be the same for all observations)
+    /// * `error_dec`: the error in declination (if some values are given, the error dec is supposed to be the same for all observations)
     ///
     /// Note
     /// ----
     /// * The ADES file must respect the MPC format.
     ///   * ref: <https://minorplanetcenter.net/iau/info/ADES.html>
-    fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self;
+    fn new_from_ades(
+        env_state: &mut Outfit,
+        ades: &Utf8Path,
+        error_ra: Option<ArcSec>,
+        error_dec: Option<ArcSec>,
+    ) -> Self;
 
     /// Create a TrajectorySet from an ADES file
     ///
@@ -185,6 +193,8 @@ pub trait TrajectoryExt {
     /// ---------
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `ades`: a path to an ADES file
+    /// * `error_ra`: the error in right ascension (if some values are given, the error ra is supposed to be the same for all observations)
+    /// * `error_dec`: the error in declination (if some values are given, the error dec is supposed to be the same for all observations)
     ///
     /// Return
     /// ------
@@ -194,7 +204,13 @@ pub trait TrajectoryExt {
     /// ----
     /// * The ADES file must respect the MPC format.
     ///   * ref: <https://minorplanetcenter.net/iau/info/ADES.html>
-    fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path);
+    fn add_from_ades(
+        &mut self,
+        env_state: &mut Outfit,
+        ades: &Utf8Path,
+        error_ra: Option<ArcSec>,
+        error_dec: Option<ArcSec>,
+    );
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -275,13 +291,24 @@ impl TrajectoryExt for TrajectorySet {
         self.insert(object_number, observations);
     }
 
-    fn add_from_ades(&mut self, env_state: &mut Outfit, ades: &Utf8Path) {
-        parse_ades(env_state, ades, self);
+    fn add_from_ades(
+        &mut self,
+        env_state: &mut Outfit,
+        ades: &Utf8Path,
+        error_ra: Option<ArcSec>,
+        error_dec: Option<ArcSec>,
+    ) {
+        parse_ades(env_state, ades, self, error_ra, error_dec);
     }
 
-    fn new_from_ades(env_state: &mut Outfit, ades: &Utf8Path) -> Self {
+    fn new_from_ades(
+        env_state: &mut Outfit,
+        ades: &Utf8Path,
+        error_ra: Option<ArcSec>,
+        error_dec: Option<ArcSec>,
+    ) -> Self {
         let mut trajs: TrajectorySet = HashMap::default();
-        parse_ades(env_state, ades, &mut trajs);
+        parse_ades(env_state, ades, &mut trajs, error_ra, error_dec);
         trajs
     }
 }
