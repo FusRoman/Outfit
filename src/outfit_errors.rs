@@ -38,4 +38,13 @@ pub enum OutfitError {
 
     #[error("Observation not found: {0}")]
     ObservationNotFound(usize),
+
+    #[error("Invalid Error model: {0}")]
+    InvalidErrorModel(String),
+
+    #[error("Invalid File Path for Error model: {0}")]
+    InvalidErrorModelFilePath(String),
+
+    #[error("Error during the nom parsing: {0}")]
+    NomParsingError(String),
 }
