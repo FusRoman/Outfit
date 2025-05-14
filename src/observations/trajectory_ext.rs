@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::constants::{Degree, ObjectNumber, Observations, TrajectorySet, MJD};
+use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
@@ -70,7 +70,9 @@ pub trait TrajectoryExt {
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `object_number`: the object number
     /// * `ra`: a vector of right ascension
+    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
     /// * `dec`: a vector of declination
+    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
     /// * `time`: a vector of time in MJD
     /// * `observer`: the observer
     ///
@@ -81,7 +83,9 @@ pub trait TrajectoryExt {
         env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
+        error_ra: ArcSec,
         dec: &Vec<Degree>,
+        error_dec: ArcSec,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self;
@@ -94,7 +98,9 @@ pub trait TrajectoryExt {
     /// * `env_state`: a mutable reference to the Outfit instance
     /// * `object_number`: the object number
     /// * `ra`: a vector of right ascension
+    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
     /// * `dec`: a vector of declination
+    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
     /// * `time`: a vector of time in MJD
     /// * `observer`: the observer
     fn add_from_vec(
@@ -102,7 +108,9 @@ pub trait TrajectoryExt {
         env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
+        error_ra: ArcSec,
         dec: &Vec<Degree>,
+        error_dec: ArcSec,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     );
@@ -113,6 +121,8 @@ pub trait TrajectoryExt {
     /// ---------
     /// * `parquet`: a path to a parquet file
     /// * `observer`: the observer
+    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
+    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
     /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
     ///
     /// Return
@@ -125,6 +135,8 @@ pub trait TrajectoryExt {
         env_state: &mut Outfit,
         parquet: &Utf8Path,
         mpc_code: Arc<Observer>,
+        error_ra: ArcSec,
+        error_dec: ArcSec,
         batch_size: Option<usize>,
     ) -> Self;
 
@@ -134,6 +146,8 @@ pub trait TrajectoryExt {
     /// ---------
     /// * `parquet`: a path to a parquet file
     /// * `observer`: the observer
+    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
+    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
     /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
     ///
     /// Return
@@ -147,6 +161,8 @@ pub trait TrajectoryExt {
         env_state: &mut Outfit,
         parquet: &Utf8Path,
         observer: Arc<Observer>,
+        error_ra: ArcSec,
+        error_dec: ArcSec,
         batch_size: Option<usize>,
     );
 
@@ -186,11 +202,14 @@ impl TrajectoryExt for TrajectorySet {
         env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
+        error_ra: ArcSec,
         dec: &Vec<Degree>,
+        error_dec: ArcSec,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) -> Self {
-        let observations: Observations = observation_from_vec(env_state, ra, dec, time, observer);
+        let observations: Observations =
+            observation_from_vec(env_state, ra, error_ra, dec, error_dec, time, observer);
         let mut traj_set: TrajectorySet = HashMap::default();
         traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
@@ -201,11 +220,14 @@ impl TrajectoryExt for TrajectorySet {
         env_state: &mut Outfit,
         object_number: &str,
         ra: &Vec<Degree>,
+        error_ra: ArcSec,
         dec: &Vec<Degree>,
+        error_dec: ArcSec,
         time: &Vec<MJD>,
         observer: Arc<Observer>,
     ) {
-        let observations: Observations = observation_from_vec(env_state, ra, dec, time, observer);
+        let observations: Observations =
+            observation_from_vec(env_state, ra, error_ra, dec, error_dec, time, observer);
         self.insert(
             ObjectNumber::String(object_number.to_string()),
             observations,
@@ -217,19 +239,27 @@ impl TrajectoryExt for TrajectorySet {
         env_state: &mut Outfit,
         parquet: &Utf8Path,
         observer: Arc<Observer>,
+        error_ra: ArcSec,
+        error_dec: ArcSec,
         batch_size: Option<usize>,
     ) {
-        parquet_to_trajset(self, env_state, parquet, observer, batch_size);
+        parquet_to_trajset(
+            self, env_state, parquet, observer, error_ra, error_dec, batch_size,
+        );
     }
 
     fn new_from_parquet(
         env_state: &mut Outfit,
         parquet: &Utf8Path,
         observer: Arc<Observer>,
+        error_ra: ArcSec,
+        error_dec: ArcSec,
         batch_size: Option<usize>,
     ) -> Self {
         let mut trajs: TrajectorySet = HashMap::default();
-        parquet_to_trajset(&mut trajs, env_state, parquet, observer, batch_size);
+        parquet_to_trajset(
+            &mut trajs, env_state, parquet, observer, error_ra, error_dec, batch_size,
+        );
         trajs
     }
 

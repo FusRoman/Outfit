@@ -11,8 +11,16 @@ fn test_trajectories_from_vec() {
     let time = vec![43041.93878];
     let observer = env_state.get_observer_from_mpc_code(&"049".to_string());
 
-    let mut traj_set: TrajectorySet =
-        TrajectorySet::new_from_vec(&mut env_state, object_number, &ra, &dec, &time, observer);
+    let mut traj_set: TrajectorySet = TrajectorySet::new_from_vec(
+        &mut env_state,
+        object_number,
+        &ra,
+        0.5,
+        &dec,
+        0.5,
+        &time,
+        observer,
+    );
 
     assert_eq!(traj_set.len(), 1);
     let obs_33803 = traj_set.get(&ObjectNumber::String("33803".into())).unwrap();
@@ -33,7 +41,16 @@ fn test_trajectories_from_vec() {
         .get_observer_from_mpc_code(&"675".to_string())
         .clone();
 
-    traj_set.add_from_vec(&mut env_state, object_number, &ra, &dec, &time, observer);
+    traj_set.add_from_vec(
+        &mut env_state,
+        object_number,
+        &ra,
+        0.5,
+        &dec,
+        0.5,
+        &time,
+        observer,
+    );
 
     assert_eq!(traj_set.len(), 2);
     let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();

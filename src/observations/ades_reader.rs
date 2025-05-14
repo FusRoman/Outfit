@@ -70,7 +70,6 @@ struct OpticalObs {
 }
 
 impl OpticalObs {
-
     /// Returns the trajectory ID for the optical observation.
     /// It first checks for a `perm_id`, then a `prov_id`, and finally falls back to `trk_sub`.
     /// If none of these are available, it panics with an error message.
@@ -96,7 +95,7 @@ impl OpticalObs {
     }
 
     fn to_observation(&self, observer_idx: u16) -> Observation {
-        Observation::new(observer_idx, self.ra, self.dec, self.obs_time)
+        Observation::new(observer_idx, self.ra, 0., self.dec, 0., self.obs_time)
     }
 }
 
@@ -127,7 +126,7 @@ where
 /// creating an `Observation` for each optical observation.
 /// The observations are then added to the `TrajectorySet` using the trajectory ID.
 /// If a new observatory is found, it is added to the `Outfit` observatory set.
-/// 
+///
 /// Arguments
 /// ---------
 /// * `outfit`: A mutable reference to the `Outfit` instance.
@@ -191,22 +190,20 @@ pub(crate) fn parse_ades(outfit: &mut Outfit, ades: &Utf8Path, trajs: &mut Traje
     let xml = std::fs::read_to_string(ades)
         .expect(format!("Failed to read ADES file: {}", ades.to_string()).as_str());
 
-        match from_str::<FlatAdes>(&xml) {
-            Ok(flat_ades) => {
-                parse_flat_ades(outfit, &flat_ades, trajs);
-            }
-            Err(flat_err) => {
-                match from_str::<StructuredAdes>(&xml) {
-                    Ok(structured_ades) => {
-                        parse_structured_ades(outfit, &structured_ades, trajs);
-                    }
-                    Err(structured_err) => {
-                        panic!(
-                            "Failed to parse ADES file:\n- Flat error: {}\n- Structured error: {}",
-                            flat_err, structured_err
-                        );
-                    }
-                }
-            }
+    match from_str::<FlatAdes>(&xml) {
+        Ok(flat_ades) => {
+            parse_flat_ades(outfit, &flat_ades, trajs);
         }
+        Err(flat_err) => match from_str::<StructuredAdes>(&xml) {
+            Ok(structured_ades) => {
+                parse_structured_ades(outfit, &structured_ades, trajs);
+            }
+            Err(structured_err) => {
+                panic!(
+                    "Failed to parse ADES file:\n- Flat error: {}\n- Structured error: {}",
+                    flat_err, structured_err
+                );
+            }
+        },
+    }
 }

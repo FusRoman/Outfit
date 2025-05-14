@@ -1,6 +1,7 @@
 use smallvec::SmallVec;
 use std::{fs::File, sync::Arc};
 
+use crate::constants::ArcSec;
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use crate::{
@@ -15,7 +16,7 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 /// The Parquet file must contain the following columns: "ra", "dec", "jd", and "trajectory_id".
 /// The "jd" column is converted to MJD using the JDTOMJD constant.
 /// The "ra" and "dec" columns are converted to 32 bits for performance.
-/// 
+///
 /// Arguments
 /// ---------
 /// * `trajectories`: a mutable reference to a TrajectorySet
@@ -27,19 +28,20 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 /// Return
 /// ------
 /// * a TrajectorySet containing the observations from the Parquet file
-pub (crate) fn parquet_to_trajset(
+pub(crate) fn parquet_to_trajset(
     trajectories: &mut TrajectorySet,
     env_state: &mut Outfit,
     parquet: &Utf8Path,
     observer: Arc<Observer>,
+    error_ra: ArcSec,
+    error_dec: ArcSec,
     batch_size: Option<usize>,
 ) {
     let uint16_obs = env_state.uint16_from_observer(observer);
 
     let file = File::open(parquet).expect("Unable to open file");
 
-    let builder =
-        ParquetRecordBatchReaderBuilder::try_new(file).expect("Failed to read metadata");
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).expect("Failed to read metadata");
 
     let parquet_metadata = builder.metadata();
     let schema_descr = parquet_metadata.file_metadata().schema_descr();
@@ -110,7 +112,9 @@ pub (crate) fn parquet_to_trajset(
             let obs = Observation::new(
                 uint16_obs,
                 ra.expect("Expected RA"),
+                error_ra,
                 dec.expect("Expected DEC"),
+                error_dec,
                 mjd_time,
             );
 
