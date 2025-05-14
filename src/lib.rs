@@ -13,6 +13,7 @@ pub mod outfit;
 pub mod outfit_errors;
 mod ref_system;
 pub mod time;
+pub mod error_models;
 
 #[cfg(all(test, feature = "jpl-download"))]
 pub(crate) mod unit_test_global {
