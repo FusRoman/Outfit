@@ -34,6 +34,8 @@ pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;
 
 // type def
 pub type Degree = f64;
+pub type ArcSec = f64;
+pub type Radian = f64;
 pub type Kilometer = f64;
 /// a mpc code observatory made of three characters
 pub type MpcCode = String;
