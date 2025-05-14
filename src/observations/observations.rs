@@ -1,5 +1,5 @@
 use crate::{
-    constants::{Degree, ObjectNumber, Observations, DPI, MJD},
+    constants::{ArcSec, Degree, ObjectNumber, Observations, DPI, MJD},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
     observers::{observer_position::geo_obs_pos, observers::Observer},
@@ -26,9 +26,9 @@ use thiserror::Error;
 pub struct Observation {
     observer: u16,
     pub ra: Degree,
-    pub error_ra: Degree,
+    pub error_ra: ArcSec,
     pub dec: Degree,
-    pub error_dec: Degree,
+    pub error_dec: ArcSec,
     pub time: MJD,
 }
 
@@ -45,13 +45,20 @@ impl Observation {
     /// Return
     /// ------
     /// * a new Observation struct
-    pub fn new(observer: u16, ra: Degree, dec: Degree, time: MJD) -> Self {
+    pub fn new(
+        observer: u16,
+        ra: Degree,
+        error_ra: ArcSec,
+        dec: Degree,
+        error_dec: ArcSec,
+        time: MJD,
+    ) -> Self {
         Observation {
             observer,
             ra,
-            error_ra: 0.,
+            error_ra,
             dec,
-            error_dec: 0.,
+            error_dec,
             time,
         }
     }
@@ -149,13 +156,18 @@ fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, ParseOb
         return Err(ParseObsError::NotCCDObs);
     }
 
-    // TODO: replace error_ra and error_dec with the correct values
+    let (ra, error_ra) = parse_ra_to_deg(line[32..44].trim())
+        .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str());
+
+    let (dec, error_dec) = parse_dec_to_deg(line[44..56].trim())
+        .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str());
+
     let observation = Observation::new(
         env_state.uint16_from_mpc_code(&line[77..80].trim().into()),
-        parse_ra_to_deg(line[32..44].trim())
-            .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str()),
-        parse_dec_to_deg(line[44..56].trim())
-            .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str()),
+        ra,
+        error_ra,
+        dec,
+        error_dec,
         frac_date_to_mjd(line[15..32].trim())
             .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
     );
@@ -221,7 +233,9 @@ pub(crate) fn extract_80col(
 pub(crate) fn observation_from_vec(
     env_state: &mut Outfit,
     ra: &Vec<Degree>,
+    error_ra: ArcSec,
     dec: &Vec<Degree>,
+    error_dec: ArcSec,
     time: &Vec<MJD>,
     observer: Arc<Observer>,
 ) -> Observations {
@@ -230,7 +244,7 @@ pub(crate) fn observation_from_vec(
     ra.iter()
         .zip(dec.iter())
         .zip(time.iter())
-        .map(|((ra, dec), time)| Observation::new(obs_uin16, *ra, *dec, *time))
+        .map(|((ra, dec), time)| Observation::new(obs_uin16, *ra, error_ra, *dec, error_dec, *time))
         .collect()
 }
 
