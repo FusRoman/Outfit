@@ -22,7 +22,9 @@ use aberth::aberth;
 pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
     ra: Vector3<f64>,
+    ra_error: Vector3<f64>,
     dec: Vector3<f64>,
+    dec_error: Vector3<f64>,
     time: Vector3<f64>,
     observer_position: Matrix3<f64>,
 }
@@ -68,11 +70,20 @@ impl fmt::Display for SpuriousRoot {
 impl GaussObs {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
-    pub fn new(idx_obs: Vector3<usize>, ra: Vector3<f64>, dec: Vector3<f64>, mjd_time: Vector3<f64>) -> GaussObs {
+    pub fn new(
+        idx_obs: Vector3<usize>,
+        ra: Vector3<f64>,
+        ra_error: Vector3<f64>,
+        dec: Vector3<f64>,
+        dec_error: Vector3<f64>,
+        mjd_time: Vector3<f64>,
+    ) -> GaussObs {
         GaussObs {
             idx_obs,
             ra,
+            ra_error,
             dec,
+            dec_error,
             time: mjd_time,
             observer_position: Matrix3::zeros(),
         }
@@ -470,7 +481,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::zeros(),
         };
@@ -537,7 +558,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
@@ -568,7 +599,9 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::zeros(),
+            ra_error: Vector3::zeros(),
             dec: Vector3::zeros(),
+            dec_error: Vector3::zeros(),
             time: Vector3::zeros(),
             observer_position: Matrix3::zeros(),
         };
@@ -598,7 +631,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
@@ -666,7 +709,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::zeros(),
         };
@@ -702,7 +755,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
@@ -737,7 +800,17 @@ mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
+            ra_error: Vector3::new(
+                0.0002777777777777778,
+                0.0002777777777777778,
+                0.0002777777777777778,
+            ),
             dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
+            dec_error: Vector3::new(
+                0.00002777777777777778,
+                0.00002777777777777778,
+                0.00002777777777777778,
+            ),
             time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
