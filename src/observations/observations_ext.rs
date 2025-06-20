@@ -120,10 +120,29 @@ impl ObservationsExt for Observations {
                 let obs2 = &self[idx2];
                 let obs3 = &self[idx3];
 
+                // all coordinates and associated errors are in radians for the gauss preliminary orbit
                 GaussObs::new(
                     Vector3::new(idx1, idx2, idx3),
-                    Vector3::new(obs1.ra.to_radians(), obs2.ra.to_radians(), obs3.ra.to_radians()),
-                    Vector3::new(obs1.dec.to_radians(), obs2.dec.to_radians(), obs3.dec.to_radians()),
+                    Vector3::new(
+                        obs1.ra.to_radians(),
+                        obs2.ra.to_radians(),
+                        obs3.ra.to_radians(),
+                    ),
+                    Vector3::new(
+                        obs1.error_ra.to_radians(),
+                        obs2.error_ra.to_radians(),
+                        obs3.error_ra.to_radians(),
+                    ),
+                    Vector3::new(
+                        obs1.dec.to_radians(),
+                        obs2.dec.to_radians(),
+                        obs3.dec.to_radians(),
+                    ),
+                    Vector3::new(
+                        obs1.error_dec.to_radians(),
+                        obs2.error_dec.to_radians(),
+                        obs3.error_dec.to_radians(),
+                    ),
                     Vector3::new(obs1.time, obs2.time, obs3.time),
                 )
             })
@@ -214,7 +233,7 @@ impl ObservationsExt for Observations {
     ) -> Result<f64, OutfitError> {
         let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
 
-        dbg!("RMS interval: {} - {}", start_obs_rms, end_obs_rms);
+        dbg!(start_obs_rms, end_obs_rms);
 
         let equinoctial_elements: EquinoctialElements = orbit_element.into();
 
@@ -260,7 +279,9 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(23, 24, 33),
                 [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
+                [[4.8481368110953594e-9, 4.8481368110953594e-9, 4.84813681109536e-8]].into(),
                 [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
+                [[4.84813681109536e-8, 4.84813681109536e-8, 4.84813681109536e-7]].into(),
                 [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
             )
         );
@@ -270,7 +291,9 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(21, 25, 33),
                 [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
+                [[4.8481368110953594e-9, 4.8481368110953594e-9, 4.84813681109536e-8]].into(),
                 [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
+                [[4.84813681109536e-8, 4.84813681109536e-8, 4.84813681109536e-7]].into(),
                 [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
             )
         );
@@ -323,12 +346,14 @@ mod test_obs_ext {
         let triplets = GaussObs::new(
             Vector3::new(34, 35, 36),
             [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
+            [[0., 0., 0.]].into(),
             [[
                 0.77917805235018101,
                 0.77908666497129186,
                 0.77899653810797365,
             ]]
             .into(),
+            [[0., 0., 0.]].into(),
             [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
         );
 

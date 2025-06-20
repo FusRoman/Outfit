@@ -1,16 +1,13 @@
-use std::collections::HashMap;
-
 use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_until, take_while, take_while1},
-    character::complete::{char, multispace0, space1},
+    bytes::complete::{tag, take_until, take_while1},
+    character::complete::{char, multispace0},
     combinator::{map, opt},
     number::complete::float,
-    sequence::{preceded, separated_pair, terminated},
+    sequence::{preceded, separated_pair},
     IResult, Parser,
 };
 
-use crate::{constants::MpcCode, outfit_errors::OutfitError};
+use crate::constants::MpcCode;
 
 use super::CatalogCode;
 
