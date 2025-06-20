@@ -8,6 +8,7 @@ use ureq::http::{self, Uri};
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
+    error_models::{get_bias_rms, ErrorModel, ErrorModelData},
     jpl_ephem::download_jpl_file::EphemFileSource,
     observers::{observatories::Observatories, observers::Observer},
     outfit_errors::OutfitError,
@@ -20,18 +21,18 @@ pub struct Outfit {
     observatories: Observatories,
     jpl_source: EphemFileSource,
     jpl_ephem: OnceCell<JPLEphem>,
+    error_model: ErrorModelData,
 }
 
 impl Outfit {
-    pub fn new(jpl_file: &str) -> Self {
-        Outfit {
+    pub fn new(jpl_file: &str, error_model: ErrorModel) -> Result<Self, OutfitError> {
+        Ok(Outfit {
             env_state: OutfitEnv::new(),
             observatories: Observatories::new(),
-            jpl_source: jpl_file
-                .try_into()
-                .expect(format!("JPL ephemeris file path is not valid: {jpl_file}").as_str()),
+            jpl_source: jpl_file.try_into()?,
             jpl_ephem: OnceCell::new(),
-        }
+            error_model: error_model.read_error_model_file()?,
+        })
     }
 
     pub fn get_jpl_ephem(&self) -> Result<&JPLEphem, OutfitError> {
@@ -118,11 +119,15 @@ impl Outfit {
 
                 let (longitude, cos, sin, name) = parse_remain(remain, code);
 
+                let bias_rms = get_bias_rms(&self.error_model, code.to_string(), "c".to_string());
+
                 let observer = Observer {
                     longitude: NotNan::try_from(longitude as f64).expect("Longitude cannot be NaN"),
                     rho_cos_phi: NotNan::try_from(cos as f64).expect("Longitude cannot be NaN"),
                     rho_sin_phi: NotNan::try_from(sin as f64).expect("Longitude cannot be NaN"),
                     name: Some(name),
+                    ra_accuracy: bias_rms.map(|(ra, _)| NotNan::try_from(ra as f64).unwrap()),
+                    dec_accuracy: bias_rms.map(|(_, dec)| NotNan::try_from(dec as f64).unwrap()),
                 };
                 observatories.insert(code.to_string(), Arc::new(observer));
             };
@@ -214,13 +219,14 @@ fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
 
 #[cfg(test)]
 mod outfit_struct_test {
+    use super::*;
     use ordered_float::NotNan;
 
     use crate::{observers::observers::Observer, outfit::Outfit};
 
     #[test]
     fn test_observer_from_mpc_code() {
-        let outfit = Outfit::new("horizon:DE440");
+        let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
         let observer = outfit.get_observer_from_mpc_code(&"000".into());
         let test = Observer {
@@ -228,6 +234,8 @@ mod outfit_struct_test {
             rho_cos_phi: NotNan::try_from(0.6241099834442139).unwrap(),
             rho_sin_phi: NotNan::try_from(0.7787299752235413).unwrap(),
             name: Some("Greenwich".to_string()),
+            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
+            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
         };
         assert_eq!(observer, test.into());
 
@@ -237,6 +245,8 @@ mod outfit_struct_test {
             rho_cos_phi: NotNan::try_from(0.).unwrap(),
             rho_sin_phi: NotNan::try_from(0.).unwrap(),
             name: Some("WISE".to_string()),
+            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
+            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
         };
         assert_eq!(observer, test.into());
 
@@ -246,13 +256,15 @@ mod outfit_struct_test {
             rho_cos_phi: NotNan::try_from(0.7440530061721802).unwrap(),
             rho_sin_phi: NotNan::try_from(0.666068971157074).unwrap(),
             name: Some("Mazariegos".to_string()),
+            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
+            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
         };
         assert_eq!(observer, test.into());
     }
 
     #[test]
     fn test_add_observer() {
-        let mut outfit = Outfit::new("horizon:DE440");
+        let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let obs = outfit.new_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
         assert_eq!(obs.longitude, 1.0);
         assert_eq!(obs.rho_cos_phi, 0.999395371426802);

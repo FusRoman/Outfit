@@ -1,10 +1,11 @@
 use outfit::constants::{ObjectNumber, TrajectorySet};
+use outfit::error_models::ErrorModel;
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
 #[test]
 fn test_trajectories_from_vec() {
-    let mut env_state = Outfit::new("horizon:DE440");
+    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
     let object_number = "33803";
     let ra = vec![359.7403333333333];
     let dec = vec![-0.5039444444444444];

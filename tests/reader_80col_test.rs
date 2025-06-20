@@ -1,11 +1,12 @@
 use camino::Utf8Path;
 use outfit::constants::{ObjectNumber, TrajectorySet};
+use outfit::error_models::ErrorModel;
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
 #[test]
 fn test_80col_reader() {
-    let mut env_state = Outfit::new("horizon:DE440");
+    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
     let path_file = Utf8Path::new("tests/data/33803.obs");
     let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, &path_file);

@@ -1,8 +1,8 @@
 use nalgebra::Vector3;
 use ordered_float::NotNan;
 
-use crate::constants::{Degree, Kilometer};
 use crate::constants::ERAU;
+use crate::constants::{Degree, Kilometer};
 
 use super::observer_position::geodetic_to_parallax;
 
@@ -16,6 +16,9 @@ pub struct Observer {
     // rho sin phi in kilometers
     pub rho_sin_phi: ordered_float::NotNan<f64>,
     pub name: Option<String>,
+    // Accuracy of the right ascension and declination
+    pub ra_accuracy: Option<ordered_float::NotNan<f64>>,
+    pub dec_accuracy: Option<ordered_float::NotNan<f64>>,
 }
 
 impl Observer {
@@ -36,6 +39,8 @@ impl Observer {
         latitude: Degree,
         elevation: Kilometer,
         name: Option<String>,
+        ra_accuracy: Option<ordered_float::NotNan<f64>>,
+        dec_accuracy: Option<ordered_float::NotNan<f64>>,
     ) -> Observer {
         let (rho_cos_phi, rho_sin_phi) = geodetic_to_parallax(latitude, elevation);
         Observer {
@@ -43,6 +48,8 @@ impl Observer {
             rho_cos_phi: NotNan::try_from(rho_cos_phi).expect("Longitude cannot be NaN"),
             rho_sin_phi: NotNan::try_from(rho_sin_phi as f64).expect("Longitude cannot be NaN"),
             name,
+            ra_accuracy,
+            dec_accuracy,
         }
     }
 
@@ -76,7 +83,7 @@ mod observer_test {
 
     #[test]
     fn test_observer_constructor() {
-        let observer = Observer::new(0.0, 0.0, 0.0, None);
+        let observer = Observer::new(0.0, 0.0, 0.0, None, None, None);
         assert_eq!(observer.longitude, 0.0);
         assert_eq!(observer.rho_cos_phi, 1.0);
         assert_eq!(observer.rho_sin_phi, 0.0);
@@ -86,6 +93,8 @@ mod observer_test {
             -30.2446,
             2647.,
             Some("Rubin Observatory".to_string()),
+            Some(NotNan::new(0.0001).unwrap()),
+            Some(NotNan::new(0.0001).unwrap()),
         );
 
         assert_eq!(observer.longitude, 289.25058);
@@ -97,7 +106,7 @@ mod observer_test {
     fn body_fixed_coord_test() {
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
-        let pan_starrs = Observer::new(lon, lat, h, None);
+        let pan_starrs = Observer::new(lon, lat, h, None, None, None);
         let obs_fixed_vector = pan_starrs.body_fixed_coord();
         assert_eq!(
             obs_fixed_vector,
