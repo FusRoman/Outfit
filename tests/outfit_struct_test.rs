@@ -1,8 +1,8 @@
-use outfit::outfit::Outfit;
+use outfit::{error_models::ErrorModel, outfit::Outfit};
 
 #[test]
 fn test_outfit_observer_management() {
-    let mut outfit = Outfit::new("horizon:DE440");
+    let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
     let obs1 = outfit.new_observer(51.58206, -73.06644, 100., Some("Test Observer 1".into()));
     assert_eq!(obs1.name, Some("Test Observer 1".to_string()));

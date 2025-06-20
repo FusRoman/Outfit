@@ -251,14 +251,15 @@ mod test_obs_ext {
     use camino::Utf8Path;
 
     use crate::{
-        constants::TrajectorySet, observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
+        constants::TrajectorySet, error_models::ErrorModel,
+        observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
     };
 
     use super::*;
 
     #[test]
     fn test_compute_triplets() {
-        let mut env_state = Outfit::new("horizon:DE440");
+        let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
 
@@ -279,9 +280,19 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(23, 24, 33),
                 [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
-                [[4.8481368110953594e-9, 4.8481368110953594e-9, 4.84813681109536e-8]].into(),
+                [[
+                    4.8481368110953594e-9,
+                    4.8481368110953594e-9,
+                    4.84813681109536e-8
+                ]]
+                .into(),
                 [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
-                [[4.84813681109536e-8, 4.84813681109536e-8, 4.84813681109536e-7]].into(),
+                [[
+                    4.84813681109536e-8,
+                    4.84813681109536e-8,
+                    4.84813681109536e-7
+                ]]
+                .into(),
                 [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
             )
         );
@@ -291,9 +302,19 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(21, 25, 33),
                 [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
-                [[4.8481368110953594e-9, 4.8481368110953594e-9, 4.84813681109536e-8]].into(),
+                [[
+                    4.8481368110953594e-9,
+                    4.8481368110953594e-9,
+                    4.84813681109536e-8
+                ]]
+                .into(),
                 [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
-                [[4.84813681109536e-8, 4.84813681109536e-8, 4.84813681109536e-7]].into(),
+                [[
+                    4.84813681109536e-8,
+                    4.84813681109536e-8,
+                    4.84813681109536e-7
+                ]]
+                .into(),
                 [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
             )
         );
@@ -301,7 +322,7 @@ mod test_obs_ext {
 
     #[test]
     fn test_select_rms_interval() {
-        let mut env_state = Outfit::new("horizon:DE440");
+        let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
 

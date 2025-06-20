@@ -128,7 +128,7 @@ pub(crate) fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 
 #[cfg(test)]
 mod jpl_request_test {
-    use crate::time::{date_to_mjd, mjd_to_jd};
+    use crate::{error_models::ErrorModel, time::{date_to_mjd, mjd_to_jd}};
 
     use super::*;
 
@@ -150,7 +150,7 @@ mod jpl_request_test {
     #[test]
     #[ignore]
     fn test_jplvector_request() {
-        let state = Outfit::new("horizon:DE440");
+        let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let mjd_list = date_to_mjd(&date_list);
         let response_data = request_vector(&mjd_list, &state);

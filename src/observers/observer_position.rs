@@ -283,7 +283,7 @@ pub(crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 mod observer_pos_tests {
 
     use super::*;
-    use crate::outfit::Outfit;
+    use crate::{error_models::ErrorModel, outfit::Outfit};
 
     #[test]
     fn geodetic_to_parallax_test() {
@@ -306,12 +306,12 @@ mod observer_pos_tests {
 
     #[test]
     fn pvobs_test() {
-        let state = Outfit::new("horizon:DE440");
+        let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let tmjd = 57028.479297592596;
         let epoch = Epoch::from_mjd_in_time_scale(tmjd, hifitime::TimeScale::TT);
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
-        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
+        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()), None, None);
 
         let (observer_position, observer_velocity) =
             pvobs(&pan_starrs, &epoch, state.get_ut1_provider());
@@ -343,7 +343,7 @@ mod observer_pos_tests {
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
-        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()));
+        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()), None, None);
 
         // Create a vector of observers
         let helio_pos = helio_obs_pos(&pan_starrs, &tmjd, &OUTFIT_HORIZON_TEST.0);

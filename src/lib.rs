@@ -22,18 +22,15 @@ pub(crate) mod unit_test_global {
     use camino::Utf8Path;
 
     use crate::{
-        constants::TrajectorySet,
-        jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
-        observations::trajectory_ext::TrajectoryExt,
-        outfit::Outfit,
+        constants::TrajectorySet, error_models::ErrorModel, jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData}, observations::trajectory_ext::TrajectoryExt, outfit::Outfit
     };
 
     pub(crate) static OUTFIT_NAIF_TEST: LazyLock<Outfit> =
-        LazyLock::new(|| Outfit::new("naif:DE440"));
+        LazyLock::new(|| Outfit::new("naif:DE440", ErrorModel::FCCT14).unwrap());
 
     pub(crate) static OUTFIT_HORIZON_TEST: LazyLock<(Outfit, TrajectorySet)> =
         LazyLock::new(|| {
-            let mut env = Outfit::new("horizon:DE440");
+            let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
             let path_file = Utf8Path::new("tests/data/2015AB.obs");
             let traj_set = TrajectorySet::new_from_80col(&mut env, &path_file);
