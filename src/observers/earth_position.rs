@@ -23,7 +23,7 @@ pub(in crate::observers) fn earth_position_from_jpl_horizon(
 
 #[cfg(test)]
 mod earth_pos_tests {
-    use crate::time::date_to_mjd;
+    use crate::{error_models::ErrorModel, time::date_to_mjd};
 
     use super::*;
     use crate::outfit::Outfit;
@@ -31,7 +31,7 @@ mod earth_pos_tests {
     #[test]
     #[ignore]
     fn test_get_earth_pos() {
-        let state = Outfit::new("horizon:DE440");
+        let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let date_list = vec!["2021-07-04T12:47:24", "2024-12-28T01:47:28"];
         let jd_list = date_to_mjd(&date_list);
         let earth_vector = earth_position_from_jpl_horizon(&jd_list, &state);
@@ -59,7 +59,7 @@ mod earth_pos_tests {
     #[test]
     #[ignore]
     fn test_earth_pos_with_mjd() {
-        let state = Outfit::new("horizon:DE440");
+        let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
         let earth_vector = earth_position_from_jpl_horizon(&test_mjd, &state);
         assert_eq!(

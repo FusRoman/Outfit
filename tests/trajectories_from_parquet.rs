@@ -1,11 +1,12 @@
 use camino::Utf8Path;
 use outfit::constants::{ObjectNumber, TrajectorySet};
+use outfit::error_models::ErrorModel;
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
 #[test]
 fn test_load_traj_from_parquet() {
-    let mut env_state = Outfit::new("horizon:DE440");
+    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
     let path_file = Utf8Path::new("tests/data/trajectories.parquet");
 
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
@@ -18,7 +19,7 @@ fn test_load_traj_from_parquet() {
 
 #[test]
 fn test_large_parquet() {
-    let mut env_state = Outfit::new("horizon:DE440");
+    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
     let path_file = Utf8Path::new("tests/data/test_from_fink.parquet");
 
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());

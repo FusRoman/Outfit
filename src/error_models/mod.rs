@@ -16,7 +16,7 @@ use crate::{constants::MpcCode, outfit_errors::OutfitError};
 use vfcc17::parse_vfcc17_line;
 
 type CatalogCode = String;
-type ErrorModelData = HashMap<(MpcCode, CatalogCode), (f32, f32)>;
+pub type ErrorModelData = HashMap<(MpcCode, CatalogCode), (f32, f32)>;
 
 pub enum ErrorModel {
     FCCT14,
