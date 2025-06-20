@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_until, take_while, take_while1},
-    character::complete::{char, multispace0, space1},
+    bytes::complete::{tag, take_until, take_while},
+    character::complete::{char, multispace0},
     combinator::{map, opt},
     number::complete::float,
     sequence::{preceded, separated_pair, terminated},
@@ -132,6 +132,33 @@ impl ErrorModel {
     }
 }
 
+pub(crate) fn get_bias_rms(
+    error_model: &ErrorModelData,
+    mpc_code: MpcCode,
+    catalog_code: CatalogCode,
+) -> Option<(f32, f32)> {
+    error_model
+        .get(&(mpc_code.clone(), catalog_code.clone()))
+        .cloned()
+        .or_else(|| {
+            error_model
+                .get(&(mpc_code.clone(), "e".to_string()))
+                .cloned()
+        })
+        .or_else(|| error_model.get(&(mpc_code, "c".to_string())).cloned())
+        .or_else(|| error_model.get(&("ALL".to_string(), catalog_code)).cloned())
+        .or_else(|| {
+            error_model
+                .get(&("ALL".to_string(), "e".to_string()))
+                .cloned()
+        })
+        .or_else(|| {
+            error_model
+                .get(&("ALL".to_string(), "c".to_string()))
+                .cloned()
+        })
+}
+
 impl TryFrom<&str> for ErrorModel {
     type Error = OutfitError;
 
@@ -196,5 +223,46 @@ mod test_error_model {
         assert!(result.is_ok());
         let data = result.unwrap();
         assert!(!data.is_empty());
+    }
+
+    #[test]
+    fn test_get_bias_rms() {
+        let error_model = ErrorModel::FCCT14.read_error_model_file().unwrap();
+        let bias_rms = get_bias_rms(&error_model, "ALL".to_string(), "c".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.51);
+        assert_eq!(rmsd, 0.4);
+
+        let bias_rms = get_bias_rms(&error_model, "699".to_string(), "c".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.47);
+        assert_eq!(rmsd, 0.39);
+
+        let error_model = ErrorModel::CBM10.read_error_model_file().unwrap();
+        let bias_rms = get_bias_rms(&error_model, "ALL".to_string(), "c".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.5);
+        assert_eq!(rmsd, 0.5);
+
+        let bias_rms = get_bias_rms(&error_model, "699".to_string(), "c".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.84);
+        assert_eq!(rmsd, 0.81);
+
+        let error_model = ErrorModel::VFCC17.read_error_model_file().unwrap();
+        let bias_rms = get_bias_rms(&error_model, "ALL".to_string(), "U".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.6);
+        assert_eq!(rmsd, 0.6);
+        let bias_rms = get_bias_rms(&error_model, "699".to_string(), "*".to_string());
+        assert!(bias_rms.is_some());
+        let (rmsa, rmsd) = bias_rms.unwrap();
+        assert_eq!(rmsa, 0.8);
+        assert_eq!(rmsd, 0.8);
     }
 }

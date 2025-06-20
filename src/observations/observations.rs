@@ -126,6 +126,20 @@ impl Observation {
         let diff_delta = self.dec - delta;
         let rms_ra = (self.dec.cos() * (diff_alpha / self.error_ra)).powi(2);
         let rms_dec = (diff_delta / self.error_dec).powi(2);
+
+        println!("\n\n");
+        println!("==========================");
+        dbg!(
+            self.ra,
+            self.dec,
+            self.error_ra,
+            self.error_dec,
+            rms_ra,
+            rms_dec
+        );
+        println!("==========================");
+        println!("\n\n");
+
         Ok(rms_ra + rms_dec)
     }
 }
