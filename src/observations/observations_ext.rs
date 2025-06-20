@@ -1,10 +1,13 @@
 use itertools::Itertools;
-use nalgebra::Vector3;
+use nalgebra::{Vector, Vector3};
 
 use crate::{
-    constants::Observations, equinoctial_element::EquinoctialElements,
-    initial_orbit_determination::gauss::GaussObs, keplerian_element::KeplerianElements,
-    outfit::Outfit, outfit_errors::OutfitError,
+    constants::{Observations, RADSEC},
+    equinoctial_element::EquinoctialElements,
+    initial_orbit_determination::gauss::GaussObs,
+    keplerian_element::KeplerianElements,
+    outfit::{self, Outfit},
+    outfit_errors::OutfitError,
 };
 
 /// Calculate the weight of a triplet of observations based on the time difference.
@@ -33,32 +36,6 @@ fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
 }
 
 pub(crate) trait ObservationsExt {
-    fn compute_triplets(
-        &mut self,
-        dt_min: Option<f64>,
-        dt_max: Option<f64>,
-        optimal_interval_time: Option<f64>,
-        max_triplet: Option<u32>,
-    ) -> Vec<GaussObs>;
-
-    fn select_rms_interval(
-        &self,
-        triplets: &GaussObs,
-        extf: f64,
-        dtmax: f64,
-    ) -> Result<(usize, usize), OutfitError>;
-
-    fn rms_orbit_error(
-        &self,
-        state: &Outfit,
-        triplets: &GaussObs,
-        orbit_element: &KeplerianElements,
-        extf: f64,
-        dtmax: f64,
-    ) -> Result<f64, OutfitError>;
-}
-
-impl ObservationsExt for Observations {
     /// Compute triplets of observations.
     ///
     /// This function computes triplets of observations from the given set of observations.
@@ -81,6 +58,85 @@ impl ObservationsExt for Observations {
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
         max_triplet: Option<u32>,
+        outfit: &Outfit,
+    ) -> Vec<GaussObs>;
+
+    /// Select the interval of observations for RMS calculation.
+    ///
+    /// This function selects the interval of observations for RMS calculation based on the provided triplet.
+    /// It computes the maximum allowed interval and finds the start and end indices of the observations
+    /// within that interval.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `triplets`: A reference to a `GaussObs` representing the triplet of observations.
+    /// * `extf`: A `f64` representing the external factor for the interval calculation.
+    /// * `dtmax`: A `f64` representing the maximum allowed interval.
+    ///
+    /// Return
+    /// ------
+    /// * A `Result` containing a tuple of start and end indices of the observations within the interval,
+    ///   or an `OutfitError` if an error occurs.
+    fn select_rms_interval(
+        &self,
+        triplets: &GaussObs,
+        extf: f64,
+        dtmax: f64,
+    ) -> Result<(usize, usize), OutfitError>;
+
+    /// Compute the RMS of normalized astrometric residuals over a selected interval of observations.
+    ///
+    /// This function evaluates the quality of a preliminary orbit by computing the root-mean-square (RMS)
+    /// of normalized squared astrometric residuals (in RA and DEC) across a subset of observations selected
+    /// from a `GaussObs` triplet. The subset is determined using a time interval expansion (`extf`) and a
+    /// maximum allowed duration (`dtmax`), centered on the triplet.
+    ///
+    /// # Arguments
+    /// ---------------
+    /// * `state` - The current global state providing ephemerides, Earth orientation data, and time conversion.
+    /// * `triplets` - A set of three observations used to generate the initial orbit (Gauss method).
+    /// * `orbit_element` - The keplerian orbital elements to be tested against the observation arc.
+    /// * `extf` - A fractional extension factor used to expand the time interval around the triplet center.
+    /// * `dtmax` - A maximum time window (in days) allowed for including additional observations.
+    ///
+    /// # Returns
+    /// ----------
+    /// * `Result<f64, OutfitError>` - The RMS (root-mean-square) of the normalized residuals over the selected interval, in radians.
+    ///
+    /// # Computation Details
+    /// ----------
+    /// - The residuals per observation are computed using [`Observation::ephemeris_error`](crate::observations::observations::Observation::ephemeris_error), returning a weighted sum of squares (normalized).
+    /// - The RMS is computed as:
+    ///   RMS = √[ (1 / 2N) × Σᵢ (RAᵢ² + DECᵢ²) ]
+    ///   where N is the number of observations in the selected interval.
+    ///
+    /// # Errors
+    /// ----------
+    /// Returns `OutfitError` if:
+    /// - The interval selection fails (e.g., no valid observations in time range),
+    /// - Orbit propagation or ephemeris lookup fails for any observation.
+    ///
+    /// # Units
+    /// ----------
+    /// - The final RMS is expressed in **radians**.
+    fn rms_orbit_error(
+        &self,
+        state: &Outfit,
+        triplets: &GaussObs,
+        orbit_element: &KeplerianElements,
+        extf: f64,
+        dtmax: f64,
+    ) -> Result<f64, OutfitError>;
+}
+
+impl ObservationsExt for Observations {
+    fn compute_triplets(
+        &mut self,
+        dt_min: Option<f64>,
+        dt_max: Option<f64>,
+        optimal_interval_time: Option<f64>,
+        max_triplet: Option<u32>,
+        outfit: &Outfit,
     ) -> Vec<GaussObs> {
         self.sort_by(|a, b| {
             a.time.partial_cmp(&b.time).expect(
@@ -120,6 +176,67 @@ impl ObservationsExt for Observations {
                 let obs2 = &self[idx2];
                 let obs3 = &self[idx3];
 
+                let observer_obs1 = obs1.get_observer(outfit);
+                let observer_obs2 = obs2.get_observer(outfit);
+                let observer_obs3 = obs3.get_observer(outfit);
+
+                let max_rms = |observation_error: f64, observer_error: f64, factor: f64| {
+                    f64::max(observation_error, observer_error * factor)
+                };
+
+                let ra_error = Vector3::new(
+                    max_rms(
+                        obs1.error_ra,
+                        observer_obs1
+                            .ra_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC / obs1.dec.cos(),
+                    ),
+                    max_rms(
+                        obs2.error_ra,
+                        observer_obs2
+                            .ra_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC / obs2.dec.cos(),
+                    ),
+                    max_rms(
+                        obs3.error_ra,
+                        observer_obs3
+                            .ra_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC / obs3.dec.cos(),
+                    ),
+                );
+
+                let dec_error = Vector3::new(
+                    max_rms(
+                        obs1.error_dec,
+                        observer_obs1
+                            .dec_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC,
+                    ),
+                    max_rms(
+                        obs2.error_dec,
+                        observer_obs2
+                            .dec_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC,
+                    ),
+                    max_rms(
+                        obs3.error_dec,
+                        observer_obs3
+                            .dec_accuracy
+                            .map(|v| v.into_inner())
+                            .unwrap_or(0.0),
+                        RADSEC,
+                    ),
+                );
                 // all coordinates and associated errors are in radians for the gauss preliminary orbit
                 GaussObs::new(
                     Vector3::new(idx1, idx2, idx3),
@@ -128,43 +245,19 @@ impl ObservationsExt for Observations {
                         obs2.ra.to_radians(),
                         obs3.ra.to_radians(),
                     ),
-                    Vector3::new(
-                        obs1.error_ra.to_radians(),
-                        obs2.error_ra.to_radians(),
-                        obs3.error_ra.to_radians(),
-                    ),
+                    ra_error,
                     Vector3::new(
                         obs1.dec.to_radians(),
                         obs2.dec.to_radians(),
                         obs3.dec.to_radians(),
                     ),
-                    Vector3::new(
-                        obs1.error_dec.to_radians(),
-                        obs2.error_dec.to_radians(),
-                        obs3.error_dec.to_radians(),
-                    ),
+                    dec_error,
                     Vector3::new(obs1.time, obs2.time, obs3.time),
                 )
             })
             .collect::<Vec<GaussObs>>()
     }
 
-    /// Select the interval of observations for RMS calculation.
-    ///
-    /// This function selects the interval of observations for RMS calculation based on the provided triplet.
-    /// It computes the maximum allowed interval and finds the start and end indices of the observations
-    /// within that interval.
-    ///
-    /// Arguments
-    /// ---------
-    /// * `triplets`: A reference to a `GaussObs` representing the triplet of observations.
-    /// * `extf`: A `f64` representing the external factor for the interval calculation.
-    /// * `dtmax`: A `f64` representing the maximum allowed interval.
-    ///
-    /// Return
-    /// ------
-    /// * A `Result` containing a tuple of start and end indices of the observations within the interval,
-    ///   or an `OutfitError` if an error occurs.
     fn select_rms_interval(
         &self,
         triplets: &GaussObs,
@@ -233,8 +326,6 @@ impl ObservationsExt for Observations {
     ) -> Result<f64, OutfitError> {
         let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
 
-        dbg!(start_obs_rms, end_obs_rms);
-
         let equinoctial_elements: EquinoctialElements = orbit_element.into();
 
         let rms_all_obs = self[start_obs_rms..=end_obs_rms]
@@ -266,7 +357,7 @@ mod test_obs_ext {
         let triplets = traj_set
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory")
-            .compute_triplets(Some(0.03), Some(150.), None, Some(10));
+            .compute_triplets(Some(0.03), Some(150.), None, Some(10), &env_state);
 
         assert_eq!(
             triplets.len(),
@@ -281,16 +372,16 @@ mod test_obs_ext {
                 Vector3::new(23, 24, 33),
                 [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
                 [[
-                    4.8481368110953594e-9,
-                    4.8481368110953594e-9,
-                    4.84813681109536e-8
+                    3.589796414603182e-6,
+                    2.7777777777777776e-7,
+                    2.777777777777778e-6
                 ]]
                 .into(),
                 [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
                 [[
-                    4.84813681109536e-8,
-                    4.84813681109536e-8,
-                    4.84813681109536e-7
+                    2.777777777777778e-6,
+                    2.777777777777778e-6,
+                    2.777777777777778e-5
                 ]]
                 .into(),
                 [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
@@ -303,16 +394,16 @@ mod test_obs_ext {
                 Vector3::new(21, 25, 33),
                 [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
                 [[
-                    4.8481368110953594e-9,
-                    4.8481368110953594e-9,
-                    4.84813681109536e-8
+                    3.5618818519573463e-6,
+                    2.7777777777777776e-7,
+                    2.777777777777778e-6
                 ]]
                 .into(),
                 [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
                 [[
-                    4.84813681109536e-8,
-                    4.84813681109536e-8,
-                    4.84813681109536e-7
+                    2.777777777777778e-6,
+                    2.777777777777778e-6,
+                    2.777777777777778e-5
                 ]]
                 .into(),
                 [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
@@ -330,7 +421,7 @@ mod test_obs_ext {
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(Some(0.03), Some(150.), None, Some(10));
+        let triplets = traj.compute_triplets(Some(0.03), Some(150.), None, Some(10), &env_state);
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
@@ -358,11 +449,16 @@ mod test_obs_ext {
     fn test_rms_trajectory() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
-        let traj_set = &OUTFIT_HORIZON_TEST.1;
+        let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
 
         let traj = traj_set
-            .get(&crate::constants::ObjectNumber::String("K09R05F".into()))
+            .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory");
+
+        traj.iter_mut().for_each(|obs| {
+            obs.ra = obs.ra.to_radians();
+            obs.dec = obs.dec.to_radians();
+        });
 
         let triplets = GaussObs::new(
             Vector3::new(34, 35, 36),
@@ -392,6 +488,6 @@ mod test_obs_ext {
             .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler, -1.0, 30.)
             .unwrap();
 
-        dbg!(rms);
+        assert_eq!(rms, 71.09778145906324);
     }
 }

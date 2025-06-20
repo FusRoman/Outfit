@@ -219,7 +219,7 @@ mod test_error_model {
 
         let error_model = ErrorModel::VFCC17;
         let result = error_model.read_error_model_file();
-        dbg!(&result);
+
         assert!(result.is_ok());
         let data = result.unwrap();
         assert!(!data.is_empty());

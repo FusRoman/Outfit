@@ -2,11 +2,12 @@ use camino::Utf8Path;
 use criterion::Throughput;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use outfit::constants::TrajectorySet;
+use outfit::error_models::ErrorModel;
 use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
 
 fn bench_load_parquet(c: &mut Criterion) {
-    let mut outfit = Outfit::new("horizon:DE440");
+    let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
     let path = Utf8Path::new("tests/data/test_from_fink.parquet");
     let ztf_observer = outfit.get_observer_from_mpc_code(&"I41".into());
 

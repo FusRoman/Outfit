@@ -22,7 +22,7 @@ use thiserror::Error;
 /// * `ra` - The right ascension of the observation
 /// * `dec` - The declination of the observation
 /// * `time` - The time of the observation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Observation {
     observer: u16,
     pub ra: Degree,
@@ -76,6 +76,35 @@ impl Observation {
         env_state.get_observer_from_uint16(self.observer)
     }
 
+    /// Compute the normalized squared astrometric residuals (RA/DEC) between an observed position and a propagated ephemeris.
+    ///
+    /// This function compares the actual observed position (stored in `self`) to the expected astrometric position
+    /// derived from the propagation of equinoctial orbital elements using a two-body model, corrected for light aberration
+    /// and transformed into the appropriate equatorial reference frame. It returns a scalar value representing the sum of
+    /// squared, normalized residuals in RA and DEC.
+    ///
+    /// # Arguments
+    /// ---------------
+    /// * `state` - The current application state providing ephemerides and time conversions.
+    /// * `equinoctial_element` - The orbital elements of the object used to propagate its position.
+    /// * `observer` - The observer's geographic location and observing context.
+    ///
+    /// # Returns
+    /// ----------
+    /// * `Result<f64, OutfitError>` - A scalar value representing the weighted sum of squared residuals (dimensionless).
+    ///   This value is roughly equivalent to a reduced chi-squared contribution for a single observation (but not divided by 2).
+    ///
+    /// # Notes
+    /// ----------
+    /// - The residuals are normalized using the observation's astrometric uncertainties (`error_ra`, `error_dec`).
+    /// - Right ascension differences are corrected by `cos(dec)` to account for projection effects.
+    /// - The resulting value is **dimensionless**.
+    /// - Units: all angles are in **radians**.
+    ///
+    /// # Errors
+    /// ----------
+    /// Returns an `OutfitError` if ephemeris data or propagation fails (e.g. missing JPL ephemeris).
+
     pub(crate) fn ephemeris_error(
         &self,
         state: &Outfit,
@@ -126,19 +155,6 @@ impl Observation {
         let diff_delta = self.dec - delta;
         let rms_ra = (self.dec.cos() * (diff_alpha / self.error_ra)).powi(2);
         let rms_dec = (diff_delta / self.error_dec).powi(2);
-
-        println!("\n\n");
-        println!("==========================");
-        dbg!(
-            self.ra,
-            self.dec,
-            self.error_ra,
-            self.error_dec,
-            rms_ra,
-            rms_dec
-        );
-        println!("==========================");
-        println!("\n\n");
 
         Ok(rms_ra + rms_dec)
     }
