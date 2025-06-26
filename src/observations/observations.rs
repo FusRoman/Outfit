@@ -9,7 +9,6 @@ use crate::{
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
-use core::error;
 use hifitime::Epoch;
 use nalgebra::Matrix3;
 use std::{f64::consts::PI, ops::Range, sync::Arc};

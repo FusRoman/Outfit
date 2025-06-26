@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::constants::{VLIGHT, VLIGHT_AU};
+use crate::constants::VLIGHT_AU;
 
 use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 

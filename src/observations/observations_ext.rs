@@ -1,12 +1,10 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
-use csv::Error;
 use itertools::Itertools;
 use nalgebra::Vector3;
-use nom::Err;
 
 use crate::{
-    constants::{Observations, RADSEC},
+    constants::Observations,
     equinoctial_element::EquinoctialElements,
     error_models::ErrorModel,
     initial_orbit_determination::gauss::GaussObs,

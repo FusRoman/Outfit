@@ -1,8 +1,7 @@
 use core::f64;
 use std::f64::consts::PI;
 
-use nalgebra::{Matrix3x6, Matrix6x3, Vector, Vector3};
-use quick_xml::de;
+use nalgebra::{Matrix3x6, Matrix6x3, Vector3};
 use roots::{find_root_newton_raphson, SimpleConvergency};
 
 use crate::{
