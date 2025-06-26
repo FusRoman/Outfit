@@ -120,6 +120,10 @@ impl Outfit {
 
                 let (longitude, cos, sin, name) = parse_remain(remain, code);
 
+                // TODO: need to handle the catalog code
+                // For now, we assume the catalog code is "c" (for "catalog")
+                // This is a simplification, as the catalog code can vary
+                // depending on the observer and the error model
                 let bias_rms = get_bias_rms(&self.error_model, code.to_string(), "c".to_string());
 
                 let observer = Observer {
