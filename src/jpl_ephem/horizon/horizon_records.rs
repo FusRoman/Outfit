@@ -4,7 +4,7 @@ use super::interpolation_result::InterpResult;
 
 /// The HorizonRecord struct represents a record of Tchebycheff coefficients
 /// to derive a celestial object's position over a specified time interval.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct HorizonRecord {
     pub start_jd: f64,
     pub end_jd: f64,

@@ -14,6 +14,7 @@ pub mod horizon;
 pub mod jpl_request;
 pub mod naif;
 
+#[derive(Debug, Clone)]
 pub enum JPLEphem {
     HorizonFile(HorizonData),
     NaifFile(NaifData),

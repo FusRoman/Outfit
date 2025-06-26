@@ -1,5 +1,5 @@
 use crate::{
-    constants::{ArcSec, Degree, ObjectNumber, Observations, DPI, MJD},
+    constants::{ArcSec, Degree, ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
     observers::{observer_position::geo_obs_pos, observers::Observer},
@@ -9,6 +9,7 @@ use crate::{
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
+use core::error;
 use hifitime::Epoch;
 use nalgebra::Matrix3;
 use std::{f64::consts::PI, ops::Range, sync::Arc};
@@ -18,17 +19,19 @@ use thiserror::Error;
 ///
 /// # Fields
 ///
-/// * `observer` - The observer
-/// * `ra` - The right ascension of the observation
-/// * `dec` - The declination of the observation
+/// * `observer` - The observer index (u16), unique identifier for the observer
+/// * `ra` - The right ascension of the observation in Radians
+/// * `error_ra` - The error in right ascension in Radians
+/// * `dec` - The declination of the observation in Radians
+/// * `error_dec` - The error in declination in Radians
 /// * `time` - The time of the observation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Observation {
-    observer: u16,
-    pub ra: Degree,
-    pub error_ra: ArcSec,
-    pub dec: Degree,
-    pub error_dec: ArcSec,
+    pub(crate) observer: u16,
+    pub ra: Radian,
+    pub error_ra: Radian,
+    pub dec: Radian,
+    pub error_dec: Radian,
     pub time: MJD,
 }
 
@@ -45,20 +48,21 @@ impl Observation {
     /// Return
     /// ------
     /// * a new Observation struct
+    /// The coordinates and the associated errors are converted from degrees and arcseconds respectively to radians.
     pub fn new(
         observer: u16,
-        ra: Degree,
-        error_ra: ArcSec,
-        dec: Degree,
-        error_dec: ArcSec,
+        ra: Radian,
+        error_ra: Radian,
+        dec: Radian,
+        error_dec: Radian,
         time: MJD,
     ) -> Self {
         Observation {
             observer,
-            ra,
-            error_ra,
-            dec,
-            error_dec,
+            ra: ra,
+            error_ra: error_ra,
+            dec: dec,
+            error_dec: error_dec,
             time,
         }
     }
@@ -166,6 +170,12 @@ pub enum ParseObsError {
     TooShortLine,
     #[error("The line is not a CCD observation")]
     NotCCDObs,
+    #[error("Error parsing RA: {0}")]
+    InvalidRA(String),
+    #[error("Invalid Dec value: {0}")]
+    InvalidDec(String),
+    #[error("Invalid date: {0}")]
+    InvalidDate(String),
 }
 
 /// Parse a line from an 80 column file to an Observation
@@ -177,34 +187,71 @@ pub enum ParseObsError {
 /// Return
 /// ------
 /// * an Observation struct
-fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, ParseObsError> {
+fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, OutfitError> {
     if line.len() < 80 {
-        return Err(ParseObsError::TooShortLine);
+        return Err(OutfitError::Parsing80ColumnFileError(
+            ParseObsError::TooShortLine,
+        ));
     }
 
     if line.chars().nth(14) == Some('s') {
-        return Err(ParseObsError::NotCCDObs);
+        return Err(OutfitError::Parsing80ColumnFileError(
+            ParseObsError::NotCCDObs,
+        ));
     }
 
-    let (ra, error_ra) = parse_ra_to_deg(line[32..44].trim())
-        .expect(format!("Error parsing RA: {}", line[32..44].trim()).as_str());
+    let (ra, error_ra) = parse_ra_to_deg(line[32..44].trim()).ok_or_else(|| {
+        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidRA(
+            line[32..44].trim().to_string(),
+        ))
+    })?;
 
-    let (dec, error_dec) = parse_dec_to_deg(line[44..56].trim())
-        .expect(format!("Error parsing DEC: {}", line[44..56].trim()).as_str());
+    let (dec, error_dec) = parse_dec_to_deg(line[44..56].trim()).ok_or_else(|| {
+        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidDec(
+            line[44..56].trim().to_string(),
+        ))
+    })?;
+
+    let time = frac_date_to_mjd(line[15..32].trim()).map_err(|_| {
+        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidDate(
+            line[15..32].trim().to_string(),
+        ))
+    })?;
+
+    let observer_id = env_state.uint16_from_mpc_code(&line[77..80].trim().into());
+    let observer = env_state.get_observer_from_uint16(observer_id);
+
+    let max_rms = |observation_error: f64, observer_error: f64, factor: f64| {
+        f64::max(observation_error, observer_error * factor)
+    };
+
+    let dec_radians = dec.to_radians();
+    let dec_rad_cos = dec_radians.cos();
+
+    let ra_error = max_rms(
+        (error_ra * RADH) / dec_rad_cos,
+        observer.ra_accuracy.map(|v| v.into_inner()).unwrap_or(0.0),
+        RADSEC / dec_rad_cos,
+    );
+
+    let dec_error = max_rms(
+        error_dec.to_radians(),
+        observer.dec_accuracy.map(|v| v.into_inner()).unwrap_or(0.0),
+        RADSEC,
+    );
 
     let observation = Observation::new(
-        env_state.uint16_from_mpc_code(&line[77..80].trim().into()),
-        ra,
-        error_ra,
-        dec,
-        error_dec,
-        frac_date_to_mjd(line[15..32].trim())
-            .expect(format!("Error parsing date: {}", line[15..32].trim()).as_str()),
+        observer_id,
+        ra.to_radians(),
+        ra_error,
+        dec_radians,
+        dec_error,
+        time,
     );
     Ok(observation)
 }
 
-/// Extract the observations and the object number from an 80 column file
+/// Extract the observations and the object number from a 80 column file
 ///
 /// Arguments
 /// ---------
@@ -216,7 +263,7 @@ fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, ParseOb
 pub(crate) fn extract_80col(
     env_state: &mut Outfit,
     colfile: &Utf8Path,
-) -> (Observations, ObjectNumber) {
+) -> Result<(Observations, ObjectNumber), OutfitError> {
     let file_content = std::fs::read_to_string(colfile)
         .expect(format!("Could not read file {}", colfile.as_str()).as_str());
 
@@ -234,17 +281,17 @@ pub(crate) fn extract_80col(
         object_number = get_object_number(first_line, 5..12);
     }
 
-    (
+    Ok((
         file_content
             .lines()
             .filter_map(|line| match from_80col(env_state, line) {
                 Ok(obs) => Some(obs),
-                Err(ParseObsError::NotCCDObs) => None,
+                Err(OutfitError::Parsing80ColumnFileError(ParseObsError::NotCCDObs)) => None,
                 Err(e) => panic!("Error parsing line: {:?}", e),
             })
             .collect(),
         ObjectNumber::String(object_number),
-    )
+    ))
 }
 
 /// Create a vector of Observations from vectors of right ascension, declination, time, and observer
@@ -280,7 +327,45 @@ pub(crate) fn observation_from_vec(
 
 #[cfg(test)]
 mod test_observations {
+
     use super::*;
+
+    #[test]
+    fn test_new_observation() {
+        let observation = Observation::new(1, 1.0, 0.1, 2.0, 0.2, 59000.0);
+        assert_eq!(
+            observation,
+            Observation {
+                observer: 1,
+                ra: 1.0,
+                error_ra: 0.1,
+                dec: 2.0,
+                error_dec: 0.2,
+                time: 59000.0
+            }
+        );
+
+        let observation_2 = Observation::new(
+            2,
+            343.09737500000000,
+            2.7777777777777779E-006,
+            -14.784833333333333,
+            2.7777777777777779E-005,
+            59001.0,
+        );
+
+        assert_eq!(
+            observation_2,
+            Observation {
+                observer: 2,
+                ra: 343.097375,
+                error_ra: 2.777777777777778e-6,
+                dec: -14.784833333333333,
+                error_dec: 2.777777777777778e-5,
+                time: 59001.0
+            }
+        );
+    }
 
     #[test]
     #[cfg(feature = "jpl-download")]
@@ -313,5 +398,85 @@ mod test_observations {
         let rms_error =
             obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element, &observer);
         assert_eq!(rms_error.unwrap(), 75.00445641224026);
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_from_80col_valid_line() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let line =
+            "     K09R05F  C2009 09 15.23433 22 52 22.62 -14 47 03.2          20.8 Vr~097wG96";
+
+        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
+        let result = from_80col(&mut env_state, line);
+
+        assert!(result.is_ok());
+        let obs = result.unwrap();
+
+        assert_eq!(
+            obs,
+            Observation {
+                observer: 0,
+                ra: 5.988124307160555,
+                error_ra: 1.2535340843609459e-6,
+                dec: -0.25803335512429054,
+                error_dec: 1.0181086985431635e-6,
+                time: 55089.23509601851
+            }
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_from_80col_too_short_line() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let line = "short line";
+        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
+        let result = from_80col(&mut env_state, line);
+
+        assert!(matches!(
+            result,
+            Err(OutfitError::Parsing80ColumnFileError(
+                ParseObsError::TooShortLine
+            ))
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_from_80col_invalid_date() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let line =
+            "     K09R05F  C20xx 09 15.23433 22 52 22.62 -14 47 03.2          20.8 Vr~097wG96";
+        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
+        let result = from_80col(&mut env_state, line);
+
+        assert!(matches!(
+            result,
+            Err(OutfitError::Parsing80ColumnFileError(
+                ParseObsError::InvalidDate(_)
+            ))
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_from_80col_invalid_ra_dec() {
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let line =
+            "     K09R05F  C2009 09 15.23433 XX YY ZZ.ZZ -AA BB CC.C          20.8 Vr~097wG96";
+        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
+        let result = from_80col(&mut env_state, line);
+
+        assert!(matches!(
+            result,
+            Err(OutfitError::Parsing80ColumnFileError(
+                ParseObsError::InvalidRA(_)
+            ))
+        ));
     }
 }

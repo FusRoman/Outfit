@@ -33,7 +33,7 @@ type HorizonRecords = Vec<HashMap<u8, Vec<HorizonRecord>>>;
 /// The third element is the number of subintervals
 pub type IPT = [[u32; 3]; 15];
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct HorizonHeader {
     jpl_version: String,
     ipt: IPT,
@@ -49,7 +49,7 @@ pub struct HorizonHeader {
 /// The records are stored in a vector of hashmaps
 /// where the key is the body number (0-14) and the value is a vector of HorizonRecord
 /// Each HorizonRecord contains the start and end JD, and the coefficients for the Tchebyshev polynomial
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HorizonData {
     header: HorizonHeader,
     records: HorizonRecords,

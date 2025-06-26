@@ -1,12 +1,18 @@
+use std::collections::{HashMap, VecDeque};
+
+use csv::Error;
 use itertools::Itertools;
-use nalgebra::{Vector, Vector3};
+use nalgebra::Vector3;
+use nom::Err;
 
 use crate::{
     constants::{Observations, RADSEC},
     equinoctial_element::EquinoctialElements,
+    error_models::ErrorModel,
     initial_orbit_determination::gauss::GaussObs,
     keplerian_element::KeplerianElements,
-    outfit::{self, Outfit},
+    observations::observations::Observation,
+    outfit::Outfit,
     outfit_errors::OutfitError,
 };
 
@@ -58,7 +64,6 @@ pub(crate) trait ObservationsExt {
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
         max_triplet: Option<u32>,
-        outfit: &Outfit,
     ) -> Vec<GaussObs>;
 
     /// Select the interval of observations for RMS calculation.
@@ -127,6 +132,44 @@ pub(crate) trait ObservationsExt {
         extf: f64,
         dtmax: f64,
     ) -> Result<f64, OutfitError>;
+
+    /// Apply RMS correction based on temporally clustered batches of observations.
+    ///
+    /// This method adjusts the astrometric uncertainties (`error_ra`, `error_dec`) of each observation
+    /// based on the local density of observations in time and observer identity. Observations that are
+    /// close in time (within 8 hours) and come from the same observer are grouped into batches, and a
+    /// correction factor is applied to reflect statistical correlation or improvement due to redundancy.
+    ///
+    /// # Arguments
+    /// ---------------
+    /// * `error_model` - The error model to use when applying the batch correction. Supported values include:
+    ///     - `"vfcc17"`: uses a reduced factor `√(n × 0.25)` if the batch has at least 5 observations,
+    ///     - any other string: uses the standard `√n` factor.
+    /// * `gap_max` - The maximum time gap (in days) to consider observations as part of the same batch.
+    ///
+    /// # Behavior
+    /// ----------
+    /// - Observations are grouped by `observer` and sorted in time.
+    /// - A batch is formed when consecutive observations from the same observer are spaced by less than 8 hours.
+    /// - Each observation in a batch of size `n` receives a correction:
+    ///     - `√n` for standard models,
+    ///     - `√(n × 0.25)` for `vfcc17` when `n ≥ 5`.
+    /// - If `n < 5` with `vfcc17`, it falls back to `√n`.
+    /// - Observations with fixed weights (`force_w`) are not affected (not yet implemented in this version).
+    ///
+    /// # Returns
+    /// ----------
+    /// * `()` - This function modifies the observations in-place; it does not return a value.
+    ///
+    /// # Computation Details
+    /// ----------
+    /// - The time comparison is based on Modified Julian Date (`MJD`), and the batch window is fixed at 8 hours (i.e., `8.0 / 24.0` days).
+    /// - The error fields `error_ra` and `error_dec` are both scaled by the same batch correction factor.
+    ///
+    /// # Units
+    /// ----------
+    /// - Input and output uncertainties (`error_ra`, `error_dec`) are expressed in **radians**.
+    fn apply_batch_rms_correction(&mut self, error_model: &ErrorModel, gap_max: f64);
 }
 
 impl ObservationsExt for Observations {
@@ -136,7 +179,6 @@ impl ObservationsExt for Observations {
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
         max_triplet: Option<u32>,
-        outfit: &Outfit,
     ) -> Vec<GaussObs> {
         self.sort_by(|a, b| {
             a.time.partial_cmp(&b.time).expect(
@@ -176,82 +218,11 @@ impl ObservationsExt for Observations {
                 let obs2 = &self[idx2];
                 let obs3 = &self[idx3];
 
-                let observer_obs1 = obs1.get_observer(outfit);
-                let observer_obs2 = obs2.get_observer(outfit);
-                let observer_obs3 = obs3.get_observer(outfit);
-
-                let max_rms = |observation_error: f64, observer_error: f64, factor: f64| {
-                    f64::max(observation_error, observer_error * factor)
-                };
-
-                let ra_error = Vector3::new(
-                    max_rms(
-                        obs1.error_ra,
-                        observer_obs1
-                            .ra_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC / obs1.dec.cos(),
-                    ),
-                    max_rms(
-                        obs2.error_ra,
-                        observer_obs2
-                            .ra_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC / obs2.dec.cos(),
-                    ),
-                    max_rms(
-                        obs3.error_ra,
-                        observer_obs3
-                            .ra_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC / obs3.dec.cos(),
-                    ),
-                );
-
-                let dec_error = Vector3::new(
-                    max_rms(
-                        obs1.error_dec,
-                        observer_obs1
-                            .dec_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC,
-                    ),
-                    max_rms(
-                        obs2.error_dec,
-                        observer_obs2
-                            .dec_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC,
-                    ),
-                    max_rms(
-                        obs3.error_dec,
-                        observer_obs3
-                            .dec_accuracy
-                            .map(|v| v.into_inner())
-                            .unwrap_or(0.0),
-                        RADSEC,
-                    ),
-                );
                 // all coordinates and associated errors are in radians for the gauss preliminary orbit
                 GaussObs::new(
                     Vector3::new(idx1, idx2, idx3),
-                    Vector3::new(
-                        obs1.ra.to_radians(),
-                        obs2.ra.to_radians(),
-                        obs3.ra.to_radians(),
-                    ),
-                    ra_error,
-                    Vector3::new(
-                        obs1.dec.to_radians(),
-                        obs2.dec.to_radians(),
-                        obs3.dec.to_radians(),
-                    ),
-                    dec_error,
+                    Vector3::new(obs1.ra, obs2.ra, obs3.ra),
+                    Vector3::new(obs1.dec, obs2.dec, obs3.dec),
                     Vector3::new(obs1.time, obs2.time, obs3.time),
                 )
             })
@@ -335,6 +306,52 @@ impl ObservationsExt for Observations {
 
         Ok((rms_all_obs / (2. * (end_obs_rms - start_obs_rms + 1) as f64)).sqrt())
     }
+
+    fn apply_batch_rms_correction(&mut self, error_model: &ErrorModel, gap_max: f64) {
+        // Step 1: Sort in time
+        self.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+
+        // Step 2: Group by observer
+        for (_observer_id, group) in &self.into_iter().chunk_by(|obs| obs.observer) {
+            // Step 3: Batch grouping using sliding window
+            let mut batch: VecDeque<&mut Observation> = VecDeque::new();
+            let mut iter = group.peekable();
+
+            while let Some(obs) = iter.next() {
+                batch.push_back(obs);
+
+                // Extend batch while within gap_max
+                while let Some(next) = iter.peek() {
+                    let dt = next.time
+                        - batch
+                            .back()
+                            .expect("in apply_batch_rms_correction: batch should not be empty")
+                            .time;
+                    if dt <= gap_max {
+                        batch.push_back(iter.next().expect(
+                            "in apply_batch_rms_correction: next in batch should not be None",
+                        ));
+                    } else {
+                        break;
+                    }
+                }
+
+                // Apply correction to current batch
+                let n = batch.len();
+                if n > 0 {
+                    let factor = match error_model {
+                        ErrorModel::VFCC17 if n >= 5 => (n as f64 * 0.25).sqrt(),
+                        _ => (n as f64).sqrt(),
+                    };
+
+                    for obs in batch.drain(..) {
+                        obs.error_ra *= factor;
+                        obs.error_dec *= factor;
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -357,7 +374,7 @@ mod test_obs_ext {
         let triplets = traj_set
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory")
-            .compute_triplets(Some(0.03), Some(150.), None, Some(10), &env_state);
+            .compute_triplets(Some(0.03), Some(150.), None, Some(10));
 
         assert_eq!(
             triplets.len(),
@@ -371,19 +388,7 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(23, 24, 33),
                 [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
-                [[
-                    3.589796414603182e-6,
-                    2.7777777777777776e-7,
-                    2.777777777777778e-6
-                ]]
-                .into(),
                 [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
-                [[
-                    2.777777777777778e-6,
-                    2.777777777777778e-6,
-                    2.777777777777778e-5
-                ]]
-                .into(),
                 [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
             )
         );
@@ -393,19 +398,7 @@ mod test_obs_ext {
             GaussObs::new(
                 Vector3::new(21, 25, 33),
                 [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
-                [[
-                    3.5618818519573463e-6,
-                    2.7777777777777776e-7,
-                    2.777777777777778e-6
-                ]]
-                .into(),
                 [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
-                [[
-                    2.777777777777778e-6,
-                    2.777777777777778e-6,
-                    2.777777777777778e-5
-                ]]
-                .into(),
                 [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
             )
         );
@@ -421,7 +414,7 @@ mod test_obs_ext {
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(Some(0.03), Some(150.), None, Some(10), &env_state);
+        let triplets = traj.compute_triplets(Some(0.03), Some(150.), None, Some(10));
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
@@ -455,22 +448,17 @@ mod test_obs_ext {
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory");
 
-        traj.iter_mut().for_each(|obs| {
-            obs.ra = obs.ra.to_radians();
-            obs.dec = obs.dec.to_radians();
-        });
+        traj.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
 
         let triplets = GaussObs::new(
             Vector3::new(34, 35, 36),
             [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
-            [[0., 0., 0.]].into(),
             [[
                 0.77917805235018101,
                 0.77908666497129186,
                 0.77899653810797365,
             ]]
             .into(),
-            [[0., 0., 0.]].into(),
             [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
         );
 
@@ -488,6 +476,140 @@ mod test_obs_ext {
             .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler, -1.0, 30.)
             .unwrap();
 
-        assert_eq!(rms, 71.09778145906324);
+        assert_eq!(rms, 68.88650730830162);
+    }
+
+    mod test_batch_rms_correction {
+        use crate::constants::{Radian, MJD};
+        use approx::assert_ulps_eq;
+        use smallvec::smallvec;
+
+        use super::*;
+
+        fn rad(x: f64) -> Radian {
+            x
+        }
+
+        fn obs(observer: u16, time: MJD) -> Observation {
+            Observation {
+                observer,
+                ra: rad(1.0),
+                error_ra: rad(1e-6),
+                dec: rad(0.5),
+                error_dec: rad(2e-6),
+                time,
+            }
+        }
+
+        #[test]
+        fn test_single_batch_vfcc17_large() {
+            let base_time = 59000.0;
+            let mut obs: Observations = smallvec![
+                obs(1, base_time),
+                obs(1, base_time + 0.01),
+                obs(1, base_time + 0.02),
+                obs(1, base_time + 0.03),
+                obs(1, base_time + 0.04), // n = 5
+            ];
+
+            obs.apply_batch_rms_correction(&ErrorModel::VFCC17, 8.0 / 24.0);
+
+            let factor = (5.0_f64 * 0.25_f64).sqrt();
+            for ob in &obs {
+                assert_ulps_eq!(ob.error_ra, 1e-6 * factor, max_ulps = 2);
+                assert_ulps_eq!(ob.error_dec, 2e-6 * factor, max_ulps = 2);
+            }
+        }
+
+        #[test]
+        fn test_single_batch_small_n() {
+            let base_time = 59000.0;
+            let mut obs: Observations = smallvec![
+                obs(2, base_time),
+                obs(2, base_time + 0.01), // n = 2
+            ];
+
+            obs.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
+
+            let factor = (2.0f64).sqrt();
+            for ob in &obs {
+                assert_ulps_eq!(ob.error_ra, 1e-6 * factor, max_ulps = 2);
+                assert_ulps_eq!(ob.error_dec, 2e-6 * factor, max_ulps = 2);
+            }
+        }
+
+        #[test]
+        fn test_multiple_batches_same_observer() {
+            let base_time = 59000.0;
+            let mut obs: Observations = smallvec![
+                obs(3, base_time),
+                obs(3, base_time + 0.01), // batch 1 (n = 2)
+                obs(3, base_time + 1.0),  // isolated, batch 2 (n = 1)
+            ];
+
+            obs.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
+
+            let factor1 = (2.0f64).sqrt();
+            let factor2 = 1.0;
+
+            assert_ulps_eq!(obs[0].error_ra, 1e-6 * factor1, max_ulps = 2);
+            assert_ulps_eq!(obs[1].error_ra, 1e-6 * factor1, max_ulps = 2);
+            assert_ulps_eq!(obs[2].error_ra, 1e-6 * factor2, max_ulps = 2);
+        }
+
+        #[test]
+        fn test_different_observers_are_not_grouped() {
+            let base_time = 59000.0;
+            let mut obs: Observations = smallvec![
+                obs(10, base_time),
+                obs(11, base_time + 0.01),
+                obs(12, base_time + 0.02),
+            ];
+
+            obs.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
+
+            for ob in &obs {
+                assert_ulps_eq!(ob.error_ra, 1e-6, max_ulps = 2);
+                assert_ulps_eq!(ob.error_dec, 2e-6, max_ulps = 2);
+            }
+        }
+
+        #[test]
+        fn test_batch_gaps_exceed_gapmax() {
+            let mut obs: Observations = smallvec![
+                obs(5, 59000.0),
+                obs(5, 59001.0), // > 8h => separate
+            ];
+
+            obs.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
+
+            for ob in &obs {
+                assert_ulps_eq!(ob.error_ra, 1e-6, max_ulps = 2);
+                assert_ulps_eq!(ob.error_dec, 2e-6, max_ulps = 2);
+            }
+        }
+
+        #[test]
+        #[cfg(feature = "jpl-download")]
+        fn test_batch_real_data() {
+            use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+            let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
+
+            let traj = traj_set
+                .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
+                .expect("Failed to get trajectory");
+
+            traj.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
+
+            assert_ulps_eq!(traj[0].error_ra, 2.507075226057322e-6, max_ulps = 2);
+            assert_ulps_eq!(traj[0].error_dec, 2.036217397086327e-6, max_ulps = 2);
+
+            assert_ulps_eq!(traj[1].error_ra, 2.5070681687218917e-6, max_ulps = 2);
+            assert_ulps_eq!(traj[1].error_dec, 2.036217397086327e-6, max_ulps = 2);
+
+            assert_ulps_eq!(traj[2].error_ra, 2.5070595078906952E-006, max_ulps = 2);
+            assert_ulps_eq!(traj[2].error_dec, 2.036217397086327e-6, max_ulps = 2);
+        }
     }
 }

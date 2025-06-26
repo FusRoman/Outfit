@@ -281,13 +281,15 @@ impl TrajectoryExt for TrajectorySet {
 
     fn new_from_80col(env_state: &mut Outfit, colfile: &Utf8Path) -> Self {
         let mut traj_set: TrajectorySet = HashMap::default();
-        let (observations, object_number) = extract_80col(env_state, colfile);
+        let (observations, object_number) =
+            extract_80col(env_state, colfile).expect("Failed to extract 80col data");
         traj_set.insert(object_number, observations);
         traj_set
     }
 
     fn add_from_80col(&mut self, env_state: &mut Outfit, colfile: &Utf8Path) {
-        let (observations, object_number) = extract_80col(env_state, colfile);
+        let (observations, object_number) =
+            extract_80col(env_state, colfile).expect("Failed to extract 80col data");
         self.insert(object_number, observations);
     }
 

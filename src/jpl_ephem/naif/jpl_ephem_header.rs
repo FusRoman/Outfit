@@ -5,7 +5,7 @@ use nom::{
     IResult, Parser,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct JPLEphemHeader {
     pub version: String,
     pub creation_date: String,

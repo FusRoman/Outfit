@@ -15,8 +15,8 @@ fn test_80col_reader() {
     assert_eq!(traj_set.len(), 1);
     assert_eq!(obs_33803.len(), 1812);
     assert_eq!(obs_33803[0].time, 43041.93932611111);
-    assert_eq!(obs_33803[0].ra, 359.7403333333333);
-    assert_eq!(obs_33803[0].dec, -0.5039444444444444);
+    assert_eq!(obs_33803[0].ra, 6.278653268888574);
+    assert_eq!(obs_33803[0].dec, -0.008795489802689202);
     assert_eq!(
         obs_33803[0].get_observer(&env_state).name,
         Some("Uppsala-Kvistaberg".to_string())
@@ -28,8 +28,8 @@ fn test_80col_reader() {
     let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();
     assert_eq!(obs_8467.len(), 3748);
     assert_eq!(obs_8467[0].time, 43785.35855925926);
-    assert_eq!(obs_8467[0].ra, 14.62025);
-    assert_eq!(obs_8467[0].dec, 9.987777777777778);
+    assert_eq!(obs_8467[0].ra, 0.25517149996470095);
+    assert_eq!(obs_8467[0].dec, 0.17431960717974476);
     assert_eq!(
         obs_8467[0].get_observer(&env_state).name,
         Some("Palomar Mountain".to_string())
@@ -43,8 +43,8 @@ fn test_80col_reader() {
         .unwrap();
     assert_eq!(obs_k25.len(), 20);
     assert_eq!(obs_k25[0].time, 60732.28129074074);
-    assert_eq!(obs_k25[0].ra, 154.65650833333333);
-    assert_eq!(obs_k25[0].dec, 29.973188888888888);
+    assert_eq!(obs_k25[0].ra, 2.6992652800547146);
+    assert_eq!(obs_k25[0].dec, 0.5231308334332919);
     assert_eq!(
         obs_k25[0].get_observer(&env_state).name,
         Some("Kitt Peak-Bok".to_string())
