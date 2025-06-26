@@ -15,7 +15,7 @@ use ureq::{
 /// * `ut1_provider` - A provider used to get the current UT1 time
 /// * `observatories` - A lazy map of observatories from the Minor Planet Center.
 ///     The key is the MPC code and the value is the observer
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OutfitEnv {
     pub http_client: Agent,
     pub ut1_provider: Ut1Provider,

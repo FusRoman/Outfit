@@ -17,7 +17,7 @@ use nom::number::complete::le_f64;
 /// - `rsize`: Size of the ephemeris record in bytes
 /// - `n_records`: Number of ephemeris records
 /// The data is read from the file in little-endian format.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DirectoryData {
     pub init: f64,
     pub intlen: usize,

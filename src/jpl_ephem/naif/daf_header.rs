@@ -1,6 +1,6 @@
 use nom::{bytes::complete::take, number::complete::le_i32, IResult};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DAFHeader {
     pub idword: String,
     pub internal_filename: String,

@@ -3,7 +3,7 @@ use super::observers::Observer;
 use crate::constants::{Degree, Kilometer, MpcCodeObs};
 use std::sync::{Arc, OnceLock};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Observatories {
     pub(crate) mpc_code_obs: OnceLock<MpcCodeObs>,
     obs_to_uint16: BiMap<Arc<Observer>, u16>,

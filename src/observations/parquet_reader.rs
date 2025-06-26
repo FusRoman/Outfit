@@ -15,7 +15,7 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 /// Reads a Parquet file and converts it to a TrajectorySet.
 /// The Parquet file must contain the following columns: "ra", "dec", "jd", and "trajectory_id".
 /// The "jd" column is converted to MJD using the JDTOMJD constant.
-/// The "ra" and "dec" columns are converted to 32 bits for performance.
+/// The "ra" and "dec" columns are expected to be in degrees.
 ///
 /// Arguments
 /// ---------
@@ -23,6 +23,8 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 /// * `env_state`: a mutable reference to an Outfit
 /// * `parquet`: a path to a Parquet file
 /// * `observer`: an Arc<Observer>
+/// * `error_ra`: the error in right ascension (RA) in arcseconds
+/// * `error_dec`: the error in declination (DEC) in arcseconds
 /// * `batch_size`: an optional batch size to use when reading the Parquet file, If None, the default batch size is 2048
 ///
 /// Return

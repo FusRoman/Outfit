@@ -1452,6 +1452,7 @@ version = "0.1.0"
 dependencies = [
  "aberth",
  "ahash",
+ "approx",
  "arrow-array",
  "camino",
  "criterion",

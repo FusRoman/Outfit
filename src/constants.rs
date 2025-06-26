@@ -7,16 +7,17 @@ use smallvec::SmallVec;
 
 use crate::initial_orbit_determination::gauss::GaussObs;
 
+// Constants
+pub const DPI: f64 = 2. * std::f64::consts::PI;
+pub const SECONDS_PER_DAY: f64 = 86_400.0;
+pub const AU: f64 = 149_597_870.7;
+
 pub const EPS: f64 = 1e-6;
 pub const T2000: f64 = 51544.5; // J2000 Epoch for MJD
 pub const JDTOMJD: f64 = 2400000.5; // Julian Date -> Modified Julian Date conversion factor
 pub const RADEG: f64 = std::f64::consts::PI / 180.0; // Degrees -> radians conversion factor
 pub const RADSEC: f64 = std::f64::consts::PI / 648000.0; // arcsecond -> radians conversion factor
-
-// Constants
-pub const DPI: f64 = 2. * std::f64::consts::PI;
-pub const SECONDS_PER_DAY: f64 = 86_400.0;
-pub const AU: f64 = 149_597_870.7;
+pub const RADH: f64 = DPI / 24.0; // hours -> radians conversion factor
 
 /// Earth ellipsoid constant from (GRS1980/WGS84)
 pub const EARTH_MAJOR_AXIS: f64 = 6_378_137.0; // Earth equatorial radius in meter

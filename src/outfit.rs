@@ -16,6 +16,7 @@ use crate::{
 
 use crate::jpl_ephem::JPLEphem;
 
+#[derive(Debug, Clone)]
 pub struct Outfit {
     env_state: OutfitEnv,
     observatories: Observatories,

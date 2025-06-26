@@ -8,7 +8,7 @@ use nom::{
 
 use crate::jpl_ephem::naif::naif_ids::{naif_type::SpkDataType, NaifIds};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Summary {
     pub start_epoch: f64,
     pub end_epoch: f64,

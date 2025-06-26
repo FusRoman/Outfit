@@ -16,7 +16,7 @@ use super::{
 
 type DafRecords = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NaifData {
     daf_header: DAFHeader,
     header: JPLEphemHeader,

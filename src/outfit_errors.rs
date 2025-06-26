@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::observations::observations::ParseObsError;
+
 #[derive(Error, Debug)]
 pub enum OutfitError {
     #[error("Invalid JPL string format: {0}")]
@@ -47,4 +49,7 @@ pub enum OutfitError {
 
     #[error("Error during the nom parsing: {0}")]
     NomParsingError(String),
+
+    #[error("Error during the 80 column file parsing: {0}")]
+    Parsing80ColumnFileError(ParseObsError),
 }
