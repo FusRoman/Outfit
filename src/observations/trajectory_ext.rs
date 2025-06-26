@@ -4,7 +4,6 @@ use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
-use nom::error;
 
 use super::ades_reader::parse_ades;
 use super::observations::{extract_80col, observation_from_vec};
