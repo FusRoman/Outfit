@@ -31,12 +31,6 @@ pub struct GaussObs {
     observer_position: Matrix3<f64>,
 }
 
-/// Define the errors that the Gauss method could return during the execution
-///
-/// GaussSingMatrix means that the matrix made of unit_vector towards the orbiting body cannot be inverse.
-#[derive(Debug, Clone)]
-struct GaussSingMatrix;
-
 /// Solve8PolyFailed is used in case the Aberth–Ehrlich method failed to return roots.
 #[derive(Debug, Clone)]
 struct Solve8PolyFailed;
@@ -44,15 +38,6 @@ struct Solve8PolyFailed;
 /// Spurious root, root not accepted for orbital estimation
 #[derive(Debug, Clone)]
 struct SpuriousRoot;
-
-impl fmt::Display for GaussSingMatrix {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "The unit matrix cannot be inverse, orbit could be coplanar"
-        )
-    }
-}
 
 impl fmt::Display for Solve8PolyFailed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -193,7 +178,7 @@ impl GaussObs {
             Vector3<f64>,
             Vector3<f64>,
         ),
-        GaussSingMatrix,
+        OutfitError,
     > {
         let tau1 = GAUSS_GRAV * (self.time[0] - self.time[1]);
         let tau3 = GAUSS_GRAV * (self.time[2] - self.time[1]);
@@ -206,9 +191,9 @@ impl GaussObs {
         );
 
         let unit_matrix = self.unit_matrix();
-        let Some(inv_unit_matrix) = unit_matrix.try_inverse() else {
-            return Err(GaussSingMatrix);
-        };
+        let inv_unit_matrix = unit_matrix
+            .try_inverse()
+            .ok_or(OutfitError::SingularDirectionMatrix)?;
 
         Ok((tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b))
     }

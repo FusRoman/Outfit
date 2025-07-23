@@ -55,6 +55,9 @@ pub enum OutfitError {
 
     #[error("Gaussian noise generation failed: {0:?}")]
     NoiseInjectionError(rand_distr::NormalError),
+
+    #[error("Unit direction matrix is singular (cannot be inverted); observations may be coplanar")]
+    SingularDirectionMatrix,
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
