@@ -4,14 +4,9 @@ use itertools::Itertools;
 use nalgebra::Vector3;
 
 use crate::{
-    constants::Observations,
-    equinoctial_element::EquinoctialElements,
-    error_models::ErrorModel,
-    initial_orbit_determination::gauss::GaussObs,
-    keplerian_element::KeplerianElements,
-    observations::observations::Observation,
-    outfit::Outfit,
-    outfit_errors::OutfitError,
+    constants::Observations, equinoctial_element::EquinoctialElements, error_models::ErrorModel,
+    initial_orbit_determination::gauss::GaussObs, keplerian_element::KeplerianElements,
+    observations::observations::Observation, outfit::Outfit, outfit_errors::OutfitError,
 };
 
 /// Calculate the weight of a triplet of observations based on the time difference.

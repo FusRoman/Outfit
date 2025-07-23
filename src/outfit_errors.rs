@@ -52,4 +52,13 @@ pub enum OutfitError {
 
     #[error("Error during the 80 column file parsing: {0}")]
     Parsing80ColumnFileError(ParseObsError),
+
+    #[error("Gaussian noise generation failed: {0:?}")]
+    NoiseInjectionError(rand_distr::NormalError),
+}
+
+impl From<rand_distr::NormalError> for OutfitError {
+    fn from(err: rand_distr::NormalError) -> Self {
+        OutfitError::NoiseInjectionError(err)
+    }
 }
