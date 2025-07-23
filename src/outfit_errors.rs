@@ -56,8 +56,16 @@ pub enum OutfitError {
     #[error("Gaussian noise generation failed: {0:?}")]
     NoiseInjectionError(rand_distr::NormalError),
 
-    #[error("Unit direction matrix is singular (cannot be inverted); observations may be coplanar")]
+    #[error(
+        "Unit direction matrix is singular (cannot be inverted); observations may be coplanar"
+    )]
     SingularDirectionMatrix,
+
+    #[error("Aberth–Ehrlich method failed to find acceptable complex roots")]
+    PolynomialRootFindingFailed,
+
+    #[error("Spurious root detected (e.g., negative or near-zero geocentric distance)")]
+    SpuriousRootDetected,
 }
 
 impl From<rand_distr::NormalError> for OutfitError {

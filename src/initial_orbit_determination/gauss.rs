@@ -31,29 +31,6 @@ pub struct GaussObs {
     observer_position: Matrix3<f64>,
 }
 
-/// Solve8PolyFailed is used in case the Aberth–Ehrlich method failed to return roots.
-#[derive(Debug, Clone)]
-struct Solve8PolyFailed;
-
-/// Spurious root, root not accepted for orbital estimation
-#[derive(Debug, Clone)]
-struct SpuriousRoot;
-
-impl fmt::Display for Solve8PolyFailed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "The Aberth–Ehrlich method failed to find complex roots for the 8-order polynom."
-        )
-    }
-}
-
-impl fmt::Display for SpuriousRoot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Spurious root detected for the orbital estimation")
-    }
-}
-
 impl GaussObs {
     /// Initialise the struct used for the Gauss method.
     /// Use only three observations to estimate an initial orbit
@@ -236,7 +213,7 @@ impl GaussObs {
         max_iterations: u32,
         aberth_epsilon: f64,
         root_acceptance_epsilon: f64,
-    ) -> Result<Vec<f64>, Solve8PolyFailed> {
+    ) -> Result<Vec<f64>, OutfitError> {
         let roots = aberth(&polynom, max_iterations, aberth_epsilon);
         match roots.stop_reason {
             StopReason::Converged(_) | StopReason::MaxIteration(_) => {
@@ -248,7 +225,7 @@ impl GaussObs {
                     .collect::<Vec<f64>>());
             }
             StopReason::Failed(_) => {
-                return Err(Solve8PolyFailed);
+                return Err(OutfitError::PolynomialRootFindingFailed);
             }
         }
     }
@@ -269,13 +246,13 @@ impl GaussObs {
         unit_matrix: &Matrix3<f64>,
         unit_matinv: &Matrix3<f64>,
         vector_c: &Vector3<f64>,
-    ) -> Result<(Matrix3<f64>, f64), SpuriousRoot> {
+    ) -> Result<(Matrix3<f64>, f64), OutfitError> {
         let obs_pos_t = self.observer_position.transpose();
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(&vector_c);
         if rho[1] < 0.01 {
-            return Err(SpuriousRoot);
+            return Err(OutfitError::SpuriousRootDetected);
         }
         let rho_unit = Matrix3::from_columns(&[
             rho[0] * unit_matrix.column(0),
