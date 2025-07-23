@@ -10,8 +10,11 @@ use crate::kepler::velocity_correction;
 use crate::keplerian_element::KeplerianElements;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
+use crate::outfit_errors::OutfitError;
 use crate::ref_system::rotpn;
 use aberth::aberth;
+use rand::Rng;
+use rand_distr::{Distribution, Normal};
 
 /// Gauss struct data
 /// ra is right ascension in radians
@@ -19,7 +22,7 @@ use aberth::aberth;
 /// time is the observation time in modified julian date (MJD
 /// observer_position is the position of the observer from where the observation have been taken.
 /// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
     ra: Vector3<Radian>,
@@ -82,6 +85,82 @@ impl GaussObs {
             time: mjd_time,
             observer_position: Matrix3::zeros(),
         }
+    }
+
+    /// Generate noisy variants of this `GaussObs` triplet by injecting Gaussian noise
+    /// into the right ascension (RA) and declination (DEC) coordinates.
+    ///
+    /// The function returns a vector of `GaussObs` instances consisting of:
+    /// - The original, unperturbed triplet as the first element,
+    /// - Followed by `n_realizations` perturbed copies with Gaussian noise applied
+    ///   independently to each RA and DEC coordinate, using their corresponding
+    ///   standard deviations and a global scaling factor.
+    ///
+    /// This method is functionally equivalent to OrbFit’s IOD behavior governed by the
+    /// `iodnit` and `iodksi` parameters, and is useful for testing the robustness
+    /// of initial orbit determination with respect to observational uncertainties.
+    ///
+    /// # Arguments
+    /// ----------
+    /// * `errors_ra` - A `Vector3<f64>` containing 1σ errors (in radians) on the RA
+    ///   of the three observations.
+    /// * `errors_dec` - A `Vector3<f64>` containing 1σ errors (in radians) on the DEC
+    ///   of the three observations.
+    /// * `n_realizations` - The number of noisy versions to generate (excluding the original).
+    /// * `noise_scale` - A multiplicative factor applied to each σ (e.g., 1.0 for nominal noise,
+    ///   >1.0 to test instability under exaggerated error).
+    /// * `rng` - A mutable reference to a random number generator implementing `rand::Rng`.
+    ///
+    /// # Returns
+    /// ----------
+    /// A `Result` containing a vector of `GaussObs` instances:
+    /// - `Ok(vec)` if all noise samples were generated successfully,
+    /// - `Err(OutfitError::NoiseInjectionError)` if any distribution parameters were invalid.
+    ///
+    /// # Errors
+    /// ----------
+    /// Returns an error if any call to `Normal::new` fails due to non-finite or negative variance.
+    pub(crate) fn generate_noisy_realizations(
+        &self,
+        errors_ra: &Vector3<f64>,
+        errors_dec: &Vector3<f64>,
+        n_realizations: usize,
+        noise_scale: f64,
+        rng: &mut impl Rng,
+    ) -> Result<Vec<GaussObs>, OutfitError> {
+        let noisy_iter = (0..n_realizations).map(|_| {
+            let ra_vec: Vec<f64> = self
+                .ra
+                .iter()
+                .zip(errors_ra.iter())
+                .map(|(&ra, &sigma)| {
+                    let normal = Normal::new(0.0, sigma * noise_scale)?;
+                    Ok(ra + normal.sample(rng))
+                })
+                .collect::<Result<Vec<f64>, OutfitError>>()?;
+
+            let dec_vec: Vec<f64> = self
+                .dec
+                .iter()
+                .zip(errors_dec.iter())
+                .map(|(&dec, &sigma)| {
+                    let normal = Normal::new(0.0, sigma * noise_scale)?;
+                    Ok(dec + normal.sample(rng))
+                })
+                .collect::<Result<Vec<f64>, OutfitError>>()?;
+
+            Ok(GaussObs {
+                idx_obs: self.idx_obs,
+                ra: Vector3::from_column_slice(&ra_vec),
+                dec: Vector3::from_column_slice(&dec_vec),
+                time: self.time,
+                observer_position: self.observer_position.clone(),
+            })
+        });
+
+        std::iter::once(Ok(self.clone()))
+            .chain(noisy_iter)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     /// Compute the orbiting body direction cosine vector
@@ -468,7 +547,6 @@ impl GaussObs {
 
 #[cfg(test)]
 mod gauss_test {
-
     use super::*;
 
     #[test]
@@ -841,5 +919,104 @@ mod gauss_test {
         );
 
         assert_eq!(corrected_epoch, 57049.24233491307);
+    }
+
+    mod test_generate_noisy_realizations {
+        use super::*;
+
+        use nalgebra::vector;
+        use rand::{rngs::StdRng, SeedableRng};
+
+        #[test]
+        fn test_generate_noisy_realizations_count_and_identity() {
+            let gauss = GaussObs {
+                idx_obs: Vector3::new(0, 1, 2),
+                ra: vector![1.0, 2.0, 3.0],
+                dec: vector![0.1, 0.2, 0.3],
+                time: vector![59000.0, 59001.0, 59002.0],
+                observer_position: Matrix3::identity(),
+            };
+
+            let errors_ra = vector![1e-6, 1e-6, 1e-6];
+            let errors_dec = vector![2e-6, 2e-6, 2e-6];
+
+            let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
+
+            let realizations = gauss
+                .generate_noisy_realizations(&errors_ra, &errors_dec, 5, 1.0, &mut rng)
+                .unwrap();
+
+            assert_eq!(realizations.len(), 6); // 1 original + 5 noisy
+
+            // Check the original is preserved
+            assert_eq!(realizations[0].ra, gauss.ra);
+            assert_eq!(realizations[0].dec, gauss.dec);
+
+            // Check that at least one noisy version differs
+            let some_different = realizations[1..]
+                .iter()
+                .any(|g| g.ra != gauss.ra || g.dec != gauss.dec);
+            assert!(
+                some_different,
+                "Expected at least one noisy realization to differ"
+            );
+        }
+
+        #[test]
+        fn test_generate_noisy_realizations_with_zero_noise() {
+            let gauss = GaussObs {
+                idx_obs: Vector3::new(0, 1, 2),
+                ra: vector![1.5, 1.6, 1.7],
+                dec: vector![0.9, 1.0, 1.1],
+                time: vector![59000.0, 59001.0, 59002.0],
+                observer_position: Matrix3::identity(),
+            };
+
+            let errors_ra = vector![0.0, 0.0, 0.0];
+            let errors_dec = vector![0.0, 0.0, 0.0];
+
+            let mut rng = StdRng::seed_from_u64(123);
+
+            let realizations = gauss
+                .generate_noisy_realizations(&errors_ra, &errors_dec, 3, 1.0, &mut rng)
+                .unwrap();
+
+            for g in realizations {
+                assert_eq!(g.ra, gauss.ra);
+                assert_eq!(g.dec, gauss.dec);
+            }
+        }
+
+        #[test]
+        fn test_generate_noisy_realizations_with_custom_scale() {
+            let gauss = GaussObs {
+                idx_obs: Vector3::new(0, 1, 2),
+                ra: vector![1.0, 1.1, 1.2],
+                dec: vector![0.5, 0.6, 0.7],
+                time: vector![59000.0, 59001.0, 59002.0],
+                observer_position: Matrix3::identity(),
+            };
+
+            let errors_ra = vector![1e-6, 1e-6, 1e-6];
+            let errors_dec = vector![1e-6, 1e-6, 1e-6];
+
+            let mut rng_low = StdRng::seed_from_u64(42);
+            let mut rng_high = StdRng::seed_from_u64(42); // same seed
+
+            let low_noise = gauss
+                .generate_noisy_realizations(&errors_ra, &errors_dec, 1, 0.1, &mut rng_low)
+                .unwrap();
+            let high_noise = gauss
+                .generate_noisy_realizations(&errors_ra, &errors_dec, 1, 10.0, &mut rng_high)
+                .unwrap();
+
+            let diff_low = (low_noise[1].ra - gauss.ra).norm();
+            let diff_high = (high_noise[1].ra - gauss.ra).norm();
+
+            assert!(
+                diff_high > diff_low,
+                "High noise should cause greater deviation than low noise"
+            );
+        }
     }
 }
