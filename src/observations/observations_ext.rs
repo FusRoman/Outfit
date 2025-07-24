@@ -6,7 +6,7 @@ use crate::{
     constants::{Observations, Radian},
     equinoctial_element::EquinoctialElements,
     error_models::ErrorModel,
-    initial_orbit_determination::gauss::GaussObs,
+    initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult},
     keplerian_element::KeplerianElements,
     observations::observations::Observation,
     outfit::Outfit,
@@ -204,7 +204,7 @@ pub(crate) trait ObservationsExt {
         optimal_interval_time: Option<f64>,
         max_triplets: Option<u32>,
         gap_max: f64,
-    ) -> Result<(Option<KeplerianElements>, f64), OutfitError>;
+    ) -> Result<(Option<GaussResult>, f64), OutfitError>;
 }
 
 impl ObservationsExt for Observations {
@@ -427,7 +427,7 @@ impl ObservationsExt for Observations {
         optimal_interval_time: Option<f64>,
         max_triplets: Option<u32>,
         gap_max: f64,
-    ) -> Result<(Option<KeplerianElements>, f64), OutfitError> {
+    ) -> Result<(Option<GaussResult>, f64), OutfitError> {
         self.apply_batch_rms_correction(error_model, gap_max);
 
         let triplets = self.compute_triplets(
