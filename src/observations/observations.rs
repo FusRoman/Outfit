@@ -107,47 +107,63 @@ impl Observation {
     /// # Errors
     /// ----------
     /// Returns an `OutfitError` if ephemeris data or propagation fails (e.g. missing JPL ephemeris).
-
+    ///
+    /// # See also
+    /// * [`geo_obs_pos`] – Computes geocentric position of the observer including Earth rotation and nutation.
+    /// * [`correct_aberration`] – Applies aberration correction to the apparent direction of the body.
+    /// * [`cartesian_to_radec`] – Converts 3D Cartesian vectors into equatorial coordinates (RA/DEC).
+    /// * [`solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
     pub(crate) fn ephemeris_error(
         &self,
         state: &Outfit,
         equinoctial_element: &EquinoctialElements,
         observer: &Observer,
     ) -> Result<f64, OutfitError> {
+        // Propagate heliocentric position and velocity of the asteroid using a two-body model.
+        // Output is in the ecliptic mean J2000 reference frame.
         let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
             0.,
             self.time - equinoctial_element.reference_epoch,
             false,
         )?;
 
+        // Convert observation time to TT (Terrestrial Time) for ephemeris consistency
         let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
 
+        // Get Earth's heliocentric position (barycentric if true is set) at observation epoch
         let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
 
+        // Construct rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
         rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
         let matrix_elc_transform = Matrix3::from(roteqec);
 
+        // Transform Earth's position to ecliptic J2000 frame
         let earth_pos_eclj2000 = matrix_elc_transform.transpose() * earth_position;
 
+        // Transform asteroid's propagated position and velocity into ecliptic J2000 frame
         let cart_pos_ast_eclj2000 = matrix_elc_transform * cart_pos_ast;
         let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
+        // Compute the observer's geocentric position (accounts for Earth rotation, nutation, etc.)
         let (geo_obs_pos, _) = geo_obs_pos(&observer, &obs_mjd, &state.get_ut1_provider());
 
+        // Observer's heliocentric position = Earth position + observer's geocentric offset
         let xobs = geo_obs_pos + earth_pos_eclj2000;
 
+        // Transform observer's position to ecliptic J2000 frame
         let obs_on_earth = matrix_elc_transform * xobs;
 
+        // Compute the vector from observer to asteroid in heliocentric frame
         let relative_position = cart_pos_ast_eclj2000 - obs_on_earth;
 
+        // Apply aberration correction due to observer motion (velocity of asteroid required)
         let corrected_pos = correct_aberration(relative_position, cart_pos_vel_eclj2000);
+
+        // Convert corrected position to equatorial coordinates (RA, DEC)
         let (alpha, delta, _) = cartesian_to_radec(corrected_pos);
 
-        // -----
-        // floating point error between orbfit anf outfit is around 1e-5 in absolute and 1e-7 in relative
-        // this is something to check in the future for reproducing the same results
-        // -----
+        // Compute difference in right ascension (with wrapping modulo 2π)
         let diff_alpha = (self.ra - alpha) % DPI;
         let diff_alpha = if diff_alpha > PI {
             diff_alpha - DPI
@@ -155,10 +171,15 @@ impl Observation {
             diff_alpha
         };
 
+        // Compute difference in declination
         let diff_delta = self.dec - delta;
+
+        // Normalize residuals by astrometric uncertainties.
+        // RA is scaled by cos(DEC) to account for spherical projection
         let rms_ra = (self.dec.cos() * (diff_alpha / self.error_ra)).powi(2);
         let rms_dec = (diff_delta / self.error_dec).powi(2);
 
+        // Return the total normalized squared residuals (RA² + DEC²)
         Ok(rms_ra + rms_dec)
     }
 }
