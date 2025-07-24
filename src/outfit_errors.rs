@@ -66,6 +66,9 @@ pub enum OutfitError {
 
     #[error("Spurious root detected (e.g., negative or near-zero geocentric distance)")]
     SpuriousRootDetected,
+
+    #[error("Gauss method failed to find roots")]
+    GaussNoRootsFound,
 }
 
 impl From<rand_distr::NormalError> for OutfitError {

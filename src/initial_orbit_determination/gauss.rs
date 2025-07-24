@@ -8,32 +8,79 @@ use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::kepler::velocity_correction;
 use crate::keplerian_element::KeplerianElements;
+use crate::observers::observer_position;
+use crate::observers::observer_position::helio_obs_pos;
+use crate::observers::observers::Observer;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
+use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use crate::ref_system::rotpn;
 use aberth::aberth;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 
-/// Gauss struct data
-/// ra is right ascension in radians
-/// dec is declination in radians
-/// time is the observation time in modified julian date (MJD
-/// observer_position is the position of the observer from where the observation have been taken.
-/// The observer position is in equatorial mean J2000 reference frame and units is astronomical unit
+/// Observation triplet structure for Gauss's initial orbit determination.
+///
+/// This struct holds the minimal set of data required to apply the classical Gauss method
+/// for orbit determination using three optical astrometric observations taken from the same site.
+///
+/// Fields
+/// -------
+/// * `idx_obs`: indices of the three observations in the full dataset (typically used for traceability).
+/// * `ra`: right ascensions [radians] of the three observations, in the ICRS frame.
+/// * `dec`: declinations [radians] of the three observations, in the ICRS frame.
+/// * `time`: observation times [MJD TT], i.e., Modified Julian Dates in Terrestrial Time scale.
+/// * `observer_position`: 3×3 matrix of the observer’s heliocentric position vectors at each observation time,
+///   with:
+///   - columns = observation epochs,
+///   - units = astronomical units (AU),
+///   - frame = equatorial mean J2000 (same as ICRS).
+///
+/// Remarks
+/// -------
+/// * All three observations are assumed to come from the same observing site.
+/// * The observer position matrix is computed via [`helio_obs_pos`] during construction.
+///
+/// # See also
+/// * [`GaussObs::with_observer_position`] – constructor that computes this struct from RA/DEC/times
+/// * [`helio_obs_pos`] – computes heliocentric observer positions
 #[derive(Debug, PartialEq, Clone)]
-pub struct GaussObs {
+pub(crate) struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
-    ra: Vector3<Radian>,
-    dec: Vector3<Radian>,
-    time: Vector3<f64>,
-    observer_position: Matrix3<f64>,
+    pub(crate)ra: Vector3<Radian>,
+    pub(crate) dec: Vector3<Radian>,
+    pub(crate) time: Vector3<f64>,
+    pub(crate) observer_position: Matrix3<f64>,
 }
 
 impl GaussObs {
-    /// Initialise the struct used for the Gauss method.
-    /// Use only three observations to estimate an initial orbit
+    /// Create a new `GaussObs` instance from raw observational data.
+    ///
+    /// This constructor initializes the `GaussObs` struct using only the observational content:
+    /// right ascension, declination, observation times, and their corresponding indices. It does
+    /// **not** compute the observer's heliocentric position — the `observer_position` matrix is
+    /// initialized to zero and must be populated separately if needed (e.g., using [`with_observer_position`]).
+    ///
+    /// Arguments
+    /// ---------
+    /// * `idx_obs`: indices of the three observations in the full dataset.
+    /// * `ra`: right ascensions [radians] of the observations (ICRS).
+    /// * `dec`: declinations [radians] of the observations (ICRS).
+    /// * `mjd_time`: observation times [MJD TT].
+    ///
+    /// Returns
+    /// --------
+    /// * A `GaussObs` struct containing the input values and an empty observer position matrix.
+    ///
+    /// Remarks
+    /// -------
+    /// * Use this constructor when only the observational data is available, and the observer geometry
+    ///   will be computed separately.
+    /// * The ordering of RA/DEC/time must be consistent — each index `i` corresponds to a unique epoch.
+    ///
+    /// # See also
+    /// * [`GaussObs::with_observer_position`] – preferred constructor when the observing site is known
     pub fn new(
         idx_obs: Vector3<usize>,
         ra: Vector3<f64>,
@@ -46,6 +93,54 @@ impl GaussObs {
             dec,
             time: mjd_time,
             observer_position: Matrix3::zeros(),
+        }
+    }
+
+    /// Construct a `GaussObs` object from observation data and observer position.
+    ///
+    /// This constructor initializes a `GaussObs` instance using raw observational inputs (RA/DEC/time)
+    /// and computes the heliocentric position of the observer at each observation epoch.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `state`: reference to the [`Outfit`] context, providing access to JPL ephemerides and Earth orientation.
+    /// * `idx_obs`: index triplet identifying the observation triplet used for initial orbit determination.
+    /// * `ra`: vector of right ascension values [radians] corresponding to the three observations.
+    /// * `dec`: vector of declination values [radians] corresponding to the three observations.
+    /// * `mjd_time`: observation times in Modified Julian Date (TT scale).
+    /// * `observer`: reference to the [`Observer`] corresponding to the observing site.
+    ///
+    /// Returns
+    /// --------
+    /// * A `GaussObs` struct populated with:
+    ///     - the input observation indices, RA/DEC, and times,
+    ///     - the observer's heliocentric position matrix computed via [`helio_obs_pos`] (3×3).
+    ///
+    /// Remarks
+    /// -------
+    /// * The observer positions are expressed in the equatorial mean J2000 frame (in AU),
+    ///   consistent with the requirements of Gauss’s method for orbit determination.
+    /// * The order of `ra`, `dec`, `time`, and `observer_position` is consistent: element `i` in each
+    ///   vector corresponds to a single astrometric observation.
+    ///
+    /// # See also
+    /// * [`GaussObs`] – data structure for storing triplet-based IOD input
+    /// * [`helio_obs_pos`] – used internally to compute heliocentric observer positions
+    pub fn with_observer_position(
+        state: &Outfit,
+        idx_obs: Vector3<usize>,
+        ra: Vector3<f64>,
+        dec: Vector3<f64>,
+        mjd_time: Vector3<f64>,
+        observer: [&Observer; 3],
+    ) -> GaussObs {
+        let observer_position = helio_obs_pos(observer, &mjd_time, state);
+        GaussObs {
+            idx_obs,
+            ra,
+            dec,
+            time: mjd_time,
+            observer_position,
         }
     }
 
@@ -183,22 +278,21 @@ impl GaussObs {
         vector_b: &Vector3<f64>,
     ) -> (f64, f64, f64) {
         let observer_position_t = self.observer_position.transpose();
-        let ra = observer_position_t * vector_a;
-        let rb = observer_position_t * vector_b;
+        let ra = self.observer_position * vector_a;
+        let rb = self.observer_position * vector_b;
 
         let second_row_t = unit_invmatrix.row(1).transpose();
         let a2star = second_row_t.dot(&ra);
         let b2star = second_row_t.dot(&rb);
 
-        let r22 = self
-            .observer_position
+        let r22 = observer_position_t
             .row(1)
-            .component_mul(&self.observer_position.row(1))
+            .component_mul(&observer_position_t.row(1))
             .sum();
         let s2r2 = unit_matrix
             .column(1)
             .transpose()
-            .dot(&self.observer_position.row(1));
+            .dot(&observer_position_t.row(1));
 
         (
             -(a2star.powi(2)) - r22 - (2.0 * a2star * s2r2),
@@ -247,7 +341,7 @@ impl GaussObs {
         unit_matinv: &Matrix3<f64>,
         vector_c: &Vector3<f64>,
     ) -> Result<(Matrix3<f64>, f64), OutfitError> {
-        let obs_pos_t = self.observer_position.transpose();
+        let obs_pos_t = self.observer_position;
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(&vector_c);
@@ -380,15 +474,14 @@ impl GaussObs {
     // un champ PrelimOrbit(KeplerienOrbit)
     // un champ CorrectedOrbit(KeplerianElements)
     // un champ FailOrbit
-    pub fn prelim_orbit(&self) -> Option<KeplerianElements> {
-        let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) =
-            self.gauss_prelim().unwrap();
+    pub fn prelim_orbit(&self) -> Result<KeplerianElements, OutfitError> {
+        let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) = self.gauss_prelim()?;
 
         let (coeff_6, coeff_3, coeff_0) =
             self.coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b);
         let polynomial = [coeff_0, 0., 0., coeff_3, 0., 0., coeff_6, 0., 1.];
 
-        let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6).unwrap();
+        let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6)?;
 
         // get the first accepted root and return the asteroid position and asteroid velocity
         let Some((asteroid_pos_all_time, asteroid_vel, reference_epoch)) =
@@ -404,7 +497,7 @@ impl GaussObs {
                 )
             })
         else {
-            return None;
+            return Err(OutfitError::GaussNoRootsFound);
         };
 
         let Some((corrected_pos, corrected_vel, corrected_epoch)) = self.pos_and_vel_correction(
@@ -417,14 +510,14 @@ impl GaussObs {
             1e-10,
             50,
         ) else {
-            return Some(self.from_position_velocity_to_orbit(
+            return Ok(self.from_position_velocity_to_orbit(
                 &asteroid_pos_all_time.column(1).into(),
                 &asteroid_vel,
                 reference_epoch,
             ));
         };
 
-        Some(self.from_position_velocity_to_orbit(
+        Ok(self.from_position_velocity_to_orbit(
             &corrected_pos.column(1).into(),
             &corrected_vel,
             corrected_epoch,
@@ -508,8 +601,55 @@ impl GaussObs {
 }
 
 #[cfg(test)]
-mod gauss_test {
+pub(crate) mod gauss_test {
+    use approx::assert_relative_eq;
+
     use super::*;
+
+    pub(crate) fn assert_orbit_close(
+        actual: &KeplerianElements,
+        expected: &KeplerianElements,
+        epsilon: f64,
+    ) {
+        assert_relative_eq!(
+            actual.reference_epoch,
+            expected.reference_epoch,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.semi_major_axis,
+            expected.semi_major_axis,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.eccentricity,
+            expected.eccentricity,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(actual.inclination, expected.inclination, epsilon = epsilon);
+        assert_relative_eq!(
+            actual.ascending_node_longitude,
+            expected.ascending_node_longitude,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.periapsis_argument,
+            expected.periapsis_argument,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.mean_anomaly,
+            expected.mean_anomaly,
+            epsilon = epsilon
+        );
+    }
+
+    pub fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
+        assert_eq!(a.idx_obs, b.idx_obs);
+        assert_relative_eq!(a.ra, b.ra, max_relative = tol);
+        assert_relative_eq!(a.dec, b.dec, max_relative = tol);
+        assert_relative_eq!(a.time, b.time, max_relative = tol);
+    }
 
     #[test]
     fn test_gauss_prelim() {
@@ -595,7 +735,8 @@ mod gauss_test {
                 -0.77438744379695956,
                 0.56128847092611645,
                 0.24334971075289916,
-            ),
+            )
+            .transpose(),
         };
 
         let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
@@ -656,7 +797,8 @@ mod gauss_test {
                 -0.77438744379695956,
                 0.56128847092611645,
                 0.24334971075289916,
-            ),
+            )
+            .transpose(),
         };
 
         let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
@@ -747,35 +889,105 @@ mod gauss_test {
     fn test_solve_orbit() {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
-            ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            ra: Vector3::new(1.6894680985108945, 1.6898614520910629, 1.7526450904422723),
+            dec: Vector3::new(1.0825984522657437, 0.94367901893462314, 0.82751732157120139),
+            time: Vector3::new(57028.454047592590, 57049.231857592589, 57063.959487592590),
             observer_position: Matrix3::new(
-                -0.26456661713915464,
-                0.86893516436949503,
-                0.37669962110919220,
-                -0.58916318521741273,
-                0.72388725167947765,
-                0.31381865165245848,
-                -0.77438744379695956,
-                0.56128847092611645,
-                0.24334971075289916,
+                -0.26413563360707898,
+                -0.58897355265057350,
+                -0.77419214835037198,
+                0.86904662091008600,
+                0.72401171879164605,
+                0.56151021954891822,
+                0.37674668566657249,
+                0.31387342067709401,
+                0.24344479140165851,
             ),
         };
 
         let prelim_orbit = gauss.prelim_orbit().unwrap();
-        assert_eq!(
-            prelim_orbit,
-            KeplerianElements {
-                reference_epoch: 57049.24233491307,
-                semi_major_axis: 1.8015109749705496,
-                eccentricity: 0.2835090890769234,
-                inclination: 0.20264596920729464,
-                ascending_node_longitude: 0.008079724163250196,
-                periapsis_argument: 1.244926174041886,
-                mean_anomaly: 0.44069722652585874
-            }
-        )
+
+        // This is the expected orbit based on the Orbfit software
+        // The values are obtained from the Orbfit output for the same observations
+        // The values are very close to the ones obtained from the Rust implementation
+        // The floating point differences is very close to one ulp
+        // (unit in the last place) of the floating point representation
+        let expected_orbit = KeplerianElements {
+            reference_epoch: 57049.229045244218,
+            semi_major_axis: 1.8014943988486352,
+            eccentricity: 0.28351414224908073,
+            inclination: 0.20264170920820326,
+            ascending_node_longitude: 8.1185624442695909E-003,
+            periapsis_argument: 1.2447953118143020,
+            mean_anomaly: 0.44065425435816186,
+        };
+
+        // Compare the prelim_orbit with the expected orbit
+        assert_orbit_close(&prelim_orbit, &expected_orbit, 1e-14);
+
+        let a = GaussObs {
+            idx_obs: [[23, 24, 33]].into(),
+            ra: [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
+            dec: [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
+            time: [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
+            observer_position: [
+                [-0.2645666171486676, 0.8689351643673471, 0.3766996211112465],
+                [-0.5889735526502539, 0.7240117187952059, 0.3138734206791042],
+                [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
+            ]
+            .into(),
+        };
+
+        let prelim_orbit_a = a.prelim_orbit().unwrap();
+
+        let expected_orbit = KeplerianElements {
+            reference_epoch: 57049.22904525282,
+            semi_major_axis: 1.801490008178814,
+            eccentricity: 0.28350961635625993,
+            inclination: 0.20264261257939395,
+            ascending_node_longitude: 0.008105552171682476,
+            periapsis_argument: 1.244832121745955,
+            mean_anomaly: 0.4406444535028061,
+        };
+
+        // Compare the prelim_orbit_a with the expected orbit
+        assert_orbit_close(&prelim_orbit_a, &expected_orbit, 1e-13);
+
+        let gauss = GaussObs {
+            idx_obs: Vector3::new(0, 1, 2),
+            ra: Vector3::new(1.6894680552416277, 1.6898618214421519, 1.7526488678231147),
+            dec: Vector3::new(1.0825994437405373, 0.94367986333414500, 0.82751736050722857),
+            time: Vector3::new(57028.454047592590, 57049.231857592589, 57063.959487592590),
+            observer_position: Matrix3::new(
+                -0.26413563360707898,
+                -0.58897355265057350,
+                -0.77419214835037198,
+                0.86904662091008600,
+                0.72401171879164605,
+                0.56151021954891822,
+                0.37674668566657249,
+                0.31387342067709401,
+                0.24344479140165851,
+            ),
+        };
+
+        let prelim_orbit_b = gauss.prelim_orbit().unwrap();
+
+        // This is the expected orbit based on the Orbfit software
+        // The values are obtained from the Orbfit output for the same observations
+        let expected_orbfit = KeplerianElements {
+            reference_epoch: 57049.229045608859,
+            semi_major_axis: 1.8013098187420686,
+            eccentricity: 0.28347096712267805,
+            inclination: 0.20261766587244120,
+            ascending_node_longitude: 8.1948054204650823E-003,
+            periapsis_argument: 1.2446747244785052,
+            mean_anomaly: 0.44073731381184733,
+        };
+
+        // Compare the prelim_orbit_b with the expected orbit
+        // The epsilon value is set to 1e-10 for a very close match between the OrbFit and the Rust implementation
+        assert_orbit_close(&prelim_orbit_b, &expected_orbfit, 1e-13);
     }
 
     #[test]
@@ -795,7 +1007,8 @@ mod gauss_test {
                 -0.77438744379695956,
                 0.56128847092611645,
                 0.24334971075289916,
-            ),
+            )
+            .transpose(),
         };
 
         let ast_pos = Matrix3::new(
@@ -947,6 +1160,29 @@ mod gauss_test {
                 assert_eq!(g.ra, gauss.ra);
                 assert_eq!(g.dec, gauss.dec);
             }
+        }
+
+        #[test]
+        fn test_no_noise() {
+            let gauss = GaussObs {
+                idx_obs: Vector3::new(0, 1, 2),
+                ra: vector![1.5, 1.6, 1.7],
+                dec: vector![0.9, 1.0, 1.1],
+                time: vector![59000.0, 59001.0, 59002.0],
+                observer_position: Matrix3::identity(),
+            };
+
+            let errors_ra = vector![0.0, 0.0, 0.0];
+            let errors_dec = vector![0.0, 0.0, 0.0];
+
+            let mut rng = StdRng::seed_from_u64(123);
+
+            let realizations = gauss
+                .generate_noisy_realizations(&errors_ra, &errors_dec, 0, 1.0, &mut rng)
+                .unwrap();
+
+            assert_eq!(realizations.len(), 1); // Only the original observation
+            assert_eq!(realizations[0], gauss);
         }
 
         #[test]
