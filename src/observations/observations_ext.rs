@@ -1,12 +1,16 @@
-use std::collections::VecDeque;
-
 use itertools::Itertools;
 use nalgebra::Vector3;
+use std::collections::VecDeque;
 
 use crate::{
-    constants::Observations, equinoctial_element::EquinoctialElements, error_models::ErrorModel,
-    initial_orbit_determination::gauss::GaussObs, keplerian_element::KeplerianElements,
-    observations::observations::Observation, outfit::Outfit, outfit_errors::OutfitError,
+    constants::{Observations, Radian},
+    equinoctial_element::EquinoctialElements,
+    error_models::ErrorModel,
+    initial_orbit_determination::gauss::GaussObs,
+    keplerian_element::KeplerianElements,
+    observations::observations::Observation,
+    outfit::Outfit,
+    outfit_errors::OutfitError,
 };
 
 /// Calculate the weight of a triplet of observations based on the time difference.
@@ -53,6 +57,7 @@ pub(crate) trait ObservationsExt {
     /// * A vector of `GaussObs` representing the computed triplets of observations.
     fn compute_triplets(
         &mut self,
+        state: &Outfit,
         dt_min: Option<f64>,
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
@@ -163,11 +168,49 @@ pub(crate) trait ObservationsExt {
     /// ----------
     /// - Input and output uncertainties (`error_ra`, `error_dec`) are expressed in **radians**.
     fn apply_batch_rms_correction(&mut self, error_model: &ErrorModel, gap_max: f64);
+
+    /// Extract astrometric uncertainties (RA and DEC) for a set of three observations.
+    ///
+    /// Given a triplet of observation indices, this function retrieves the corresponding
+    /// astrometric errors in right ascension and declination from the observation set.
+    ///
+    /// # Arguments
+    /// ---------------
+    /// * `idx_obs` - A vector of three indices referring to the observations used in the triplet.
+    ///
+    /// # Returns
+    /// ---------------
+    /// * A tuple of two `Vector3<Radian>`:
+    ///   - The first vector contains the RA uncertainties in radians.
+    ///   - The second vector contains the DEC uncertainties in radians.
+    ///
+    /// # Panics
+    /// ---------------
+    /// This function will panic if any index in `idx_obs` is out of bounds of the observation set.
+
+    fn extract_errors(&self, idx_obs: Vector3<usize>) -> (Vector3<Radian>, Vector3<Radian>);
+
+    fn estimate_best_orbit(
+        &mut self,
+        state: &Outfit,
+        error_model: &ErrorModel,
+        rng: &mut impl rand::Rng,
+        n_noise_realizations: usize,
+        noise_scale: f64,
+        extf: f64,
+        dtmax: f64,
+        dt_min: Option<f64>,
+        dt_max_triplet: Option<f64>,
+        optimal_interval_time: Option<f64>,
+        max_triplets: Option<u32>,
+        gap_max: f64,
+    ) -> Result<(Option<KeplerianElements>, f64), OutfitError>;
 }
 
 impl ObservationsExt for Observations {
     fn compute_triplets(
         &mut self,
+        state: &Outfit,
         dt_min: Option<f64>,
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
@@ -211,12 +254,21 @@ impl ObservationsExt for Observations {
                 let obs2 = &self[idx2];
                 let obs3 = &self[idx3];
 
+                // Get the observer for each observation
+                let observers = [
+                    obs1.get_observer(state),
+                    obs2.get_observer(state),
+                    obs3.get_observer(state),
+                ];
+
                 // all coordinates and associated errors are in radians for the gauss preliminary orbit
-                GaussObs::new(
+                GaussObs::with_observer_position(
+                    state,
                     Vector3::new(idx1, idx2, idx3),
                     Vector3::new(obs1.ra, obs2.ra, obs3.ra),
                     Vector3::new(obs1.dec, obs2.dec, obs3.dec),
                     Vector3::new(obs1.time, obs2.time, obs3.time),
+                    observers,
                 )
             })
             .collect::<Vec<GaussObs>>()
@@ -345,12 +397,100 @@ impl ObservationsExt for Observations {
             }
         }
     }
+
+    fn extract_errors(&self, idx_obs: Vector3<usize>) -> (Vector3<Radian>, Vector3<Radian>) {
+        let (errors_ra, errors_dec): (Vec<_>, Vec<_>) = idx_obs
+            .into_iter()
+            .map(|i| {
+                let obs = &self[*i];
+                (obs.error_ra, obs.error_dec)
+            })
+            .unzip();
+
+        (
+            Vector3::from_column_slice(&errors_ra),
+            Vector3::from_column_slice(&errors_dec),
+        )
+    }
+
+    fn estimate_best_orbit(
+        &mut self,
+        state: &Outfit,
+        error_model: &ErrorModel,
+        rng: &mut impl rand::Rng,
+        n_noise_realizations: usize,
+        noise_scale: f64,
+        extf: f64,
+        dtmax: f64,
+        dt_min: Option<f64>,
+        dt_max_triplet: Option<f64>,
+        optimal_interval_time: Option<f64>,
+        max_triplets: Option<u32>,
+        gap_max: f64,
+    ) -> Result<(Option<KeplerianElements>, f64), OutfitError> {
+        self.apply_batch_rms_correction(error_model, gap_max);
+
+        let triplets = self.compute_triplets(
+            state,
+            dt_min,
+            dt_max_triplet,
+            optimal_interval_time,
+            max_triplets,
+        );
+
+        let mut best_rms = f64::MAX;
+        let mut best_orbit = None;
+
+        for triplet in triplets {
+            let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
+            let realizations = triplet.generate_noisy_realizations(
+                &error_ra,
+                &error_dec,
+                n_noise_realizations,
+                noise_scale,
+                rng,
+            )?;
+
+            for realization in realizations {
+                match realization.prelim_orbit() {
+                    Ok(orbit) => {
+                        match self.rms_orbit_error(state, &realization, &orbit, extf, dtmax) {
+                            Ok(rms) => {
+                                if rms < best_rms {
+                                    best_rms = rms;
+                                    best_orbit = Some(orbit);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Failed to compute RMS for orbit from triplet {:?}: {}",
+                                    triplet, e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to compute preliminary orbit from triplet {:?}: {}",
+                            triplet, e
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok((best_orbit, best_rms))
+    }
 }
 
 #[cfg(test)]
 mod test_obs_ext {
+    use approx::assert_relative_eq;
     use camino::Utf8Path;
 
+    use crate::initial_orbit_determination::gauss::gauss_test::{
+        assert_gauss_obs_approx_eq, assert_orbit_close,
+    };
     use crate::{
         constants::TrajectorySet, error_models::ErrorModel,
         observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
@@ -367,7 +507,7 @@ mod test_obs_ext {
         let triplets = traj_set
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory")
-            .compute_triplets(Some(0.03), Some(150.), None, Some(10));
+            .compute_triplets(&env_state, Some(0.03), Some(150.), None, Some(10));
 
         assert_eq!(
             triplets.len(),
@@ -376,25 +516,35 @@ mod test_obs_ext {
             triplets.len()
         );
 
-        assert_eq!(
-            triplets[0],
-            GaussObs::new(
-                Vector3::new(23, 24, 33),
-                [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
-                [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
-                [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
-            )
-        );
+        let expected_triplets = GaussObs {
+            idx_obs: [[23, 24, 33]].into(),
+            ra: [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
+            dec: [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
+            time: [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
+            observer_position: [
+                [-0.2645666171486676, 0.8689351643673471, 0.3766996211112465],
+                [-0.5889735526502539, 0.7240117187952059, 0.3138734206791042],
+                [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
+            ]
+            .into(),
+        };
 
-        assert_eq!(
-            triplets[9],
-            GaussObs::new(
-                Vector3::new(21, 25, 33),
-                [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
-                [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
-                [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
-            )
-        );
+        assert_gauss_obs_approx_eq(&triplets[0], &expected_triplets, 1e-12);
+
+        let expected_triplet = GaussObs {
+            idx_obs: [[21, 25, 33]].into(),
+            ra: [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
+            dec: [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
+            time: [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
+            observer_position: [
+                [-0.26413563361674103, 0.8690466209095019, 0.3767466856686271],
+                [-0.5891631852172257, 0.7238872516832191, 0.3138186516545291],
+                [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
+            ]
+            .into(),
+        };
+
+        assert_gauss_obs_approx_eq(&triplets[9], &expected_triplet, 1e-12);
     }
 
     #[test]
@@ -407,7 +557,7 @@ mod test_obs_ext {
             .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(Some(0.03), Some(150.), None, Some(10));
+        let triplets = traj.compute_triplets(&env_state, Some(0.03), Some(150.), None, Some(10));
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
@@ -473,23 +623,19 @@ mod test_obs_ext {
     }
 
     mod test_batch_rms_correction {
-        use crate::constants::{Radian, MJD};
+        use crate::constants::MJD;
         use approx::assert_ulps_eq;
         use smallvec::smallvec;
 
         use super::*;
 
-        fn rad(x: f64) -> Radian {
-            x
-        }
-
         fn obs(observer: u16, time: MJD) -> Observation {
             Observation {
                 observer,
-                ra: rad(1.0),
-                error_ra: rad(1e-6),
-                dec: rad(0.5),
-                error_dec: rad(2e-6),
+                ra: 1.0,
+                error_ra: 1e-6,
+                dec: 0.5,
+                error_dec: 2e-6,
                 time,
             }
         }
@@ -604,5 +750,113 @@ mod test_obs_ext {
             assert_ulps_eq!(traj[2].error_ra, 2.5070595078906952E-006, max_ulps = 2);
             assert_ulps_eq!(traj[2].error_dec, 2.036217397086327e-6, max_ulps = 2);
         }
+    }
+
+    mod test_extract_errors {
+        use super::*;
+        use approx::assert_ulps_eq;
+        use smallvec::smallvec;
+
+        fn make_observations() -> Observations {
+            smallvec![
+                Observation {
+                    observer: 0,
+                    ra: 1.0,
+                    dec: 0.5,
+                    error_ra: 1e-6,
+                    error_dec: 2e-6,
+                    time: 59000.0,
+                },
+                Observation {
+                    observer: 0,
+                    ra: 1.1,
+                    dec: 0.6,
+                    error_ra: 3e-6,
+                    error_dec: 4e-6,
+                    time: 59000.1,
+                },
+                Observation {
+                    observer: 0,
+                    ra: 1.2,
+                    dec: 0.7,
+                    error_ra: 5e-6,
+                    error_dec: 6e-6,
+                    time: 59000.2,
+                },
+            ]
+        }
+
+        #[test]
+        fn test_extract_errors_basic() {
+            let obs = make_observations();
+            let idx_obs = Vector3::new(0, 1, 2);
+
+            let (ra_errors, dec_errors) = obs.extract_errors(idx_obs);
+
+            assert_ulps_eq!(ra_errors[0], 1e-6, max_ulps = 2);
+            assert_ulps_eq!(ra_errors[1], 3e-6, max_ulps = 2);
+            assert_ulps_eq!(ra_errors[2], 5e-6, max_ulps = 2);
+
+            assert_ulps_eq!(dec_errors[0], 2e-6, max_ulps = 2);
+            assert_ulps_eq!(dec_errors[1], 4e-6, max_ulps = 2);
+            assert_ulps_eq!(dec_errors[2], 6e-6, max_ulps = 2);
+        }
+
+        #[test]
+        #[should_panic(expected = "index out of bounds")]
+        fn test_extract_errors_out_of_bounds() {
+            let obs = make_observations();
+            let idx_obs = Vector3::new(0, 1, 10); // 10 is out of bounds
+            let _ = obs.extract_errors(idx_obs);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "jpl-download")]
+    fn test_estimate_best_orbit() {
+        use approx::assert_relative_eq;
+        use rand::{rngs::StdRng, SeedableRng};
+
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+        let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
+
+        let traj = traj_set
+            .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
+            .expect("Failed to get trajectory");
+
+        let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
+
+        let gap_max = 8.0 / 24.0; // 8 hours in days
+        let (best_orbit, best_rms) = traj
+            .estimate_best_orbit(
+                &OUTFIT_HORIZON_TEST.0,
+                &ErrorModel::FCCT14,
+                &mut rng,
+                5,
+                1.0,
+                -1.0,
+                30.0,
+                Some(0.03),
+                Some(150.),
+                None,
+                Some(10),
+                gap_max,
+            )
+            .unwrap();
+
+        dbg!(&best_orbit, &best_rms);
+
+        let expected_orbit = KeplerianElements {
+            reference_epoch: 57049.22904488294,
+            semi_major_axis: 1.801748431600605,
+            eccentricity: 0.283572284127787,
+            inclination: 0.20266779609836036,
+            ascending_node_longitude: 0.008022659889281067,
+            periapsis_argument: 1.245060173584828,
+            mean_anomaly: 0.44047943792316746,
+        };
+        assert_orbit_close(&best_orbit.unwrap(), &expected_orbit, 1e-14);
+        assert_relative_eq!(best_rms, 55.14810894219461, epsilon = 1e-14);
     }
 }

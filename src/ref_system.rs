@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::constants::VLIGHT_AU;
+use crate::constants::{ArcSec, Radian, VLIGHT_AU};
 
 use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 
@@ -22,6 +22,55 @@ use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 //     ECLM(RefEpoch),
 // }
 
+/// Compute the rotation matrix between two celestial reference systems and epochs.
+///
+/// This function builds a composite rotation matrix that transforms coordinates
+/// from a source reference system and epoch to a target system and epoch. The supported
+/// systems are:
+/// - `"EQUM"`: equatorial mean (precession only)
+/// - `"EQUT"`: equatorial true (precession + nutation)
+/// - `"ECLM"`: ecliptic mean (precession + obliquity)
+///
+/// Epochs can be either:
+/// - `"J2000"`: standard epoch (fixed at MJD 51544.5)
+/// - `"OFDATE"`: user-specified epoch (e.g., time of observation)
+///
+/// If the two systems differ in reference frame and/or epoch, the rotation is assembled
+/// by chaining a sequence of elementary transformations: obliquity rotation, nutation,
+/// and/or precession, passing if necessary through the equatorial mean J2000 frame.
+///
+/// Arguments
+/// ---------
+/// * `rot`: mutable 3×3 array to store the resulting rotation matrix.
+/// * `rsys1`: name of the source reference system (`"EQUM"`, `"EQUT"`, `"ECLM"`).
+/// * `epoch1`: epoch of the source system (`"J2000"` or `"OFDATE"`).
+/// * `date1`: time of the source system in MJD TT (only used if `epoch1 == "OFDATE"`).
+/// * `rsys2`: name of the target reference system.
+/// * `epoch2`: epoch of the target system.
+/// * `date2`: time of the target system in MJD TT (only used if `epoch2 == "OFDATE"`).
+///
+/// Output
+/// -------
+/// * `rot`: the rotation matrix such that `x₂ = rot · x₁`, where `x₁` is a vector
+///   in the source system and `x₂` the same vector expressed in the target system.
+///
+/// Remarks
+/// -------
+/// * The rotation is built iteratively, updating the internal state until the final system/epoch is reached.
+/// * Each step composes the transformation matrix `rot` from right to left.
+/// * Precession uses the IAU 1976 model (`prec`), nutation uses IAU 1980 (`rnut80`), and obliquity from `obleq`.
+/// * The transformation path may pass through `"EQUM", "J2000"` as an intermediate canonical frame.
+///
+/// Panics
+/// -------
+/// * If an unsupported reference system or epoch is passed.
+/// * If more than 20 transformation steps are required (safety cap).
+///
+/// # See also
+/// * [`prec`] – IAU 1976 precession matrix
+/// * [`rnut80`] – IAU 1980 nutation model
+/// * [`rotmt`] – rotation matrix around X/Y/Z axes
+/// * [`obleq`] – mean obliquity of the ecliptic (in radians)
 pub fn rotpn(
     rot: &mut [[f64; 3]; 3],
     rsys1: &str,
@@ -150,12 +199,72 @@ pub fn rotpn(
     }
 }
 
+/// Check if a reference system and epoch combination is supported.
+///
+/// This helper function validates whether the given pair of reference system and epoch
+/// identifiers corresponds to a valid configuration for transformation routines like [`rotpn`].
+///
+/// Supported reference systems:
+/// - `"EQUM"`: Equatorial Mean
+/// - `"EQUT"`: Equatorial True
+/// - `"ECLM"`: Ecliptic Mean
+///
+/// Supported epochs:
+/// - `"J2000"`: Fixed standard epoch
+/// - `"OFDATE"`: Epoch of date (variable)
+///
+/// Arguments
+/// ---------
+/// * `rsys`: reference system identifier as a string slice.
+/// * `epoch`: epoch descriptor as a string slice.
+///
+/// Returns
+/// --------
+/// * `true` if the combination is valid and supported, otherwise `false`.
+///
+/// # See also
+/// * [`rotpn`] – which calls this function to validate inputs
 fn chkref(rsys: &str, epoch: &str) -> bool {
     matches!(rsys, "EQUM" | "EQUT" | "ECLM") && matches!(epoch, "J2000" | "OFDATE")
 }
 
-pub fn obleq(tjm: f64) -> f64 {
-    // Coefficients d'obliquité
+/// Compute the mean obliquity of the ecliptic at a given epoch (IAU 1976 model).
+///
+/// This function returns the mean obliquity angle ε, defined as the angle between
+/// the Earth's equator and the ecliptic plane, using the standard IAU 1976 polynomial model.
+/// The result is expressed in radians and is valid for dates within a few millennia
+/// of the J2000 epoch.
+///
+/// Arguments
+/// ---------
+/// * `tjm`: Modified Julian Date (TT scale).
+///
+/// Returns
+/// --------
+/// * Mean obliquity of the ecliptic in radians.
+///
+/// Formula
+/// -------
+/// The obliquity ε is computed as a cubic polynomial in Julian centuries since J2000:
+///
+/// ```text
+/// ε(t) = ε₀ + ε₁·T + ε₂·T² + ε₃·T³
+/// ```
+/// where:
+/// - `T = (tjm - T2000) / 36525.0`,
+/// - the coefficients `ε₀`, `ε₁`, `ε₂`, `ε₃` are in arcseconds and internally converted to radians.
+///
+/// The polynomial is evaluated using **Horner’s method** for numerical efficiency and stability:
+///
+/// ```ignore
+/// ε = ((ob3 * t + ob2) * t + ob1) * t + ob0;
+/// ```
+///
+/// # See also
+/// * [`rotmt`] – constructs rotation matrices using this obliquity
+/// * [`rotpn`] – applies obliquity rotation when transforming between ecliptic and equatorial frames
+pub fn obleq(tjm: f64) -> Radian {
+    // Obliquity coefficients
     let ob0 = ((23.0 * 3600.0 + 26.0 * 60.0) + 21.448) * RADSEC;
     let ob1 = -46.815 * RADSEC;
     let ob2 = -0.0006 * RADSEC;
@@ -166,6 +275,41 @@ pub fn obleq(tjm: f64) -> f64 {
     ((ob3 * t + ob2) * t + ob1) * t + ob0
 }
 
+/// Construct a right-handed rotation matrix around a principal axis (X, Y, or Z).
+///
+/// This function returns a 3×3 matrix representing an **active rotation**
+/// of a vector in ℝ³ by an angle `alpha` around the axis indexed by `k`.
+/// The rotation is applied in the **direct (positive/trigonometric)** sense:
+/// i.e., counter-clockwise when looking along the axis toward the origin.
+///
+/// Arguments
+/// ---------
+/// * `alpha`: rotation angle in radians (positive = direct sense).
+/// * `k`: index of the axis of rotation:
+///     - `0` → X-axis,
+///     - `1` → Y-axis,
+///     - `2` → Z-axis.
+///
+/// Returns
+/// --------
+/// * A 3×3 rotation matrix `R` such that the rotated vector is `x′ = R · x`.
+///
+/// Remarks
+/// -------
+/// * This routine follows the OrbFit convention:
+///     - it rotates the **vector** in a fixed reference frame,
+///     - i.e., it does **not** represent a change of basis.
+/// * The matrix is orthonormal and satisfies `Rᵀ = R⁻¹`.
+/// * Used internally in [`prec`], [`rnut80`], and [`rotpn`] for sequential transformations.
+///
+/// Panics
+/// -------
+/// * Panics if `k > 2`, as only axes 0–2 (X, Y, Z) are valid.
+///
+/// # See also
+/// * [`prec`] – uses `rotmt` for precession angle rotations
+/// * [`rnut80`] – applies sequential `rotmt` matrices for nutation
+/// * [`rotpn`] – assembles compound frame transformations
 pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
     if k > 2 {
         panic!("**** ROTMT: k = ??? ****");
@@ -193,7 +337,51 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
     r
 }
 
-pub fn nutn80(tjm: f64) -> (f64, f64) {
+/// Compute the nutation angles in longitude and obliquity using the IAU 1980 (Wahr) model.
+///
+/// This function returns the nutation angles (Δψ, Δε), i.e. the periodic deviations in:
+/// - ecliptic longitude (Δψ, nutation in longitude),
+/// - and obliquity of the ecliptic (Δε, nutation in obliquity),
+/// both expressed in arcseconds, using the IAU 1980 nutation theory as adopted by the IAU.
+///
+/// Arguments
+/// ---------
+/// * `tjm`: Modified Julian Date (in TT time scale).
+///
+/// Returns
+/// --------
+/// * A tuple `(Δψ, Δε)`:
+///     - `Δψ`: nutation in longitude [arcseconds]
+///     - `Δε`: nutation in obliquity [arcseconds]
+///
+/// Description
+/// -----------
+/// This implementation follows the IAU 1980 nutation model (Wahr), which expresses the nutation angles
+/// as a sum of hundreds of periodic terms depending on five fundamental lunar and solar arguments:
+/// - Mean anomaly of the Moon (l)
+/// - Mean anomaly of the Sun (p)
+/// - Argument of latitude of the Moon (f)
+/// - Mean elongation of the Moon from the Sun (d)
+/// - Longitude of the Moon's ascending node (n)
+///
+/// These arguments are computed as 3rd-order polynomials in time (in Julian centuries T from J2000),
+/// and the nutation angles are then expressed as long trigonometric series involving various linear
+/// combinations of sinusoids of these arguments.
+///
+/// The returned values are **in arcseconds**, as per the original IAU convention. They are typically
+/// converted to radians for use in rotation matrices (via [`RADSEC`] in other modules).
+///
+/// Notes
+/// ------
+/// * The internal coefficients and series expansion are directly adapted from OrbFit (Fortran), which itself
+///   follows the IAU 1980 formulation by Wahr.
+/// * This implementation is compatible with OrbFit’s `nutn80` and yields identical output to within machine precision.
+///
+/// # See also
+/// * [`rnut80`] – uses these angles to build the nutation rotation matrix
+/// * [`rotpn`] – applies nutation when transforming between EQUT and EQUM systems
+pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
+    // Compute the fundamental lunar and solar arguments (in radians)
     let t1 = (tjm - T2000) / 36525.0;
     let t = t1 as f64;
     let t2 = t * t;
@@ -211,6 +399,7 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
     let d = dd % DPI;
     let n = dn % DPI;
 
+    // Precompute cosine and sine of fundamental arguments
     let sin_cos = |x: f64| -> (f64, f64) { (x.cos(), x.sin()) };
 
     let (cl, sl) = sin_cos(l);
@@ -219,6 +408,7 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
     let (cd, sd) = sin_cos(d);
     let (cn, sn) = sin_cos(n);
 
+    // Construct compound trigonometric terms used in the series expansion
     let cp2 = 2.0 * cp * cp - 1.0;
 
     let sp2 = 2.0 * sp * cp;
@@ -269,6 +459,7 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
     let cw = cp * cg - sp * sg;
     let sw = sp * cg + cp * sg;
 
+    // Series expansion for nutation in longitude (Δψ), in 0.0001 arcseconds
     let mut dpsi =
         -(171996.0 + 174.2 * t) * sn + (2062.0 + 0.2 * t) * sn2 + 46.0 * (sm * cn + cm * sn)
             - 11.0 * sm
@@ -374,6 +565,7 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
         - (sf * cd2 + cf * sd2)
         + (sp * cd + cp * sd);
 
+    // Series expansion for nutation in obliquity (Δε), in 0.0001 arcseconds
     let mut deps = (92025.0 + 8.9 * t) * cn - (895.0 - 0.5 * t) * cn2 - 24.0 * (cm * cn - sm * sn)
         + (cm * cn2 - sm * sn2)
         + (cb * cp2 + sb * sp2)
@@ -435,23 +627,67 @@ pub fn nutn80(tjm: f64) -> (f64, f64) {
         + (cf * cr + sf * sr)
         - (cb * cl2 - sb * sl2);
 
+    // Convert results from 0.0001 arcseconds to arcseconds
     dpsi *= 1e-4;
     deps *= 1e-4;
 
     (dpsi, deps)
 }
 
+/// Construct the nutation rotation matrix using the IAU 1980 nutation model.
+///
+/// This function returns the 3×3 rotation matrix that accounts for Earth's nutation,
+/// based on the IAU 1980 theory (Wahr). It applies three successive rotations:
+///
+/// 1. Rotate around the X-axis by the **mean obliquity** ε (from [`obleq`]),
+/// 2. Rotate around the Z-axis by the **nutation in longitude** Δψ (from [`nutn80`]),
+/// 3. Rotate back around the X-axis by the **true obliquity** ε + Δε.
+///
+/// This yields a rotation matrix that transforms vectors from the mean equator and equinox
+/// of date (EQUM) to the true equator and equinox of date (EQUT).
+///
+/// Arguments
+/// ---------
+/// * `tjm`: Modified Julian Date (TT scale).
+///
+/// Returns
+/// --------
+/// * A 3×3 orthonormal matrix `R` such that:
+///     - `x_true = R · x_mean`
+///     - where `x_mean` is a vector in the mean equatorial frame of date,
+///     - and `x_true` is the same vector expressed in the true equatorial frame of date.
+///
+/// Notes
+/// ------
+/// * The obliquity angles ε and ε + Δε are in radians.
+/// * The nutation angles Δψ and Δε are computed using [`nutn80`] and converted from arcseconds to radians.
+/// * The rotation is expressed in the IAU 1980 nutation convention (used by OrbFit and many legacy systems).
+///
+/// # See also
+/// * [`nutn80`] – returns the nutation angles Δψ, Δε in arcseconds
+/// * [`obleq`] – computes the mean obliquity ε (radians)
+/// * [`rotmt`] – builds the individual axis rotation matrices
+/// * [`rotpn`] – uses `rnut80` to transform between EQUM and EQUT systems
 fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
+    // Mean obliquity of the ecliptic at date (ε)
     let epsm = obleq(tjm);
 
+    // Nutation angles in longitude (Δψ) and obliquity (Δε), in arcseconds
     let (mut dpsi, deps) = nutn80(tjm);
+
+    // Convert nutation angles from arcseconds to radians
     dpsi *= RADSEC;
     let epst = epsm + deps * RADSEC;
 
+    // Build individual rotation matrices:
+    // R1: rotation around X by +ε (mean obliquity)
+    // R2: rotation around Z by -Δψ (nutation in longitude)
+    // R3: rotation around X by -ε - Δε (true obliquity)
     let r1 = rotmt(epsm, 0);
     let r2 = rotmt(-dpsi, 2);
     let r3 = rotmt(-epst, 0);
 
+    // Multiply: rp = R2 · R1
     let mut rp = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
@@ -459,6 +695,7 @@ fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
         }
     }
 
+    // Final nutation matrix: R = R3 · (R2 · R1)
     let mut rnut = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
@@ -479,11 +716,52 @@ fn trsp3(matrix: &mut [[f64; 3]; 3]) {
     }
 }
 
+/// Compute the precession matrix from J2000 to the mean equator and equinox of a given epoch (IAU 1976 model).
+///
+/// This function constructs the 3×3 precession rotation matrix based on the IAU 1976 precession theory,
+/// as formulated in the Astronomical Almanac (1987, section B18). The matrix transforms a vector
+/// expressed in the J2000 mean equatorial frame into the mean equatorial frame of date.
+///
+/// Arguments
+/// ---------
+/// * `tjm`: Modified Julian Date in TT scale (epoch of transformation).
+/// * `rprec`: mutable reference to a 3×3 array that will receive the resulting matrix.
+///
+/// Returns
+/// --------
+/// * The result is written in place to `rprec`, such that:
+///     - `x_mean(tjm) = rprec · x_J2000`
+///
+/// Method
+/// ------
+/// The transformation is composed of three successive rotations:
+/// 1. Around Z-axis by `−ζ`
+/// 2. Around Y-axis by `θ`
+/// 3. Around Z-axis by `−z`
+///
+/// where the angles are time-dependent polynomials in Julian centuries `T = (tjm - T2000) / 36525`:
+///
+/// ```text
+/// ζ(T)     = (0.6406161 + 0.0000839·T + 0.0000050·T²) · T  [deg]
+/// θ(T)     = (0.5567530 - 0.0001185·T - 0.0000116·T²) · T  [deg]
+/// z(T)     = (0.6406161 + 0.0003041·T + 0.0000051·T²) · T  [deg]
+/// ```
+/// These angles are converted to radians internally using `RADEG`.
+///
+/// Remarks
+/// -------
+/// * This function assumes the IAU 1976 precession model, valid within a few centuries of J2000.
+/// * The rotation is active (vector rotation), and the resulting matrix is orthonormal.
+/// * Equivalent to the OrbFit `prec` Fortran routine used in reference frame transitions.
+///
+/// # See also
+/// * [`rotmt`] – constructs the rotation matrices used here
+/// * [`rotpn`] – uses `prec` when converting between epochs `"OFDATE"` and `"J2000"`
 fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
-    // Déclaration et initialisation des matrices de rotation
+    // Initialize intermediate matrix for storing R2 · R1
     let mut rp = [[0.0; 3]; 3];
 
-    // Constantes de précession
+    // Precession polynomial coefficients (in radians)
     let zed = 0.6406161 * RADEG;
     let zd = 0.6406161 * RADEG;
     let thd = 0.5567530 * RADEG;
@@ -496,25 +774,30 @@ fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
     let zddd = 0.0000051 * RADEG;
     let thddd = -0.0000116 * RADEG;
 
-    // Calcul des paramètres fondamentaux
+    // Compute Julian centuries since J2000
     let t = (tjm - T2000) / 36525.0;
+
+    // Compute precession angles (in radians)
     let zeta = ((zeddd * t + zedd) * t + zed) * t;
     let z = ((zddd * t + zdd) * t + zd) * t;
     let theta = ((thddd * t + thdd) * t + thd) * t;
 
-    // Calcul des matrices de rotation
-    let r1 = rotmt(-zeta, 2);
-    let r2 = rotmt(theta, 1);
-    let r3 = rotmt(-z, 2);
+    // Construct the three rotation matrices:
+    // R1 = rotation around Z by −ζ
+    // R2 = rotation around Y by θ
+    // R3 = rotation around Z by −z
+    let r1 = rotmt(-zeta, 2); // Z-axis
+    let r2 = rotmt(theta, 1); // Y-axis
+    let r3 = rotmt(-z, 2); // Z-axis
 
-    // Multiplication des matrices r1 et r2 pour obtenir rp
+    // Compute intermediate matrix: rp = R2 · R1
     for i in 0..3 {
         for j in 0..3 {
             rp[i][j] = r2[i][0] * r1[0][j] + r2[i][1] * r1[1][j] + r2[i][2] * r1[2][j];
         }
     }
 
-    // Multiplication de rp par r3 pour obtenir rprec
+    // Final precession matrix: rprec = R3 · (R2 · R1)
     for i in 0..3 {
         for j in 0..3 {
             rprec[i][j] = r3[i][0] * rp[0][j] + r3[i][1] * rp[1][j] + r3[i][2] * rp[2][j];
@@ -532,12 +815,65 @@ fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     result
 }
 
+/// Apply stellar aberration correction to a relative position vector.
+///
+/// This function computes the apparent position of a target object by applying 
+/// the first-order correction for stellar aberration due to the observer's velocity.
+/// It assumes the classical limit (v ≪ c), using a linear time-delay model.
+///
+/// Arguments
+/// ---------
+/// * `xrel`: relative position vector from observer to object [AU].
+/// * `vrel`: velocity of the observer relative to the barycenter [AU/day].
+///
+/// Returns
+/// --------
+/// * Corrected position vector (same units and directionality as `xrel`),
+///   shifted by the aberration effect.
+///
+/// Formula
+/// -------
+/// The corrected position is given by:
+/// ```text
+/// x_corr = xrel − (‖xrel‖ / c) · vrel
+/// ```
+/// where `c` is the speed of light in AU/day (`VLIGHT_AU`).
+///
+/// Remarks
+/// -------
+/// * This function does **not** normalize the output.
+/// * Suitable for use in astrometric modeling or when computing apparent direction
+///   of celestial objects as seen from a moving observer.
 pub(crate) fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
     let norm_vector = xrel.norm();
     let dt = norm_vector / VLIGHT_AU;
     xrel - dt * vrel
 }
 
+/// Convert a 3D Cartesian position vector to right ascension and declination.
+///
+/// Given a position vector expressed in Cartesian coordinates (typically in an equatorial frame),
+/// this function returns the corresponding right ascension (α), declination (δ), and norm (distance).
+///
+/// Arguments
+/// ---------
+/// * `cartesian_position`: 3D position vector in Cartesian coordinates [AU or any length unit].
+///
+/// Returns
+/// --------
+/// * Tuple `(α, δ, ρ)`:
+///     - `α`: right ascension in radians, in the range [0, 2π).
+///     - `δ`: declination in radians, in the range [−π/2, +π/2].
+///     - `ρ`: Euclidean norm of the vector (distance to the origin).
+///
+/// Remarks
+/// -------
+/// * If the input vector has zero norm, the result is `(0.0, 0.0, 0.0)`.
+/// * The RA computation uses `atan2` to preserve quadrant information.
+/// * This function is used when converting inertial position vectors to observable angles.
+///
+/// # See also
+/// * [`correct_aberration`] – apply aberration correction before calling this if needed
 pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let pos_norm = cartesian_position.norm();
     if pos_norm == 0. {
