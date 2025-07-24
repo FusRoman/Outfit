@@ -9,7 +9,7 @@ use crate::{equinoctial_element::EquinoctialElements, kepler::principal_angle};
 /// * `ascending_node_longitude`: radians
 /// * `periapsis_argument`: radians
 /// * `mean_anomaly`: radians
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct KeplerianElements {
     pub reference_epoch: f64,
     pub semi_major_axis: f64,
