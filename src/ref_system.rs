@@ -256,7 +256,7 @@ fn chkref(rsys: &str, epoch: &str) -> bool {
 ///
 /// The polynomial is evaluated using **Horner’s method** for numerical efficiency and stability:
 ///
-/// ```ignore
+/// ```text
 /// ε = ((ob3 * t + ob2) * t + ob1) * t + ob0;
 /// ```
 ///

@@ -1,5 +1,4 @@
 use aberth::StopReason;
-use core::fmt;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
 
@@ -8,7 +7,6 @@ use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::kepler::velocity_correction;
 use crate::keplerian_element::KeplerianElements;
-use crate::observers::observer_position;
 use crate::observers::observer_position::helio_obs_pos;
 use crate::observers::observers::Observer;
 use crate::orb_elem::ccek1;
@@ -48,7 +46,7 @@ use rand_distr::{Distribution, Normal};
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
-    pub(crate)ra: Vector3<Radian>,
+    pub(crate) ra: Vector3<Radian>,
     pub(crate) dec: Vector3<Radian>,
     pub(crate) time: Vector3<f64>,
     pub(crate) observer_position: Matrix3<f64>,
@@ -220,8 +218,29 @@ impl GaussObs {
             .collect::<Result<Vec<_>, _>>()
     }
 
-    /// Compute the orbiting body direction cosine vector
-    /// (from observations point to orbiting body in Topocentric equatorial coordinate system)
+    /// Compute the direction cosine vector pointing toward the observed celestial body.
+    ///
+    /// This function converts right ascension (RA) and declination (DEC) coordinates
+    /// into a 3D unit vector in the topocentric equatorial frame (ICRS/J2000),
+    /// pointing from the observer toward the observed object.
+    ///
+    /// Arguments
+    /// ----------
+    /// * `ra` - Right ascension in radians (0 ≤ RA < 2π), measured eastward from the vernal equinox.
+    /// * `dec` - Declination in radians (−π/2 ≤ DEC ≤ π/2), measured northward from the celestial equator.
+    /// * `cos_dec` - Precomputed cosine of the declination (`cos(dec)`), used for performance optimization.
+    ///
+    /// Returns
+    /// ----------
+    /// * `Vector3<f64>` - The unit direction vector `[x, y, z]`, where:
+    ///   - `x = cos(ra) * cos(dec)`
+    ///   - `y = sin(ra) * cos(dec)`
+    ///   - `z = sin(dec)`
+    ///
+    /// Notes
+    /// ------
+    /// * The resulting vector has norm ≈ 1 and lies on the celestial sphere.
+    /// * This representation is suitable for computing line-of-sight directions or constructing the S matrix in Gauss's method.
     fn unit_vector(ra: f64, dec: f64, cos_dec: f64) -> Vector3<f64> {
         Vector3::new(
             f64::cos(ra) * cos_dec,
@@ -230,7 +249,30 @@ impl GaussObs {
         )
     }
 
-    /// Compute the matrix containing the unit vector
+    /// Construct the matrix of unit direction vectors for the observation triplet.
+    ///
+    /// This method returns a 3×3 matrix where each column is a unit vector pointing
+    /// from the observer toward the target object at one of the three observation epochs.
+    /// The unit vectors are computed from the corresponding right ascension (RA) and
+    /// declination (DEC) values stored in the `GaussObs` struct.
+    ///
+    /// Returns
+    /// -------
+    /// * `Matrix3<f64>` — A 3×3 matrix where:
+    ///     - Column 0 corresponds to the direction at the first observation,
+    ///     - Column 1 to the second observation,
+    ///     - Column 2 to the third observation.
+    ///
+    /// Each column vector has components:
+    ///     - x = cos(RA) * cos(DEC)
+    ///     - y = sin(RA) * cos(DEC)
+    ///     - z = sin(DEC)
+    ///
+    /// Notes
+    /// ------
+    /// * The resulting matrix is expressed in the topocentric equatorial frame (ICRS/J2000).
+    /// * This matrix is used in Gauss’s method to solve for the position of the object relative to the observer.
+    /// * It is typically inverted to construct the linear system that links line-of-sight geometry to barycentric positions.
     fn unit_matrix(&self) -> Matrix3<f64> {
         Matrix3::from_columns(&[
             GaussObs::unit_vector(self.ra[0], self.dec[0], f64::cos(self.dec[0])),
@@ -239,6 +281,34 @@ impl GaussObs {
         ])
     }
 
+    /// Prepare preliminary quantities for Gauss’s method of initial orbit determination.
+    ///
+    /// This method computes all the geometrical and temporal quantities needed to set up
+    /// the 8th-degree polynomial used in Gauss’s method. It includes the normalized
+    /// time intervals (`tau1`, `tau3`), the matrix of unit direction vectors (`S`),
+    /// its inverse (`S⁻¹`), and the coefficient vectors `a` and `b` used to construct
+    /// the polynomial equation for the object's topocentric distance.
+    ///
+    /// Returns
+    /// -------
+    /// * `tau1`: Scaled time interval between first and second observations (g * (t1 - t2))
+    /// * `tau3`: Scaled time interval between third and second observations (g * (t3 - t2))
+    /// * `unit_matrix`: 3×3 matrix of unit direction vectors from observer to object (S)
+    /// * `inv_unit_matrix`: Inverse of `unit_matrix`, used in solving for the object’s position
+    /// * `vector_a`: Coefficients for linear combination of observer positions
+    /// * `vector_b`: Coefficients for quadratic correction based on topocentric distance
+    ///
+    /// Errors
+    /// ------
+    /// Returns `OutfitError::SingularDirectionMatrix` if the matrix of direction vectors
+    /// is singular (typically when the three directions are nearly coplanar or colinear).
+    ///
+    /// Notes
+    /// ------
+    /// * This method implements the initialization described in classic orbit determination literature.
+    ///
+    /// # See also
+    /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant used for time normalization.
     fn gauss_prelim(
         &self,
     ) -> Result<
@@ -270,6 +340,40 @@ impl GaussObs {
         Ok((tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b))
     }
 
+    /// Compute the coefficients of the 8th-degree polynomial in Gauss’s orbit determination method.
+    ///
+    /// This function calculates the three non-zero coefficients of the 8th-degree scalar polynomial
+    /// used to solve for the geocentric distance (r₂) of the object at the central observation time.
+    /// The polynomial is of the form:
+    ///
+    /// ```text
+    /// r2^8 + c6 * r2^6 + c3 * r2^3 + c0 = 0
+    /// ```
+    ///
+    /// where the coefficients (c₆, c₃, c₀) encapsulate geometric constraints from the observer’s
+    /// positions and directions at the three observation epochs.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `unit_matrix` – 3×3 matrix of unit direction vectors (from observer to object), as returned by `unit_matrix()`.
+    /// * `unit_invmatrix` – Inverse of `unit_matrix`, used to solve for line-of-sight distances.
+    /// * `vector_a` – First-order combination vector from `gauss_prelim()`, for linear interpolation.
+    /// * `vector_b` – Second-order combination vector from `gauss_prelim()`, for parabolic correction.
+    ///
+    /// Returns
+    /// --------
+    /// * Tuple `(c6, c3, c0)`:
+    ///     - `c6`: coefficient of r₂⁶,
+    ///     - `c3`: coefficient of r₂³,
+    ///     - `c0`: constant term of the polynomial.
+    ///
+    /// Remarks
+    /// --------
+    /// * The resulting polynomial is derived from the scalar projection of the interpolated position vector
+    ///   onto the unit direction at the central epoch, ensuring consistency between dynamic and geometric models.
+    ///
+    /// # See also
+    /// * [`gauss_prelim`] – for computing `vector_a`, `vector_b`, and the unit direction matrix.
     fn coeff_eight_poly(
         &self,
         unit_matrix: &Matrix3<f64>,
@@ -301,6 +405,38 @@ impl GaussObs {
         )
     }
 
+    /// Solve the 8th-degree polynomial for topocentric distance using the Aberth method.
+    ///
+    /// This function numerically computes the real positive roots of the scalar polynomial
+    /// of degree 8 used in Gauss's initial orbit determination. It applies the Aberth method
+    /// to find all complex roots and then filters them based on physical criteria.
+    ///
+    /// Only roots with negligible imaginary part and strictly positive real part
+    /// are retained, as required by the physical model (the object must be at a
+    /// positive distance from the observer).
+    ///
+    /// Arguments
+    /// ---------
+    /// * `polynom` – Array of 9 coefficients `[c₀, ..., c₈]` representing the polynomial:
+    ///     c₀ + c₁·r + c₂·r² + ... + c₈·r⁸ = 0
+    /// * `max_iterations` – Maximum number of iterations for the Aberth root-finding algorithm.
+    /// * `aberth_epsilon` – Convergence threshold for the Aberth iterations.
+    /// * `root_acceptance_epsilon` – Threshold on the imaginary part below which a root is considered real.
+    ///
+    /// Returns
+    /// --------
+    /// * `Ok(Vec<f64>)` – List of real, positive roots (the possible values of the object's geocentric distance at epoch 2).
+    /// * `Err(OutfitError::PolynomialRootFindingFailed)` – If Aberth iteration fails to converge.
+    ///
+    /// Remarks
+    /// --------
+    /// * The physical validity of a root is determined by two conditions:
+    ///     - its imaginary part is smaller than `root_acceptance_epsilon`,
+    ///     - its real part is strictly greater than zero.
+    /// * The root-finding is powered by the `aberth` crate.
+    ///
+    /// # See also
+    /// * [`coeff_eight_poly`] – for computing the coefficients of the polynomial.
     fn solve_8poly(
         &self,
         polynom: &[f64; 9],
@@ -324,17 +460,38 @@ impl GaussObs {
         }
     }
 
-    /// Compute the asteroid position vector at the time of the observation
+    /// Compute the asteroid position vectors at each observation time and the corrected reference epoch.
     ///
-    /// Argument
+    /// This function reconstructs the heliocentric position of the observed body at the three observation
+    /// epochs using Gauss’s method. It solves for the topocentric distances `ρ₁`, `ρ₂`, `ρ₃` by inverting the
+    /// geometry defined by the observer positions and line-of-sight unit vectors.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `unit_matrix` – 3×3 matrix of unit direction vectors from observer to object (one per epoch).
+    /// * `unit_matinv` – Inverse of `unit_matrix`, used to solve for the scalar distances ρ₁, ρ₂, ρ₃.
+    /// * `vector_c` – Coefficient vector computed from a candidate root of the 8th-degree polynomial;
+    ///   used to combine observer positions linearly to match the line-of-sight geometry.
+    ///
+    /// Returns
     /// --------
-    /// * `unit_matrix`: the matrix made of unit_vector to the orbiting body
-    /// * `unit_matinv`: the inverse of the unit matrix
-    /// * `vector_c`: the vector c used to compute the asteroid position vector
+    /// * `Ok((position_matrix, reference_epoch))`:
+    ///     - `position_matrix`: 3×3 matrix where each column is the heliocentric Cartesian position
+    ///       of the asteroid at the corresponding observation time (in AU, J2000 equatorial frame),
+    ///     - `reference_epoch`: corrected central epoch (observation time minus light travel time ρ₂ / c).
     ///
-    /// Return
-    /// ------
-    /// * the position vector of the asteroid at the time of the observation
+    /// Errors
+    /// --------
+    /// Returns `OutfitError::SpuriousRootDetected` if the computed topocentric distance ρ₂ is too small
+    /// (typically < 0.01 AU), indicating a non-physical or numerically unstable root.
+    ///
+    /// Remarks
+    /// --------
+    /// * The returned `reference_epoch` accounts for the light-time delay correction (aberration).
+    ///
+    /// # See also
+    /// * [`accept_root`] – filters valid roots using this method.
+    /// * [`VLIGHT_AU`](crate::constants::VLIGHT_AU) – speed of light in AU/day.
     fn position_vector_and_reference_epoch(
         &self,
         unit_matrix: &Matrix3<f64>,
@@ -358,29 +515,34 @@ impl GaussObs {
         Ok((obs_pos_t + rho_unit, reference_epoch))
     }
 
-    /// Compute the velocity vector of the asteroid at the time of the second observation
+    /// Estimate the asteroid's velocity vector at the central observation time using Gibbs’ method.
     ///
-    /// Argument
+    /// This function computes the velocity of the observed body at the second observation epoch
+    /// using a refined form of Gibbs' method. It relies on the positions of the object at three
+    /// distinct times and uses normalized time intervals to approximate the derivative of position.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `ast_pos_vector` – 3×3 matrix of Cartesian asteroid positions (in AU), where:
+    ///     - Column 0: position at first observation time (t1),
+    ///     - Column 1: position at second (central) observation time (t2),
+    ///     - Column 2: position at third observation time (t3).
+    ///
+    /// * `tau1` – Scaled time interval between the first and second observations (GAUSS_GRAV × (t1 − t2)).
+    /// * `tau3` – Scaled time interval between the third and second observations (GAUSS_GRAV × (t3 − t2)).
+    ///
+    /// Returns
     /// --------
-    /// * `ast_pos_vector`: Asteroid position vector at the time of the three observations
-    ///  cartesian representation,
+    /// * `Vector3<f64>` – Estimated heliocentric velocity vector of the asteroid at the time of the second observation (in AU/day).
     ///
-    /// unit = AU;
-    /// t1, t2 and t3 are the time of the three observations;
-    /// x, y, z are the cartesian coordinates of the asteroid at the time of the three observations
+    /// Remarks
+    /// --------
+    /// * The implementation follows the classical formulation used in Gauss’s method with finite-difference
+    ///   approximations and gravity-based scaling.
     ///
-    /// |    | x | y | z |
-    /// |----|---|---|---|
-    /// | t1 | 0 | 1 | 2 |
-    /// | t2 | 4 | 5 | 6 |
-    /// | t3 | 7 | 8 | 9 |
-    ///
-    /// * `tau1`: Normalized time of the first observation
-    /// * `tau3`: normalized time of the third observation
-    ///
-    /// Return
-    /// ------
-    /// * Velocity vector of the asteroid [vx, vy, vz]
+    /// # See also
+    /// * [`position_vector_and_reference_epoch`] – computes `ast_pos_vector` used as input here.
+    /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant.
     fn gibbs_correction(
         &self,
         ast_pos_vector: &Matrix3<f64>,
@@ -388,22 +550,59 @@ impl GaussObs {
         tau3: f64,
     ) -> Vector3<f64> {
         let tau13 = tau3 - tau1;
-        let r1m3 = 1. / ast_pos_vector.column(0).norm().powi(3);
-        let r2m3 = 1. / ast_pos_vector.column(1).norm().powi(3);
-        let r3m3 = 1. / ast_pos_vector.column(2).norm().powi(3);
 
-        let d1 = tau3 * (r1m3 / 12. - 1. / (tau1 * tau13));
-        let d2: f64 = (tau1 + tau3) * (r2m3 / 12. - 1. / (tau1 * tau3));
-        let d3 = -tau1 * (r3m3 / 12. + 1. / (tau3 * tau13));
+        // Compute inverse cube of distances at each observation time
+        let r1m3 = 1.0 / ast_pos_vector.column(0).norm().powi(3); // at t1
+        let r2m3 = 1.0 / ast_pos_vector.column(1).norm().powi(3); // at t2
+        let r3m3 = 1.0 / ast_pos_vector.column(2).norm().powi(3); // at t3
+
+        // Compute time-dependent scalar weights for finite difference approximation
+        let d1 = tau3 * (r1m3 / 12.0 - 1.0 / (tau1 * tau13));
+        let d2 = (tau1 + tau3) * (r2m3 / 12.0 - 1.0 / (tau1 * tau3));
+        let d3 = -tau1 * (r3m3 / 12.0 + 1.0 / (tau3 * tau13));
+
+        // Combine the three positions using the scalar weights
         let d_vect = Vector3::new(-d1, d2, d3);
 
+        // Compute the velocity vector as a weighted sum of position components
         Vector3::new(
-            GAUSS_GRAV * ast_pos_vector.row(0).dot(&d_vect.transpose()),
-            GAUSS_GRAV * ast_pos_vector.row(1).dot(&d_vect.transpose()),
-            GAUSS_GRAV * ast_pos_vector.row(2).dot(&d_vect.transpose()),
+            GAUSS_GRAV * ast_pos_vector.row(0).dot(&d_vect.transpose()), // vx
+            GAUSS_GRAV * ast_pos_vector.row(1).dot(&d_vect.transpose()), // vy
+            GAUSS_GRAV * ast_pos_vector.row(2).dot(&d_vect.transpose()), // vz
         )
     }
 
+    /// Evaluate whether a root of the 8th-degree polynomial leads to a valid preliminary orbit.
+    ///
+    /// This method checks if a given root (candidate topocentric distance `r2`) leads to a
+    /// physically meaningful orbit according to the Gauss method. It reconstructs the object's
+    /// position and velocity vectors, applies the eccentricity and perihelion filters,
+    /// and returns the full geometric state if accepted.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `root` – A real, positive root of the polynomial equation for r₂ (distance at central epoch).
+    /// * `unit_matrix` – 3×3 matrix of unit direction vectors (from observer to object).
+    /// * `inv_unit_matrix` – Inverse of the direction matrix.
+    /// * `vect_a` – First-order combination vector (from `gauss_prelim()`).
+    /// * `vect_b` – Second-order combination vector (from `gauss_prelim()`).
+    /// * `tau1` – Scaled time between first and second observation (GAUSS_GRAV × (t1 − t2)).
+    /// * `tau3` – Scaled time between third and second observation (GAUSS_GRAV × (t3 − t2)).
+    ///
+    /// Returns
+    /// --------
+    /// * `Some((position_matrix, velocity_vector, reference_epoch))` if the root is valid,
+    /// * `None` if the resulting solution is not physically acceptable (e.g. eccentricity too high).
+    ///
+    /// Remarks
+    /// --------
+    /// * The eccentricity and perihelion distance are checked against internal thresholds
+    ///   using the [`eccentricity_control`] function.
+    ///
+    /// # See also
+    /// * [`eccentricity_control`] – checks if an orbit meets physical bounds.
+    /// * [`position_vector_and_reference_epoch`] – computes the full 3×3 object position matrix.
+    /// * [`gibbs_correction`] – estimates the velocity at central epoch from positions.
     fn accept_root(
         &self,
         root: f64,
@@ -414,53 +613,109 @@ impl GaussObs {
         tau1: f64,
         tau3: f64,
     ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
-        let r2m3 = 1. / root.powi(3);
-        let vector_c: Vector3<f64> = Vector3::new(
+        // Compute r₂⁻³ once (used in vector c)
+        let r2m3 = 1.0 / root.powi(3);
+
+        // Construct the vector c used to linearly combine the observer positions
+        let vector_c = Vector3::new(
             vect_a[0] + vect_b[0] * r2m3,
-            -1.,
+            -1.0,
             vect_a[2] + vect_b[2] * r2m3,
         );
+
+        // Compute asteroid position vectors at each observation time, and the reference epoch
         let Some((ast_pos_all_time, reference_epoch)) = self
-            .position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c)
+            .position_vector_and_reference_epoch(unit_matrix, inv_unit_matrix, &vector_c)
             .ok()
         else {
-            return None;
+            return None; // root leads to invalid geometry (e.g., ρ₂ < 0.01)
         };
-        let ast_pos_second_time: Vector3<f64> = ast_pos_all_time.column(1).into();
+
+        // Extract the position vector at the central epoch (t2)
+        let ast_pos_second_time = ast_pos_all_time.column(1).into();
+
+        // Estimate the velocity vector at the second observation via Gibbs correction
         let asteroid_vel = self.gibbs_correction(&ast_pos_all_time, tau1, tau3);
+
+        // Apply eccentricity and perihelion distance control
         let Some((is_accepted, _, _, _)) =
-            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.)
+            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.0)
         else {
             return None;
         };
+
+        // Accept only orbits within eccentricity and perihelion limits
         if is_accepted {
-            return Some((ast_pos_all_time, asteroid_vel, reference_epoch));
+            Some((ast_pos_all_time, asteroid_vel, reference_epoch))
+        } else {
+            None
         }
-        return None;
     }
 
+    /// Convert Cartesian position and velocity vectors to Keplerian orbital elements.
+    ///
+    /// This function transforms a state vector (position and velocity) from the equatorial
+    /// J2000 frame into the mean ecliptic J2000 frame, then computes the corresponding
+    /// Keplerian orbital elements using classical two-body dynamics.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `asteroid_position` – Cartesian heliocentric position vector of the object (in AU), in equatorial J2000 frame.
+    /// * `asteroid_velocity` – Cartesian heliocentric velocity vector of the object (in AU/day), in equatorial J2000 frame.
+    /// * `reference_epoch` – Epoch (in MJD TT) corresponding to the state vector, used as the reference time for the elements.
+    ///
+    /// Returns
+    /// --------
+    /// * `KeplerianElements` – Struct containing the classical orbital elements of the body, with the following fields:
+    ///     - `reference_epoch`: epoch of the elements in Modified Julian Date (MJD TT),
+    ///     - `semi_major_axis`: semi-major axis in astronomical units (AU),
+    ///     - `eccentricity`: orbital eccentricity (unitless),
+    ///     - `inclination`: inclination in radians,
+    ///     - `ascending_node_longitude`: longitude of ascending node in radians,
+    ///     - `periapsis_argument`: argument of periapsis in radians,
+    ///     - `mean_anomaly`: mean anomaly at epoch in radians.
+    ///
+    /// Remarks
+    /// --------
+    /// * The transformation matrix from equatorial to ecliptic frame is computed using [`rotpn`].
+    /// * Orbital elements are computed using the function [`ccek1`] from the `orb_elem` module.
+    ///
+    /// # See also
+    /// * [`rotpn`] – computes the rotation matrix between celestial reference frames.
+    /// * [`ccek1`] – converts position and velocity vectors to orbital elements.
+    /// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – definition of the orbital elements struct.
     fn from_position_velocity_to_orbit(
         &self,
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
     ) -> KeplerianElements {
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+        // Initialize a 3x3 rotation matrix
+        let mut roteqec = [[0.0; 3]; 3];
 
+        // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
+        rotpn(&mut roteqec, "EQUM", "J2000", 0.0, "ECLM", "J2000", 0.0);
+
+        // Apply the transformation to position and velocity vectors
         let matrix_elc_transform = Matrix3::from(roteqec).transpose();
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 
+        // Merge position and velocity into a single array expected by `ccek1`
         let ast_pos_vel: [f64; 6] = [
             ecl_pos.x, ecl_pos.y, ecl_pos.z, ecl_vel.x, ecl_vel.y, ecl_vel.z,
         ];
 
+        // Prepare buffers for orbital element output
         let mut elem = [0.0; 6];
         let mut type_ = String::new();
+
+        // Compute the classical orbital elements from the state vector
         ccek1(&mut elem, &mut type_, &ast_pos_vel);
+
+        // Return orbital elements in a structured form
         KeplerianElements {
-            reference_epoch: reference_epoch,
+            reference_epoch,
             semi_major_axis: elem[0],
             eccentricity: elem[1],
             inclination: elem[2],
