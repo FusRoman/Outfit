@@ -187,9 +187,44 @@ pub(crate) trait ObservationsExt {
     /// # Panics
     /// ---------------
     /// This function will panic if any index in `idx_obs` is out of bounds of the observation set.
-
     fn extract_errors(&self, idx_obs: Vector3<usize>) -> (Vector3<Radian>, Vector3<Radian>);
 
+    /// Estimate the best-fitting preliminary orbit from a full set of astrometric observations.
+    ///
+    /// This method evaluates all viable observation triplets over the entire observation set to
+    /// find the best preliminary orbit using the Gauss method. Each triplet is perturbed multiple
+    /// times using Gaussian noise to simulate observational uncertainty. The orbit with the smallest
+    /// RMS astrometric residual is selected.
+    ///
+    /// # Arguments
+    /// * `state` – Global Outfit state, providing access to ephemerides and time conversion.
+    /// * `error_model` – The astrometric error model (typically per-band or per-observatory).
+    /// * `rng` – A random number generator used for noise injection.
+    /// * `n_noise_realizations` – Number of noisy variants to generate per triplet.
+    /// * `noise_scale` – Scaling factor applied to the nominal RA/DEC uncertainties.
+    /// * `extf` – Extrapolation fudge factor used in RMS error weighting.
+    /// * `dtmax` – Maximum time interval over which to evaluate the RMS.
+    /// * `dt_min` – Minimum time interval allowed between triplet endpoints (optional).
+    /// * `dt_max_triplet` – Maximum allowed time span for any triplet (optional).
+    /// * `optimal_interval_time` – Target time spacing between observations in triplets (optional).
+    /// * `max_triplets` – Maximum number of triplets to test (optional).
+    /// * `gap_max` – Maximum allowed time gap within a triplet (in days).
+    ///
+    /// # Returns
+    /// * `Ok((Some(best_orbit), best_rms))` – The preliminary orbit and associated RMS if successful.
+    /// * `Ok((None, f64::MAX))` – No valid orbit could be estimated.
+    /// * `Err(e)` – An error occurred during RMS computation or orbit estimation.
+    ///
+    /// # Notes
+    /// - RMS values are computed using [`rms_orbit_error`] which includes ephemeris propagation and light-time correction.
+    /// - Each triplet may yield several preliminary orbits due to noise realizations.
+    /// - Observations are preprocessed using [`apply_batch_rms_correction`] to calibrate uncertainties.
+    ///
+    /// # See also
+    /// * [`compute_triplets`] – Extracts valid triplet combinations from the observation set.
+    /// * [`generate_noisy_realizations`] – Creates perturbed triplets using RA/DEC uncertainties.
+    /// * [`prelim_orbit`] – Estimates a preliminary orbit from a single triplet.
+    /// * [`rms_orbit_error`] – Computes the goodness-of-fit for an orbit against all observations.
     fn estimate_best_orbit(
         &mut self,
         state: &Outfit,
@@ -428,8 +463,10 @@ impl ObservationsExt for Observations {
         max_triplets: Option<u32>,
         gap_max: f64,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
+        // Apply uncertainty calibration based on RMS statistics from the error model
         self.apply_batch_rms_correction(error_model, gap_max);
 
+        // Generate candidate triplets (3-observation sets) based on temporal constraints
         let triplets = self.compute_triplets(
             state,
             dt_min,
@@ -441,8 +478,12 @@ impl ObservationsExt for Observations {
         let mut best_rms = f64::MAX;
         let mut best_orbit = None;
 
+        // Iterate over each triplet to attempt orbit estimation
         for triplet in triplets {
+            // Extract astrometric uncertainties for each observation in the triplet
             let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
+
+            // Generate multiple noisy realizations of the triplet to simulate measurement noise
             let realizations = triplet.generate_noisy_realizations(
                 &error_ra,
                 &error_dec,
@@ -451,11 +492,14 @@ impl ObservationsExt for Observations {
                 rng,
             )?;
 
+            // For each noisy realization, attempt orbit determination
             for realization in realizations {
                 match realization.prelim_orbit() {
                     Ok(orbit) => {
+                        // Evaluate how well this orbit fits the full observation set
                         match self.rms_orbit_error(state, &realization, &orbit, extf, dtmax) {
                             Ok(rms) => {
+                                // Keep orbit if it's the best (lowest RMS) so far
                                 if rms < best_rms {
                                     best_rms = rms;
                                     best_orbit = Some(orbit);
@@ -479,6 +523,7 @@ impl ObservationsExt for Observations {
             }
         }
 
+        // Return best orbit found (if any) and corresponding RMS score
         Ok((best_orbit, best_rms))
     }
 }
