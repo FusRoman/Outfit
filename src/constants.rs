@@ -61,4 +61,4 @@ pub type Observations = SmallVec<[Observation; 6]>;
 /// The value is a vector of observations associated to this object
 pub type TrajectorySet = HashMap<ObjectNumber, Observations, RandomState>;
 
-pub type Triplets = HashMap<ObjectNumber, Vec<GaussObs>>;
+pub(crate) type Triplets = HashMap<ObjectNumber, Vec<GaussObs>>;
