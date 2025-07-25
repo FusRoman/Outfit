@@ -214,98 +214,189 @@ pub(crate) fn pvobs(
     (dx, dv)
 }
 
-/// Compute the Greenwich Mean Sidereal Time (GMST)
-/// in radians, for a modified julian date (UT1).
+/// Compute the Greenwich Mean Sidereal Time (GMST) in radians
+/// for a given Modified Julian Date (UT1 time scale).
 ///
-/// Arguments
-/// ---------
-/// * `tjm` - Modified Julian Date (MJD)
+/// This function implements the IAU 1982/2000 polynomial formula
+/// for the mean sidereal time at 0h UT1, plus the fractional-day
+/// correction term due to Earth's rotation rate.
 ///
-/// Retour
-/// ------
-/// GMST in radians, in the [0, 2π) interval.
+/// # Arguments
+/// * `tjm` - Modified Julian Date (MJD, UT1 time scale)
+///
+/// # Returns
+/// * GMST angle in radians, normalized to the interval [0, 2π).
+///
+/// # Details
+/// The GMST is computed in two steps:
+/// 1. Use a cubic polynomial (coefficients C0–C3) to get GMST at 0h UT1
+///    in seconds for the given date.
+/// 2. Add the contribution of Earth's rotation during the fractional day
+///    using the factor `RAP`, which converts solar days to sidereal days.
+///
+/// # References
+/// * IAU 1982, IERS Conventions 1996/2000.
+/// * Explanatory Supplement to the Astronomical Almanac (1992).
 fn gmst(tjm: f64) -> f64 {
-    /// Coefficients du polynôme pour GMST à 0h UT1 (en secondes)
+    // Polynomial coefficients for GMST at 0h UT1 (in seconds)
     const C0: f64 = 24110.54841;
     const C1: f64 = 8640184.812866;
     const C2: f64 = 9.3104e-2;
     const C3: f64 = -6.2e-6;
-    /// Rapport entre jour sidéral et jour solaire
+
+    // Ratio of sidereal day to solar day
     const RAP: f64 = 1.00273790934;
 
+    // Extract the integer MJD (0h UT1) and compute centuries since J2000.0
     let itjm = tjm.floor();
     let t = (itjm - T2000) / 36525.0;
 
-    // Calcul du temps sidéral moyen à 0h UT1
+    // Step 1: GMST at 0h UT1 using the polynomial expression
     let mut gmst0 = ((C3 * t + C2) * t + C1) * t + C0;
 
+    // Convert GMST from seconds to radians (86400 seconds per day)
     gmst0 *= DPI / 86400.0;
 
-    // Incrément de GMST à partir de 0h
-    // let h = (57028.476562500000 - 57028.0) * DPI;
+    // Step 2: Add the contribution from the fraction of the day
+    // tjm.fract() is the fraction of the current day (0 to 1)
+    // Multiplied by 2π (DPI) to convert into radians of a solar day,
+    // and then scaled by RAP to account for the faster rotation of sidereal time.
     let h = tjm.fract() * DPI;
     let mut gmst = gmst0 + h * RAP;
 
-    // Ajustement pour rester dans [0, 2π]
+    // Normalize GMST to the [0, 2π) range
     let mut i: i64 = (gmst / DPI).floor() as i64;
     if gmst < 0.0 {
-        i = i - 1;
+        i -= 1;
     }
     gmst -= i as f64 * DPI;
 
     gmst
 }
 
-/// Compute the equinox equation
+/// Compute the equation of the equinoxes (nutation correction) in radians.
 ///
-/// Arguments
-/// ---------
-/// * `tjm`: Modified Julian Date (MJD)
+/// This term accounts for the small difference between apparent sidereal time
+/// and mean sidereal time due to the nutation of Earth's rotation axis.
 ///
-/// Retour
-/// ------
-/// * Equinox equation in radians
+/// # Arguments
+/// * `tjm` - Modified Julian Date (MJD, TT or TDB time scale)
+///
+/// # Returns
+/// * Equation of the equinoxes in **radians**.
+///
+/// # Details
+/// The equation of the equinoxes is computed as:
+///
+/// ```text
+/// Eq_eq = Δψ * cos(ε)
+/// ```
+///
+/// where:
+/// * `Δψ` is the nutation in longitude (in arcseconds),
+/// * `ε` is the mean obliquity of the ecliptic (in radians).
+///
+/// The function converts `Δψ` from arcseconds to radians using `RADSEC`.
+///
+/// # See also
+/// * [`obleq`] – Computes the mean obliquity of the ecliptic.
+/// * [`nutn80`] – Computes the 1980 IAU nutation model (Δψ and Δε).
 fn equequ(tjm: f64) -> f64 {
+    // Compute the mean obliquity of the ecliptic (ε, in radians)
     let oblm = obleq(tjm);
+
+    // Compute nutation in longitude (Δψ) and nutation in obliquity (Δε)
+    // Δψ is returned in arcseconds.
     let (dpsi, _deps) = nutn80(tjm);
+
+    // Apply Eq_eq = Δψ * cos(ε), converting Δψ from arcseconds to radians using RADSEC
     RADSEC * dpsi * oblm.cos()
 }
 
-/// Convert latitude and height in parallax coordinates on the Earth
+/// Convert geodetic latitude and height into normalized parallax coordinates
+/// on the Earth.
 ///
-/// Argument
-/// --------
-/// * `lat`: observer latitude in radians
-/// * `height`: observer height in kilometer
+/// This transformation is used to compute the observer's position on Earth
+/// in a way that accounts for the Earth's oblateness. The resulting values
+/// are dimensionless and are expressed in units of the Earth's equatorial
+/// radius (`EARTH_MAJOR_AXIS`).
 ///
-/// Return
-/// ------
-/// * rho_cos_phi: normalized radius of the observer projected on the equatorial plane
-/// * rho_sin_phi: normalized radius of the observer projected on the polar axis.
+/// # Arguments
+/// * `lat` - Geodetic latitude of the observer in **radians**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+///
+/// # Returns
+/// A tuple `(rho_cos_phi, rho_sin_phi)`:
+/// * `rho_cos_phi`: normalized distance of the observer projected on
+///   the Earth's equatorial plane.
+/// * `rho_sin_phi`: normalized distance of the observer projected on
+///   the Earth's rotation (polar) axis.
+///
+/// # Details
+/// The computation uses the reference ellipsoid defined by:
+/// * `EARTH_MAJOR_AXIS`: Equatorial radius (km),
+/// * `EARTH_MINOR_AXIS`: Polar radius (km).
+///
+/// The formula comes from standard geodetic to geocentric conversion:
+///
+/// ```text
+/// u = atan( (sin φ * (b/a)) / cos φ )
+/// ρ_sinφ = (b/a) * sin u + (h/a) * sin φ
+/// ρ_cosφ = cos u + (h/a) * cos φ
+/// ```
+///
+/// where `a` and `b` are the Earth's semi-major and semi-minor axes,
+/// and `h` is the height above the ellipsoid.
+///
+/// # See also
+/// * [`Observer::body_fixed_coord`] – Uses this function to compute
+///   the observer's fixed position in Earth-centered coordinates.
 fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
+    // Ratio of the Earth's minor to major axis (flattening factor)
     let axis_ratio = EARTH_MINOR_AXIS / EARTH_MAJOR_AXIS;
+
+    // Compute the auxiliary angle u (parametric latitude)
+    // This corrects for the Earth's oblateness.
     let u = (lat.sin() * axis_ratio).atan2(lat.cos());
 
+    // Compute the normalized distance along the polar axis
     let rho_sin_phi = axis_ratio * u.sin() + (height / EARTH_MAJOR_AXIS) * lat.sin();
+
+    // Compute the normalized distance along the equatorial plane
     let rho_cos_phi = u.cos() + (height / EARTH_MAJOR_AXIS) * lat.cos();
 
     (rho_cos_phi, rho_sin_phi)
 }
 
-/// Convert latitude in degree and height in parallax coordinate
+/// Convert geodetic latitude (in degrees) and height (in kilometers)
+/// into normalized parallax coordinates.
 ///
-/// Argument
-/// --------
-/// * `lat`: observer latitude in degree
-/// * `height`: observer height in kilometer
+/// This is a convenience wrapper around [`lat_alt_to_parallax`] that
+/// performs the degrees-to-radians conversion before calling the main
+/// function.
 ///
-/// Return
-/// ------
-/// * `rho_cos_phi`: normalized radius of the observer projected on the equatorial plane
-/// * `rho_sin_phi`: normalized radius of the observer projected on the polar axis.
+/// # Arguments
+/// * `lat` - Geodetic latitude of the observer in **degrees**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+///
+/// # Returns
+/// A tuple `(rho_cos_phi, rho_sin_phi)`:
+/// * `rho_cos_phi`: normalized distance of the observer projected on
+///   the Earth's equatorial plane.
+/// * `rho_sin_phi`: normalized distance of the observer projected on
+///   the Earth's rotation (polar) axis.
+///
+/// # Details
+/// This function simply converts `lat` to radians and delegates the
+/// computation to [`lat_alt_to_parallax`].
+///
+/// # See also
+/// * [`lat_alt_to_parallax`] – Performs the actual computation given latitude in radians.
 pub(crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
+    // Convert latitude from degrees to radians
     let latitude_rad = lat.to_radians();
 
+    // Call the main routine that works with radians
     let (rho_cos_phi, rho_sin_phi) = lat_alt_to_parallax(latitude_rad, height);
 
     (rho_cos_phi, rho_sin_phi)
