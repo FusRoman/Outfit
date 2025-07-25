@@ -9,6 +9,7 @@ use crate::{
     initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult},
     keplerian_element::KeplerianElements,
     observations::observations::Observation,
+    observers::observers::Observer,
     outfit::Outfit,
     outfit_errors::OutfitError,
 };
@@ -36,6 +37,53 @@ fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     let dt2 = time3 - time2;
 
     s3dtw(dt1, dtw) + s3dtw(dt2, dtw)
+}
+
+/// Downsample a slice of observations to at most `max_keep` observations,
+/// keeping them as evenly spaced in time as possible.
+///
+/// Special case: if `max_keep < 3`, the function still returns at least
+/// three points: the first, the middle, and the last observation.
+/// This ensures that the temporal span is preserved.
+///
+/// Assumes that `obs` is already sorted by time.
+///
+/// # Arguments
+/// * `obs` - slice of observations
+/// * `max_keep` - maximum number of observations to retain
+///
+/// # Returns
+/// A new `Vec<Observation>` containing the selected observations.
+fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize> {
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // If max_keep < 3, fallback to 3 representative points
+    if max_keep <= 3 {
+        let mid = n / 2;
+        return vec![0, mid, n - 1];
+    }
+
+    // If max_keep >= n, keep all indices
+    if max_keep >= n {
+        return (0..n).collect();
+    }
+
+    // General case: keep first and last, distribute others uniformly
+    let mut indices = Vec::with_capacity(max_keep);
+    indices.push(0);
+
+    let slots = max_keep - 2;
+    for i in 0..slots {
+        // Distribute indices between 1 and n-2 (inclusive)
+        let fraction = (i + 1) as f64 / (slots + 1) as f64;
+        let idx = 1 + (fraction * (n - 2) as f64).floor() as usize;
+        indices.push(idx);
+    }
+
+    indices.push(n - 1);
+    indices
 }
 
 /// Extension trait for [`Observations`] providing high-level operations
@@ -104,28 +152,70 @@ fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
 /// This trait is central to orbit determination pipelines and is designed
 /// to work with small batches of observations (often < 100 per object).
 trait ObservationsExt {
-    /// Compute triplets of observations.
+    /// Compute triplets of observations for initial orbit determination.
     ///
-    /// This function computes triplets of observations from the given set of observations.
-    /// It filters the observations based on the time difference between the first and last observation in the triplet,
-    /// and sorts the triplets based on their weights.
+    /// This function first reduces the number of observations by keeping
+    /// a subset of points that are uniformly distributed in time, always
+    /// including the first and last observation to preserve the temporal
+    /// span. From this reduced set, all valid triplets of observations
+    /// are generated, filtered, weighted, and sorted.
     ///
-    /// Arguments
-    /// ---------
-    /// * `dt_min`: An optional minimum time difference between the first and last observation in the triplet. (default: 0.03)
-    /// * `dt_max`: An optional maximum time difference between the first and last observation in the triplet. (default: 150.0)
-    /// * `optimal_interval_time`: An optional optimal interval time requested between the observations of the triplet. (default: 20.0)
-    /// * `max_triplet`: An optional maximum number of triplets to return. (default: 10)
+    /// # Algorithm
     ///
-    /// Return
-    /// ------
-    /// * A vector of `GaussObs` representing the computed triplets of observations.
+    /// 1. Sort all observations by time.
+    /// 2. If there are more than `max_obs_for_triplets` observations,
+    ///    downsample uniformly in time to keep at most this number,
+    ///    always retaining the first and last observations.
+    /// 3. Generate all triplets `(i, j, k)` from the reduced dataset
+    ///    using three nested loops.
+    /// 4. Discard triplets where the time span (t_k – t_i) is outside
+    ///    [`dt_min`, `dt_max`].
+    /// 5. Compute a weight for each valid triplet using [`triplet_weight`],
+    ///    which favors triplets with balanced time spacing.
+    /// 6. Keep only the `max_triplet` best triplets (lowest weights).
+    /// 7. For each selected triplet, build a [`GaussObs`] that includes
+    ///    the observation data and the corresponding precomputed observer
+    ///    positions (from the [`Outfit`] state).
+    ///
+    /// # Arguments
+    ///
+    /// * `state` –
+    ///   Global [`Outfit`] state, providing access to ephemerides and
+    ///   observer position calculation.
+    /// * `dt_min` –
+    ///   Minimum allowed time difference (in days) between the first and
+    ///   last observation of the triplet. Default: 0.03.
+    /// * `dt_max` –
+    ///   Maximum allowed time difference (in days) between the first and
+    ///   last observation of the triplet. Default: 150.0.
+    /// * `optimal_interval_time` –
+    ///   Ideal time interval (in days) between consecutive observations
+    ///   within a triplet, used when computing the weight. Default: 20.0.
+    /// * `max_obs_for_triplets` –
+    ///   Maximum number of observations retained after uniform downsampling.
+    ///   If the dataset is larger, points are selected evenly in time,
+    ///   always keeping the first and last observation. Default: 100.
+    /// * `max_triplet` –
+    ///   Maximum number of triplets to return. Default: 10.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<GaussObs>` containing the selected triplets, sorted by their
+    /// weight (best first).
+    ///
+    /// # Notes
+    ///
+    /// - The downsampling step is essential for performance when the dataset
+    ///   contains thousands of observations.
+    /// - Observations are assumed to be **astrometric** and in units
+    ///   consistent with the Gauss method (RA/DEC in radians, time in MJD).
     fn compute_triplets(
         &mut self,
         state: &Outfit,
         dt_min: Option<f64>,
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
+        max_obs_for_triplets: Option<usize>,
         max_triplet: Option<u32>,
     ) -> Vec<GaussObs>;
 
@@ -334,40 +424,81 @@ trait ObservationsExt {
 pub trait ObservationIOD {
     /// Estimate the best-fitting preliminary orbit from a full set of astrometric observations.
     ///
-    /// This method evaluates all viable observation triplets over the entire observation set to
-    /// find the best preliminary orbit using the Gauss method. Each triplet is perturbed multiple
-    /// times using Gaussian noise to simulate observational uncertainty. The orbit with the smallest
-    /// RMS astrometric residual is selected.
+    /// This method searches for the best preliminary orbit by evaluating a limited number of
+    /// triplets generated from the observation set. The process includes:
+    ///
+    /// 1. **Error calibration**:
+    ///    Observations are first preprocessed with [`apply_batch_rms_correction`] to account for
+    ///    temporal clustering and observer-specific error models.
+    ///
+    /// 2. **Triplet generation**:
+    ///    Triplets are built using [`compute_triplets`], which:
+    ///      * Sorts the data by time,
+    ///      * Optionally downsamples the dataset to at most `max_obs_for_triplets` points
+    ///        (uniform in time, always keeping the first and last),
+    ///      * Generates and filters all valid triplets based on `dt_min`, `dt_max_triplet`,
+    ///        and `optimal_interval_time`.
+    ///
+    /// 3. **Monte Carlo noise sampling**:
+    ///    For each triplet, `n_noise_realizations` perturbed versions are created using
+    ///    Gaussian noise scaled by `noise_scale` times the nominal astrometric uncertainties.
+    ///
+    /// 4. **Orbit estimation and selection**:
+    ///    A preliminary orbit is computed for each (possibly perturbed) triplet with the
+    ///    Gauss method, then evaluated over the full set of observations using
+    ///    [`rms_orbit_error`]. The orbit with the smallest RMS is returned.
     ///
     /// # Arguments
-    /// * `state` – Global Outfit state, providing access to ephemerides and time conversion.
-    /// * `error_model` – The astrometric error model (typically per-band or per-observatory).
-    /// * `rng` – A random number generator used for noise injection.
-    /// * `n_noise_realizations` – Number of noisy variants to generate per triplet.
-    /// * `noise_scale` – Scaling factor applied to the nominal RA/DEC uncertainties.
-    /// * `extf` – Extrapolation fudge factor used in RMS error weighting.
-    /// * `dtmax` – Maximum time interval over which to evaluate the RMS.
-    /// * `dt_min` – Minimum time interval allowed between triplet endpoints (optional).
-    /// * `dt_max_triplet` – Maximum allowed time span for any triplet (optional).
-    /// * `optimal_interval_time` – Target time spacing between observations in triplets (optional).
-    /// * `max_triplets` – Maximum number of triplets to test (optional).
-    /// * `gap_max` – Maximum allowed time gap within a triplet (in days).
+    ///
+    /// * `state` –
+    ///   Global [`Outfit`] state, providing ephemerides and time conversions.
+    /// * `error_model` –
+    ///   The astrometric error model (typically per-band or per-observatory).
+    /// * `rng` –
+    ///   A random number generator used to draw Gaussian perturbations.
+    /// * `n_noise_realizations` –
+    ///   Number of noisy triplet variants generated per original triplet.
+    /// * `noise_scale` –
+    ///   Scaling factor applied to the nominal RA/DEC uncertainties.
+    /// * `extf` –
+    ///   Extrapolation factor for time intervals when selecting the RMS computation window.
+    /// * `dtmax` –
+    ///   Maximum time interval (days) used when evaluating the RMS fit.
+    /// * `dt_min` –
+    ///   Minimum allowed span (days) between the first and last observation in a triplet.
+    /// * `dt_max_triplet` –
+    ///   Maximum allowed span (days) for a valid triplet.
+    /// * `optimal_interval_time` –
+    ///   Target time spacing (days) between observations within a triplet (for weighting).
+    /// * `max_obs_for_triplets` –
+    ///   If the dataset is larger than this value, observations are downsampled uniformly
+    ///   before triplet generation. The first and last observation are always preserved.
+    /// * `max_triplets` –
+    ///   Maximum number of triplets to consider (after filtering and sorting).
+    /// * `gap_max` –
+    ///   Maximum allowed time gap (days) within a batch when applying RMS corrections.
     ///
     /// # Returns
-    /// * `Ok((Some(best_orbit), best_rms))` – The preliminary orbit and associated RMS if successful.
+    ///
+    /// * `Ok((Some(best_orbit), best_rms))` – Best preliminary orbit and associated RMS.
     /// * `Ok((None, f64::MAX))` – No valid orbit could be estimated.
-    /// * `Err(e)` – An error occurred during RMS computation or orbit estimation.
+    /// * `Err(e)` – An error occurred during orbit estimation or RMS evaluation.
     ///
     /// # Notes
-    /// - RMS values are computed using [`rms_orbit_error`] which includes ephemeris propagation and light-time correction.
-    /// - Each triplet may yield several preliminary orbits due to noise realizations.
-    /// - Observations are preprocessed using [`apply_batch_rms_correction`] to calibrate uncertainties.
+    ///
+    /// - RMS values are computed with [`rms_orbit_error`], which accounts for
+    ///   light-time correction and ephemeris propagation.
+    /// - Each triplet can produce several preliminary orbit candidates due to
+    ///   the noise realizations.
+    /// - The `max_obs_for_triplets` parameter is crucial when processing datasets
+    ///   with thousands of observations, as it prevents a cubic combinatorial explosion.
     ///
     /// # See also
-    /// * [`compute_triplets`] – Extracts valid triplet combinations from the observation set.
-    /// * [`generate_noisy_realizations`] – Creates perturbed triplets using RA/DEC uncertainties.
-    /// * [`prelim_orbit`] – Estimates a preliminary orbit from a single triplet.
-    /// * [`rms_orbit_error`] – Computes the goodness-of-fit for an orbit against all observations.
+    ///
+    /// * [`compute_triplets`] – Selects triplets from the observation set.
+    /// * [`generate_noisy_realizations`] – Creates perturbed triplets with Gaussian noise.
+    /// * [`prelim_orbit`] – Computes a preliminary orbit from a single triplet.
+    /// * [`rms_orbit_error`] – Measures the goodness-of-fit of an orbit against observations.
     fn estimate_best_orbit(
         &mut self,
         state: &Outfit,
@@ -380,6 +511,7 @@ pub trait ObservationIOD {
         dt_min: Option<f64>,
         dt_max_triplet: Option<f64>,
         optimal_interval_time: Option<f64>,
+        max_obs_for_triplets: Option<usize>,
         max_triplets: Option<u32>,
         gap_max: f64,
     ) -> Result<(Option<GaussResult>, f64), OutfitError>;
@@ -392,64 +524,84 @@ impl ObservationsExt for Observations {
         dt_min: Option<f64>,
         dt_max: Option<f64>,
         optimal_interval_time: Option<f64>,
+        max_obs_for_triplets: Option<usize>,
         max_triplet: Option<u32>,
     ) -> Vec<GaussObs> {
-        self.sort_by(|a, b| {
-            a.time.partial_cmp(&b.time).expect(
-                format!(
-                    "Error sorting observations for object number: {:?} vs {:?}",
-                    a.time, b.time
-                )
-                .as_str(),
-            )
-        });
+        let dt_min = dt_min.unwrap_or(0.03);
+        let dt_max = dt_max.unwrap_or(150.0);
+        let opt_dt = optimal_interval_time.unwrap_or(20.0);
+        let max_obs_for_triplets = max_obs_for_triplets.unwrap_or(100);
+        let max_triplet = max_triplet.unwrap_or(10) as usize;
 
-        self.iter()
-            .enumerate()
-            .tuple_combinations::<(_, _, _)>()
-            .filter_map(|(obs1, obs2, obs3)| {
-                let dt13 = obs3.1.time - obs1.1.time;
-                if dt13 < dt_min.unwrap_or(0.03) || dt13 > dt_max.unwrap_or(150.) {
-                    return None;
+        // Sort observations by time
+        self.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+
+        // Downsample: get indices into the original vector
+        let selected_indices =
+            downsample_uniform_with_edges_indices(self.len(), max_obs_for_triplets);
+
+        // Reduced vector: references to selected observations
+        let reduced: Vec<&Observation> = selected_indices.iter().map(|&idx| &self[idx]).collect();
+
+        let n = reduced.len();
+        let precomputed_observers: Vec<&Observer> =
+            reduced.iter().map(|obs| obs.get_observer(state)).collect();
+
+        let mut triplets = Vec::with_capacity(max_triplet * 2);
+
+        for i in 0..n {
+            for j in (i + 1)..n {
+                for k in (j + 1)..n {
+                    let dt13 = reduced[k].time - reduced[i].time;
+                    if dt13 < dt_min {
+                        continue;
+                    }
+                    if dt13 > dt_max {
+                        break; // times sorted
+                    }
+
+                    let weight =
+                        triplet_weight(reduced[i].time, reduced[j].time, reduced[k].time, opt_dt);
+
+                    triplets.push((weight, i, j, k));
+
+                    // optional pruning
+                    if triplets.len() > max_triplet * 4 {
+                        triplets.select_nth_unstable_by(max_triplet, |a, b| {
+                            a.0.partial_cmp(&b.0).unwrap()
+                        });
+                        triplets.truncate(max_triplet);
+                    }
                 }
+            }
+        }
 
-                Some((
-                    (obs1.0, obs2.0, obs3.0),
-                    triplet_weight(
-                        obs1.1.time,
-                        obs2.1.time,
-                        obs3.1.time,
-                        optimal_interval_time.unwrap_or(20.0),
-                    ),
-                ))
-            })
-            .sorted_by(|(_, w1), (_, w2)| {
-                w1.partial_cmp(w2).expect("Error sorting triplet weights")
-            })
-            .take(max_triplet.unwrap_or(10) as usize)
-            .map(|((idx1, idx2, idx3), _)| {
-                let obs1 = &self[idx1];
-                let obs2 = &self[idx2];
-                let obs3 = &self[idx3];
+        // Sort and keep the best triplets
+        triplets.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        triplets.truncate(max_triplet);
 
-                // Get the observer for each observation
-                let observers = [
-                    obs1.get_observer(state),
-                    obs2.get_observer(state),
-                    obs3.get_observer(state),
-                ];
+        // Build GaussObs with ORIGINAL indices
+        triplets
+            .into_iter()
+            .map(|(_, i, j, k)| {
+                let idx1 = selected_indices[i];
+                let idx2 = selected_indices[j];
+                let idx3 = selected_indices[k];
 
-                // all coordinates and associated errors are in radians for the gauss preliminary orbit
                 GaussObs::with_observer_position(
                     state,
-                    Vector3::new(idx1, idx2, idx3),
-                    Vector3::new(obs1.ra, obs2.ra, obs3.ra),
-                    Vector3::new(obs1.dec, obs2.dec, obs3.dec),
-                    Vector3::new(obs1.time, obs2.time, obs3.time),
-                    observers,
+                    nalgebra::Vector3::new(idx1, idx2, idx3),
+                    nalgebra::Vector3::new(reduced[i].ra, reduced[j].ra, reduced[k].ra),
+                    nalgebra::Vector3::new(reduced[i].dec, reduced[j].dec, reduced[k].dec),
+                    nalgebra::Vector3::new(reduced[i].time, reduced[j].time, reduced[k].time),
+                    [
+                        precomputed_observers[i],
+                        precomputed_observers[j],
+                        precomputed_observers[k],
+                    ],
                 )
             })
-            .collect::<Vec<GaussObs>>()
+            .collect()
     }
 
     fn select_rms_interval(
@@ -605,6 +757,7 @@ impl ObservationIOD for Observations {
         dt_min: Option<f64>,
         dt_max_triplet: Option<f64>,
         optimal_interval_time: Option<f64>,
+        max_obs_for_triplets: Option<usize>,
         max_triplets: Option<u32>,
         gap_max: f64,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
@@ -623,6 +776,7 @@ impl ObservationIOD for Observations {
             dt_min,
             dt_max_triplet,
             optimal_interval_time,
+            max_obs_for_triplets,
             max_triplets,
         );
 
@@ -715,10 +869,23 @@ mod test_obs_ext {
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
 
-        let triplets = traj_set
-            .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
+        let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
+        let traj_len = traj_set
+            .get(&traj_number)
             .expect("Failed to get trajectory")
-            .compute_triplets(&env_state, Some(0.03), Some(150.), None, Some(10));
+            .len();
+
+        let triplets = traj_set
+            .get_mut(&traj_number)
+            .expect("Failed to get trajectory")
+            .compute_triplets(
+                &env_state,
+                Some(0.03),
+                Some(150.),
+                None,
+                Some(traj_len),
+                Some(10),
+            );
 
         assert_eq!(
             triplets.len(),
@@ -764,11 +931,24 @@ mod test_obs_ext {
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
 
+        let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
+        let traj_len = traj_set
+            .get(&traj_number)
+            .expect("Failed to get trajectory")
+            .len();
+
         let traj = traj_set
-            .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
+            .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(&env_state, Some(0.03), Some(150.), None, Some(10));
+        let triplets = traj.compute_triplets(
+            &env_state,
+            Some(0.03),
+            Some(150.),
+            None,
+            Some(traj_len),
+            Some(10),
+        );
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
@@ -1032,8 +1212,14 @@ mod test_obs_ext {
 
         let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
 
+        let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
+        let traj_len = traj_set
+            .get(&traj_number)
+            .expect("Failed to get trajectory")
+            .len();
+
         let traj = traj_set
-            .get_mut(&crate::constants::ObjectNumber::String("K09R05F".into()))
+            .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
         let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
@@ -1051,12 +1237,11 @@ mod test_obs_ext {
                 Some(0.03),
                 Some(150.),
                 None,
+                Some(traj_len),
                 Some(10),
                 gap_max,
             )
             .unwrap();
-
-        dbg!(&best_orbit, &best_rms);
 
         let expected_orbit = KeplerianElements {
             reference_epoch: 57049.22904488294,
@@ -1069,5 +1254,95 @@ mod test_obs_ext {
         };
         assert_orbit_close(&best_orbit.unwrap(), &expected_orbit, 1e-14);
         assert_relative_eq!(best_rms, 55.14810894219461, epsilon = 1e-14);
+    }
+
+    mod downsampling_observations_tests {
+        use super::*;
+
+        fn make_obs(n: usize) -> Observations {
+            (0..n)
+                .map(|i| Observation {
+                    observer: 0,
+                    ra: 0.0,
+                    dec: 0.0,
+                    error_ra: 0.0,
+                    error_dec: 0.0,
+                    time: i as f64,
+                })
+                .collect()
+        }
+
+        #[test]
+        fn returns_all_when_max_keep_ge_n() {
+            let n = 5;
+            let indices = downsample_uniform_with_edges_indices(n, 5);
+            assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+
+            let indices = downsample_uniform_with_edges_indices(n, 10);
+            assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+        }
+
+        #[test]
+        fn empty_input_returns_empty() {
+            assert!(downsample_uniform_with_edges_indices(0, 0).is_empty());
+            assert!(downsample_uniform_with_edges_indices(0, 10).is_empty());
+        }
+
+        #[test]
+        fn max_keep_less_than_three_returns_first_middle_last() {
+            let n = 10;
+            let mid = n / 2;
+            for max_keep in [0, 1, 2] {
+                let indices = downsample_uniform_with_edges_indices(n, max_keep);
+                assert_eq!(indices, vec![0, mid, n - 1]);
+            }
+        }
+
+        #[test]
+        fn max_keep_three_exactly_returns_first_middle_last() {
+            let n = 10;
+            let indices = downsample_uniform_with_edges_indices(n, 3);
+            assert_eq!(indices, vec![0, n / 2, n - 1]);
+
+            let n = 3;
+            let indices = downsample_uniform_with_edges_indices(n, 3);
+            assert_eq!(indices, vec![0, 1, 2]);
+        }
+
+        #[test]
+        fn downsampling_uniformity_for_general_case() {
+            let n = 10;
+            let max_keep = 5;
+            let indices = downsample_uniform_with_edges_indices(n, max_keep);
+
+            assert_eq!(indices.len(), max_keep);
+            assert_eq!(indices.first().unwrap(), &0);
+            assert_eq!(indices.last().unwrap(), &(n - 1));
+
+            // Indices doivent être strictement croissants
+            assert!(indices.windows(2).all(|w| w[1] > w[0]));
+        }
+
+        #[test]
+        fn works_with_large_data() {
+            let n = 1000;
+            let max_keep = 100;
+            let indices = downsample_uniform_with_edges_indices(n, max_keep);
+
+            assert_eq!(indices.len(), max_keep);
+            assert_eq!(indices.first().unwrap(), &0);
+            assert_eq!(indices.last().unwrap(), &(n - 1));
+        }
+
+        #[test]
+        fn indices_match_observations() {
+            let obs = make_obs(10);
+            let max_keep = 5;
+            let indices = downsample_uniform_with_edges_indices(obs.len(), max_keep);
+
+            // Vérifie que les indices correspondent bien aux temps dans obs
+            let times: Vec<_> = indices.iter().map(|&i| obs[i].time).collect();
+            assert!(times.windows(2).all(|w| w[1] > w[0]));
+        }
     }
 }
