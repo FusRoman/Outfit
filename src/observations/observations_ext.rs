@@ -38,7 +38,72 @@ fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     s3dtw(dt1, dtw) + s3dtw(dt2, dtw)
 }
 
-pub(crate) trait ObservationsExt {
+/// Extension trait for [`Observations`] providing high-level operations
+/// commonly used in orbit determination workflows.
+///
+/// This trait adds methods to process and analyze a collection of
+/// astrometric [`Observation`] objects, including:
+///
+/// * Selection of observation triplets optimized for initial orbit determination (IOD).
+/// * Selection of subsets of observations for root-mean-square (RMS) error calculation.
+/// * Computation of orbit quality metrics (RMS of astrometric residuals).
+/// * Statistical corrections of observational errors based on temporal clustering.
+/// * Extraction of astrometric uncertainties for given observation indices.
+///
+/// # Typical usage
+///
+/// This trait is intended to be implemented on:
+///
+/// ```rust
+/// pub type Observations = SmallVec<[Observation; 6]>;
+/// ```
+///
+/// It provides functionality essential for the Gauss method and related
+/// algorithms used in preliminary orbit determination.
+///
+/// # Provided methods
+/// - [`compute_triplets`](ObservationsExt::compute_triplets):
+///   Build time-filtered triplets of observations, sorted by weight.
+/// - [`select_rms_interval`](ObservationsExt::select_rms_interval):
+///   Given a triplet, determine which observations lie in an expanded time window.
+/// - [`rms_orbit_error`](ObservationsExt::rms_orbit_error):
+///   Evaluate the fit of an orbit by computing RMS residuals.
+/// - [`apply_batch_rms_correction`](ObservationsExt::apply_batch_rms_correction):
+///   Apply correlation-based scaling factors to astrometric errors based on temporal clustering.
+/// - [`extract_errors`](ObservationsExt::extract_errors):
+///   Retrieve the RA/DEC uncertainties for a given triplet of observations.
+///
+/// # See also
+/// * [`GaussObs`] – Data structure used to represent a triplet of observations.
+/// * [`Outfit`] – Global state providing ephemerides and reference frames.
+/// * [`KeplerianElements`] – Orbital elements used to propagate orbits.
+/// * [`Observation`] – Individual observation data structure.
+///
+/// # References
+///
+/// * Danby, J.M.A. (1992). *Fundamentals of Celestial Mechanics* (2nd ed.).
+///   Willmann-Bell.  
+///   Classic reference for preliminary orbit determination methods
+///   (Gauss, Laplace, Vaisala) and iterative improvement techniques.
+///
+/// * Milani, A., & Gronchi, G. F. (2009). *Theory of Orbit Determination*.
+///   Cambridge University Press.  
+///   Comprehensive modern treatment of statistical orbit determination,
+///   including least-squares methods, weighting, and correlation handling.
+///   [https://doi.org/10.1017/CBO9781139175371](https://doi.org/10.1017/CBO9781139175371)
+///
+/// * Carpino, M., Milani, A., & Chesley, S. R. (2003). *OrbFit: Software for Preliminary Orbit Determination*.  
+///   Technical documentation distributed with the OrbFit package:
+///   [https://adams.dm.unipi.it/orbfit/](https://adams.dm.unipi.it/orbfit/)
+///
+/// These references describe the algorithms used for:
+/// - Building and filtering observation triplets (Gauss method)
+/// - Propagating trial orbits and refining them via differential corrections
+/// - Handling of astrometric uncertainties and RMS weighting.
+///
+/// This trait is central to orbit determination pipelines and is designed
+/// to work with small batches of observations (often < 100 per object).
+trait ObservationsExt {
     /// Compute triplets of observations.
     ///
     /// This function computes triplets of observations from the given set of observations.
@@ -188,7 +253,85 @@ pub(crate) trait ObservationsExt {
     /// ---------------
     /// This function will panic if any index in `idx_obs` is out of bounds of the observation set.
     fn extract_errors(&self, idx_obs: Vector3<usize>) -> (Vector3<Radian>, Vector3<Radian>);
+}
 
+/// Trait for performing Initial Orbit Determination (IOD) on a set of astrometric observations.
+///
+/// This trait encapsulates high-level algorithms to derive a **preliminary orbit**
+/// from a time series of astrometric observations, using the **Gauss method**.
+/// It focuses on searching for the best-fitting orbit over all valid triplets of observations.
+///
+/// ## Purpose
+///
+/// The main goal of this trait is to automate the process of:
+/// 1. Building candidate triplets of observations (see [`compute_triplets`]),
+/// 2. Estimating a preliminary orbit for each triplet using the Gauss method,
+/// 3. Perturbing triplets with Gaussian noise to simulate observational uncertainties,
+/// 4. Selecting the orbit that minimizes the root-mean-square (RMS) of astrometric residuals
+///    when compared to the entire set of observations.
+///
+/// This process is the standard entry point for orbit determination workflows.
+/// It is designed for **short observational arcs**, such as those of newly discovered asteroids.
+///
+/// ## Typical usage
+///
+/// ```rust,ignore
+/// let (best_orbit, rms) = observations
+///     .estimate_best_orbit(
+///         &state,
+///         &error_model,
+///         &mut rng,
+///         50,        // noise realizations
+///         1.0,       // noise scaling
+///         1.5,       // extf factor
+///         30.0,      // dtmax (days)
+///         Some(0.03),
+///         Some(150.0),
+///         Some(20.0),
+///         Some(10),
+///         0.5,
+///     )?;
+/// if let Some(orbit) = best_orbit {
+///     println!("Best preliminary orbit RMS = {rms}");
+/// }
+/// ```
+///
+/// ## Algorithmic steps
+///
+/// 1. **Batch uncertainty correction:**  
+///    Observations are first passed through [`apply_batch_rms_correction`].
+///
+/// 2. **Triplet generation:**  
+///    Valid combinations of three observations are extracted with [`compute_triplets`],
+///    optionally constrained by `dt_min`, `dt_max_triplet`, and `optimal_interval_time`.
+///
+/// 3. **Orbit estimation:**  
+///    For each triplet, noisy versions are generated (Monte Carlo) and processed by the
+///    Gauss method to obtain preliminary orbital elements.
+///
+/// 4. **Orbit evaluation:**  
+///    The preliminary orbits are tested on the full observation arc using [`rms_orbit_error`].
+///    The orbit with the smallest RMS is returned.
+///
+/// ## Performance considerations
+///
+/// * Typically applied to **small arcs of tens of observations**.
+/// * The number of tested triplets can be limited with `max_triplets`.
+/// * The noise realization loop dominates runtime (Monte Carlo approach).
+///
+/// ## Returns
+///
+/// * `Ok((Some(best_orbit), best_rms))` – if a valid orbit was found,
+/// * `Ok((None, f64::MAX))` – if no valid orbit could be estimated,
+/// * `Err(OutfitError)` – if an error occurs during propagation or fitting.
+///
+/// ## See also
+///
+/// * [`compute_triplets`] – Generates candidate triplets from the observation set.
+/// * [`rms_orbit_error`] – Evaluates the quality of an orbit over the full arc.
+/// * [`GaussResult`] – Data structure holding the result of a single Gauss method run.
+/// * [`KeplerianElements`] – Orbital elements returned by successful preliminary orbit estimation.
+pub trait ObservationIOD {
     /// Estimate the best-fitting preliminary orbit from a full set of astrometric observations.
     ///
     /// This method evaluates all viable observation triplets over the entire observation set to
@@ -447,7 +590,9 @@ impl ObservationsExt for Observations {
             Vector3::from_column_slice(&errors_dec),
         )
     }
+}
 
+impl ObservationIOD for Observations {
     fn estimate_best_orbit(
         &mut self,
         state: &Outfit,
@@ -463,8 +608,14 @@ impl ObservationsExt for Observations {
         max_triplets: Option<u32>,
         gap_max: f64,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
+        println!("\n\n ____ Estimating best orbit from observations...");
+        println!("Estimating best orbit from {} observations", self.len());
+
+        println!("Applying batch RMS correction with gap max: {}", gap_max);
         // Apply uncertainty calibration based on RMS statistics from the error model
         self.apply_batch_rms_correction(error_model, gap_max);
+
+        println!("Computing triplets of observations...");
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
         let triplets = self.compute_triplets(
@@ -475,14 +626,21 @@ impl ObservationsExt for Observations {
             max_triplets,
         );
 
+        println!("Found {} valid triplets\n", triplets.len());
+
         let mut best_rms = f64::MAX;
         let mut best_orbit = None;
 
+        println!("Start triplet processing for orbit estimation...\n");
         // Iterate over each triplet to attempt orbit estimation
         for triplet in triplets {
             // Extract astrometric uncertainties for each observation in the triplet
             let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
 
+            println!(
+                "Processing triplet: {:?} with RA errors: {:?}, DEC errors: {:?}",
+                triplet.idx_obs, error_ra, error_dec
+            );
             // Generate multiple noisy realizations of the triplet to simulate measurement noise
             let realizations = triplet.generate_noisy_realizations(
                 &error_ra,
@@ -491,6 +649,12 @@ impl ObservationsExt for Observations {
                 noise_scale,
                 rng,
             )?;
+
+            println!(
+                "Generated {} noisy realizations for triplet: {:?}",
+                realizations.len(),
+                triplet.idx_obs
+            );
 
             // For each noisy realization, attempt orbit determination
             for realization in realizations {
@@ -522,6 +686,8 @@ impl ObservationsExt for Observations {
                 }
             }
         }
+
+        println!("End of initial orbit determination ___ \n\n",);
 
         // Return best orbit found (if any) and corresponding RMS score
         Ok((best_orbit, best_rms))

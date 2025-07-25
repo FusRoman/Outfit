@@ -210,6 +210,7 @@ pub trait TrajectoryExt {
         error_ra: Option<ArcSec>,
         error_dec: Option<ArcSec>,
     );
+
 }
 
 impl TrajectoryExt for TrajectorySet {
