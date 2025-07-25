@@ -55,35 +55,24 @@ fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
 /// # Returns
 /// A new `Vec<Observation>` containing the selected observations.
 fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize> {
-    if n == 0 {
-        return Vec::new();
+    match n {
+        0 => Vec::new(),
+        _ if max_keep <= 3 => {
+            let mid = n / 2;
+            vec![0, mid, n - 1]
+        }
+        _ if max_keep >= n => (0..n).collect(),
+        _ => {
+            let slots = max_keep - 2;
+            std::iter::once(0)
+                .chain((0..slots).map(move |i| {
+                    let fraction = (i + 1) as f64 / (slots + 1) as f64;
+                    1 + (fraction * (n - 2) as f64).floor() as usize
+                }))
+                .chain(std::iter::once(n - 1))
+                .collect()
+        }
     }
-
-    // If max_keep < 3, fallback to 3 representative points
-    if max_keep <= 3 {
-        let mid = n / 2;
-        return vec![0, mid, n - 1];
-    }
-
-    // If max_keep >= n, keep all indices
-    if max_keep >= n {
-        return (0..n).collect();
-    }
-
-    // General case: keep first and last, distribute others uniformly
-    let mut indices = Vec::with_capacity(max_keep);
-    indices.push(0);
-
-    let slots = max_keep - 2;
-    for i in 0..slots {
-        // Distribute indices between 1 and n-2 (inclusive)
-        let fraction = (i + 1) as f64 / (slots + 1) as f64;
-        let idx = 1 + (fraction * (n - 2) as f64).floor() as usize;
-        indices.push(idx);
-    }
-
-    indices.push(n - 1);
-    indices
 }
 
 /// Extension trait for [`Observations`] providing high-level operations
