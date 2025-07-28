@@ -13,26 +13,26 @@ fn test_80col_reader() {
 
     let obs_33803 = traj_set.get(&ObjectNumber::String("33803".into())).unwrap();
     assert_eq!(traj_set.len(), 1);
-    assert_eq!(obs_33803.len(), 1812);
-    assert_eq!(obs_33803[0].time, 43041.93932611111);
-    assert_eq!(obs_33803[0].ra, 6.278653268888574);
-    assert_eq!(obs_33803[0].dec, -0.008795489802689202);
+    assert_eq!(obs_33803.len(), 129);
+    assert_eq!(obs_33803[0].time, 60324.52016874074);
+    assert_eq!(obs_33803[0].ra, 3.5491391785131814);
+    assert_eq!(obs_33803[0].dec, -0.15949710761897423);
     assert_eq!(
         obs_33803[0].get_observer(&env_state).name,
-        Some("Uppsala-Kvistaberg".to_string())
+        Some("Mt. Lemmon Survey".to_string())
     );
 
     let path_file = Utf8Path::new("tests/data/8467.obs");
     traj_set.add_from_80col(&mut env_state, &path_file);
     assert_eq!(traj_set.len(), 2);
     let obs_8467 = traj_set.get(&ObjectNumber::String("8467".into())).unwrap();
-    assert_eq!(obs_8467.len(), 3748);
-    assert_eq!(obs_8467[0].time, 43785.35855925926);
-    assert_eq!(obs_8467[0].ra, 0.25517149996470095);
-    assert_eq!(obs_8467[0].dec, 0.17431960717974476);
+    assert_eq!(obs_8467.len(), 61);
+    assert_eq!(obs_8467[0].time, 60647.053230740734);
+    assert_eq!(obs_8467[0].ra, 0.10365423161131723);
+    assert_eq!(obs_8467[0].dec, 0.1400047372376524);
     assert_eq!(
         obs_8467[0].get_observer(&env_state).name,
-        Some("Palomar Mountain".to_string())
+        Some("ATLAS Chile, Rio Hurtado".to_string())
     );
 
     let path_file = Utf8Path::new("tests/data/K25D50B.obs");

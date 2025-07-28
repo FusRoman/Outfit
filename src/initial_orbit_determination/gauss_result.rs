@@ -1,5 +1,6 @@
 use crate::keplerian_element::KeplerianElements;
 use std::ops::Deref;
+use std::fmt;
 
 /// Result of the Gauss initial orbit determination method.
 ///
@@ -27,7 +28,7 @@ use std::ops::Deref;
 /// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – Struct representing the orbital elements.
 /// * [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit) – Main entry point that returns a `GaussResult`.
 /// * [`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html) – trait allowing ergonomic field access.
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum GaussResult {
     PrelimOrbit(KeplerianElements),
     CorrectedOrbit(KeplerianElements),
@@ -123,56 +124,33 @@ impl Deref for GaussResult {
     }
 }
 
-use std::fmt;
-
-impl fmt::Debug for GaussResult {
-    /// Pretty-print the GaussResult with label and full Keplerian elements.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let label = match self {
-            GaussResult::PrelimOrbit(_) => "Preliminary Orbit",
-            GaussResult::CorrectedOrbit(_) => "Corrected Orbit",
-        };
-
-        let KeplerianElements {
-            reference_epoch,
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node_longitude,
-            periapsis_argument,
-            mean_anomaly,
-        } = self.get_orbit();
-
-        writeln!(f, "{}:", label)?;
-        writeln!(f, "  Epoch (MJD TT):         {:.8}", reference_epoch)?;
-        writeln!(f, "  Semi-major axis (AU):   {:.12}", semi_major_axis)?;
-        writeln!(f, "  Eccentricity:            {:.12}", eccentricity)?;
-        writeln!(f, "  Inclination (rad):       {:.12}", inclination)?;
-        writeln!(
-            f,
-            "  Asc. node long. (rad):   {:.12}",
-            ascending_node_longitude
-        )?;
-        writeln!(f, "  Arg. of periapsis (rad): {:.12}", periapsis_argument)?;
-        writeln!(f, "  Mean anomaly (rad):      {:.12}", mean_anomaly)
-    }
-}
-
 impl fmt::Display for GaussResult {
-    /// Short summary of the GaussResult, suitable for logs or CLI output.
+    /// Pretty-print the orbital elements contained in a GaussResult.
+    ///
+    /// Outputs all six Keplerian elements with angles converted to degrees,
+    /// plus the reference epoch (MJD). The output is formatted for CLI or logs.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let label = match self {
-            GaussResult::PrelimOrbit(_) => "Prelim",
-            GaussResult::CorrectedOrbit(_) => "Corrected",
+            GaussResult::PrelimOrbit(_) => "[Prelim orbit]",
+            GaussResult::CorrectedOrbit(_) => "[Corrected orbit]",
         };
 
         let orb = self.get_orbit();
-        let inclination_deg = orb.inclination.to_degrees();
-        write!(
-            f,
-            "[{}] a = {:.6} AU, e = {:.5}, i = {:.5} deg @ epoch MJD {:.5}",
-            label, orb.semi_major_axis, orb.eccentricity, inclination_deg, orb.reference_epoch
-        )
+
+        // Convert all angular quantities to degrees
+        let i_deg = orb.inclination.to_degrees();
+        let omega_deg = orb.ascending_node_longitude.to_degrees();
+        let argp_deg = orb.periapsis_argument.to_degrees();
+        let m_deg = orb.mean_anomaly.to_degrees();
+
+        writeln!(f, "{}", label)?;
+        writeln!(f, "  Epoch (MJD): {:.5}", orb.reference_epoch)?;
+        writeln!(f, "  a   (AU)   : {:.6}", orb.semi_major_axis)?;
+        writeln!(f, "  e           : {:.6}", orb.eccentricity)?;
+        writeln!(f, "  i   (deg)  : {:.6}", i_deg)?;
+        writeln!(f, "  Ω   (deg)  : {:.6}", omega_deg)?;
+        writeln!(f, "  ω   (deg)  : {:.6}", argp_deg)?;
+        write!(f, "  M   (deg)  : {:.6}", m_deg)
     }
 }
 
@@ -223,28 +201,6 @@ mod gauss_results_tests {
     }
 
     #[test]
-    fn test_debug_format_contains_all_fields() {
-        let orbit = KeplerianElements {
-            reference_epoch: 59123.45678,
-            semi_major_axis: 2.987654321,
-            eccentricity: 0.234567,
-            inclination: 0.123456,
-            ascending_node_longitude: 1.234567,
-            periapsis_argument: 2.345678,
-            mean_anomaly: 3.456789,
-        };
-
-        let result = GaussResult::PrelimOrbit(orbit);
-        let output = format!("{:#?}", result);
-
-        assert!(output.contains("Preliminary Orbit"));
-        assert!(output.contains("Epoch (MJD TT):         59123.45678"));
-        assert!(output.contains("Semi-major axis (AU):   2.987654321"));
-        assert!(output.contains("Eccentricity:            0.234567"));
-        assert!(output.contains("Inclination (rad):       0.123456"));
-    }
-
-    #[test]
     fn test_display_format_summary() {
         let orbit = KeplerianElements {
             reference_epoch: 59001.5,
@@ -260,10 +216,10 @@ mod gauss_results_tests {
 
         let output = format!("{}", result);
 
-        assert!(output.starts_with("[Corrected]"));
-        assert!(output.contains("a = 1.234567 AU"));
-        assert!(output.contains("e = 0.10000"));
-        assert!(output.contains("i = 11.45916 deg"));
-        assert!(output.contains("epoch MJD 59001.50000"));
+        assert!(output.starts_with("[Corrected orbit]"));
+        assert!(output.contains("a   (AU)   : 1.234567"));
+        assert!(output.contains("e           : 0.100000"));
+        assert!(output.contains("i   (deg)  : 11.459156"));
+        assert!(output.contains("Epoch (MJD): 59001.50000"));
     }
 }

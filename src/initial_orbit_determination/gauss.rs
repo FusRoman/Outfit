@@ -80,7 +80,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::with_observer_position`] – preferred constructor when the observing site is known
-    pub fn new(
+    pub(crate) fn new(
         idx_obs: Vector3<usize>,
         ra: Vector3<f64>,
         dec: Vector3<f64>,
@@ -934,49 +934,14 @@ impl GaussObs {
 
 #[cfg(test)]
 pub(crate) mod gauss_test {
+
     use approx::assert_relative_eq;
+
+    use crate::keplerian_element::test_keplerian_element::assert_orbit_close;
 
     use super::*;
 
-    pub(crate) fn assert_orbit_close(
-        actual: &KeplerianElements,
-        expected: &KeplerianElements,
-        epsilon: f64,
-    ) {
-        assert_relative_eq!(
-            actual.reference_epoch,
-            expected.reference_epoch,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.semi_major_axis,
-            expected.semi_major_axis,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.eccentricity,
-            expected.eccentricity,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(actual.inclination, expected.inclination, epsilon = epsilon);
-        assert_relative_eq!(
-            actual.ascending_node_longitude,
-            expected.ascending_node_longitude,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.periapsis_argument,
-            expected.periapsis_argument,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.mean_anomaly,
-            expected.mean_anomaly,
-            epsilon = epsilon
-        );
-    }
-
-    pub fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
+    pub(crate) fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
         assert_eq!(a.idx_obs, b.idx_obs);
         assert_relative_eq!(a.ra, b.ra, max_relative = tol);
         assert_relative_eq!(a.dec, b.dec, max_relative = tol);
