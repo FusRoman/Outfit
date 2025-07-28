@@ -30,7 +30,7 @@ use crate::{
 ///
 /// This trait is intended to be implemented on:
 ///
-/// ```rust
+/// ```rust, ignore
 /// pub type Observations = SmallVec<[Observation; 6]>;
 /// ```
 ///
@@ -601,14 +601,8 @@ impl ObservationIOD for Observations {
         max_triplets: Option<u32>,
         gap_max: f64,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
-        println!("\n\n ____ Estimating best orbit from observations...");
-        println!("Estimating best orbit from {} observations", self.len());
-
-        println!("Applying batch RMS correction with gap max: {}", gap_max);
         // Apply uncertainty calibration based on RMS statistics from the error model
         self.apply_batch_rms_correction(error_model, gap_max);
-
-        println!("Computing triplets of observations...");
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
         let triplets = self.compute_triplets(
@@ -620,21 +614,14 @@ impl ObservationIOD for Observations {
             max_triplets,
         );
 
-        println!("Found {} valid triplets\n", triplets.len());
-
         let mut best_rms = f64::MAX;
         let mut best_orbit = None;
 
-        println!("Start triplet processing for orbit estimation...\n");
         // Iterate over each triplet to attempt orbit estimation
         for triplet in triplets {
             // Extract astrometric uncertainties for each observation in the triplet
             let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
 
-            println!(
-                "Processing triplet: {:?} with RA errors: {:?}, DEC errors: {:?}",
-                triplet.idx_obs, error_ra, error_dec
-            );
             // Generate multiple noisy realizations of the triplet to simulate measurement noise
             let realizations = triplet.generate_noisy_realizations(
                 &error_ra,
@@ -643,12 +630,6 @@ impl ObservationIOD for Observations {
                 noise_scale,
                 rng,
             )?;
-
-            println!(
-                "Generated {} noisy realizations for triplet: {:?}",
-                realizations.len(),
-                triplet.idx_obs
-            );
 
             // For each noisy realization, attempt orbit determination
             for realization in realizations {
@@ -681,8 +662,6 @@ impl ObservationIOD for Observations {
             }
         }
 
-        println!("End of initial orbit determination ___ \n\n",);
-
         // Return best orbit found (if any) and corresponding RMS score
         Ok((best_orbit, best_rms))
     }
@@ -693,7 +672,6 @@ mod test_obs_ext {
     use approx::assert_relative_eq;
     use camino::Utf8Path;
 
-    use crate::initial_orbit_determination::gauss::gauss_test::assert_orbit_close;
     use crate::{
         constants::TrajectorySet, error_models::ErrorModel,
         observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
@@ -984,7 +962,10 @@ mod test_obs_ext {
         use approx::assert_relative_eq;
         use rand::{rngs::StdRng, SeedableRng};
 
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        use crate::{
+            keplerian_element::test_keplerian_element::assert_orbit_close,
+            unit_test_global::OUTFIT_HORIZON_TEST,
+        };
 
         let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
 

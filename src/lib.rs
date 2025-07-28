@@ -5,7 +5,7 @@ mod equinoctial_element;
 pub mod initial_orbit_determination;
 pub mod jpl_ephem;
 mod kepler;
-mod keplerian_element;
+pub mod keplerian_element;
 pub mod observations;
 pub mod observers;
 mod orb_elem;

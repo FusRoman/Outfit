@@ -21,7 +21,7 @@ pub struct KeplerianElements {
 }
 
 impl KeplerianElements {
-    pub (crate) fn from_equinoctial_internal(
+    pub(crate) fn from_equinoctial_internal(
         reference_epoch: f64,
         semi_major_axis: f64,
         eccentricity_sin_lon: f64,
@@ -97,9 +97,48 @@ impl From<&KeplerianElements> for EquinoctialElements {
 }
 
 #[cfg(test)]
-mod test_keplerian_element {
+pub(crate) mod test_keplerian_element {
     use super::*;
     use crate::equinoctial_element::EquinoctialElements;
+    use approx::assert_relative_eq;
+
+    pub(crate) fn assert_orbit_close(
+        actual: &KeplerianElements,
+        expected: &KeplerianElements,
+        epsilon: f64,
+    ) {
+        assert_relative_eq!(
+            actual.reference_epoch,
+            expected.reference_epoch,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.semi_major_axis,
+            expected.semi_major_axis,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.eccentricity,
+            expected.eccentricity,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(actual.inclination, expected.inclination, epsilon = epsilon);
+        assert_relative_eq!(
+            actual.ascending_node_longitude,
+            expected.ascending_node_longitude,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.periapsis_argument,
+            expected.periapsis_argument,
+            epsilon = epsilon
+        );
+        assert_relative_eq!(
+            actual.mean_anomaly,
+            expected.mean_anomaly,
+            epsilon = epsilon
+        );
+    }
 
     #[test]
     fn test_keplerian_conversion() {
