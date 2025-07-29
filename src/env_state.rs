@@ -68,5 +68,4 @@ impl OutfitEnv {
             .read_to_string()
             .expect("Failed to read response body")
     }
-
 }

@@ -744,23 +744,19 @@ impl GaussObs {
             50,    // max iterations
         ) else {
             // If correction failed or diverged, return preliminary orbit
-            return Ok(GaussResult::PrelimOrbit(
-                self.compute_orbit_from_state(
-                    &asteroid_pos_all_time.column(1).into(),
-                    &asteroid_vel,
-                    reference_epoch,
-                ),
-            ));
+            return Ok(GaussResult::PrelimOrbit(self.compute_orbit_from_state(
+                &asteroid_pos_all_time.column(1).into(),
+                &asteroid_vel,
+                reference_epoch,
+            )));
         };
 
         // Correction succeeded; return refined orbit
-        Ok(GaussResult::CorrectedOrbit(
-            self.compute_orbit_from_state(
-                &corrected_pos.column(1).into(),
-                &corrected_vel,
-                corrected_epoch,
-            ),
-        ))
+        Ok(GaussResult::CorrectedOrbit(self.compute_orbit_from_state(
+            &corrected_pos.column(1).into(),
+            &corrected_vel,
+            corrected_epoch,
+        )))
     }
 
     /// Iteratively refine the asteroid's velocity and position at the central observation time.
