@@ -161,6 +161,7 @@ impl EquinoctialElements {
     /// * All lengths: UA
     /// * Time: days
     /// * Velocity: UA/day
+    #[allow(clippy::too_many_arguments)]
     fn compute_derivative(
         &self,
         t0: f64,
@@ -315,7 +316,7 @@ impl EquinoctialElements {
     ///   If `compute_derivatives` is `true`, returns:
     ///     - `dxde`: 6×3 matrix of partial derivatives of position w.r.t. orbital elements  
     ///     - `dvde`: 6×3 matrix of partial derivatives of velocity w.r.t. orbital elements  
-    ///   Otherwise, this value is `None`.
+    ///       Otherwise, this value is `None`.
     ///
     /// Units
     /// -----
