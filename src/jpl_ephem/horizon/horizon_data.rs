@@ -475,7 +475,7 @@ impl HorizonData {
     /// -------
     /// * An InterpResult struct containing the position, velocity, and acceleration
     ///   of the target body relative to the center body at the given ephemeris time.
-    ///  The position is in Km, velocity in Km/day, and acceleration in Km/day^2.
+    ///   The position is in Km, velocity in Km/day, and acceleration in Km/day^2.
     /// * The velocity and acceleration are optional, depending on the user request.
     pub fn ephemeris(
         &self,

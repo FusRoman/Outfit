@@ -115,7 +115,7 @@ impl NaifData {
     /// Returns
     /// -------
     /// * An `Option` containing a tuple of the summary, ephemeris records, and directory data.
-    /// If the target and center combination is not found, it returns `None`.
+    ///   If the target and center combination is not found, it returns `None`.
     fn get_records(
         &self,
         target: NaifIds,
@@ -137,8 +137,8 @@ impl NaifData {
     /// Returns
     /// -------
     /// * An `Option` containing a reference to the ephemeris record.
-    /// If the target and center combination is not found, or if the epoch is out of range,
-    /// it returns `None`.
+    ///   If the target and center combination is not found, or if the epoch is out of range,
+    ///   it returns `None`.
     fn get_record(
         &self,
         target: NaifIds,
@@ -166,7 +166,7 @@ impl NaifData {
     /// Returns
     /// --------
     /// * A tuple containing the position and velocity vectors in the J2000 frame.
-    /// The position and velocity vectors are in kilometers and kilometers per second, respectively.
+    ///   The position and velocity vectors are in kilometers and kilometers per second, respectively.
     pub fn ephemeris(&self, target: NaifIds, center: NaifIds, et_seconds: f64) -> InterpResult {
         let record = self
             .get_record(target, center, et_seconds)
