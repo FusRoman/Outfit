@@ -110,7 +110,6 @@ impl fmt::Display for SatelliteMassCenter {
 }
 
 #[cfg(test)]
-
 mod test_sat_mass {
     use super::*;
 
