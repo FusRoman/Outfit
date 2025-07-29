@@ -1,5 +1,5 @@
-use std::str::FromStr;
 use hifitime::{Epoch, TimeScale};
+use std::str::FromStr;
 
 /// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to modified julian date (MJD)
 ///
@@ -65,7 +65,7 @@ pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     let year = i32::from_str(parts[0]).map_err(|_| "invalid year")?;
     let month = u8::from_str(parts[1]).map_err(|_| "invalid month")?;
     let day_fraction = f64::from_str(parts[2]).map_err(|_| "invalid frac day")?;
-    
+
     // Separation of day and fraction day
     let day = day_fraction.trunc() as u8;
     let fraction = day_fraction - day as f64;
@@ -73,7 +73,8 @@ pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     let hour = (fraction * 24.0).trunc() as u8;
     let minute = ((fraction * 24.0 - hour as f64) * 60.0).trunc() as u8;
     let second = (((fraction * 24.0 - hour as f64) * 60.0 - minute as f64) * 60.0) as u8;
-    let nano = ((((fraction * 24.0 - hour as f64) * 60.0 - minute as f64) * 60.0 - second as f64) * 1e9) as u32;
+    let nano = ((((fraction * 24.0 - hour as f64) * 60.0 - minute as f64) * 60.0 - second as f64)
+        * 1e9) as u32;
 
     // Creation of epoch
     let epoch = Epoch::from_gregorian(year, month, day, hour, minute, second, nano, TimeScale::UTC);
@@ -81,7 +82,6 @@ pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     // Convert to MJD
     Ok(epoch.to_mjd_tt_days())
 }
-
 
 #[cfg(test)]
 mod time_test {

@@ -88,10 +88,16 @@ mod observations_test {
             parse_ra_to_deg("23 58 57.68"),
             Some((359.7403333333333, 2.777777777777778e-6))
         );
-        assert_eq!(parse_ra_to_deg("04 41 04.77"), Some((70.269875, 2.777777777777778e-6)));
+        assert_eq!(
+            parse_ra_to_deg("04 41 04.77"),
+            Some((70.269875, 2.777777777777778e-6))
+        );
         assert_eq!(parse_ra_to_deg("1 2 3.4.5"), None);
         assert_eq!(parse_ra_to_deg("1 2"), None);
-        assert_eq!(parse_ra_to_deg("06 50 13.370"), Some((102.55570833333333, 2.7777777777777776e-7)));
+        assert_eq!(
+            parse_ra_to_deg("06 50 13.370"),
+            Some((102.55570833333333, 2.7777777777777776e-7))
+        );
     }
 
     #[test]
@@ -111,7 +117,10 @@ mod observations_test {
         assert_eq!(parse_dec_to_deg("89 15 50.2.3"), None);
         assert_eq!(parse_dec_to_deg("89 15"), None);
 
-        assert_eq!(parse_dec_to_deg("-14 47 05.4"), Some((-14.784833333333333, 2.777777777777778e-5)));
+        assert_eq!(
+            parse_dec_to_deg("-14 47 05.4"),
+            Some((-14.784833333333333, 2.777777777777778e-5))
+        );
     }
 
     #[test]
@@ -120,8 +129,17 @@ mod observations_test {
             compute_accuracy("23.3", 1. / 3600.),
             Some(2.777777777777778e-5)
         );
-        assert_eq!(compute_accuracy("23", 1. / 3600.), Some(0.0002777777777777778));
-        assert_eq!(compute_accuracy("23.370", 1. / 3600.), Some(2.7777777777777776e-7));
-        assert_eq!(compute_accuracy("23.37", 1. / 3600.), Some(2.777777777777778e-6));
+        assert_eq!(
+            compute_accuracy("23", 1. / 3600.),
+            Some(0.0002777777777777778)
+        );
+        assert_eq!(
+            compute_accuracy("23.370", 1. / 3600.),
+            Some(2.7777777777777776e-7)
+        );
+        assert_eq!(
+            compute_accuracy("23.37", 1. / 3600.),
+            Some(2.777777777777778e-6)
+        );
     }
 }

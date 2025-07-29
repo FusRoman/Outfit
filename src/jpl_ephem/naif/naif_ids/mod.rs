@@ -164,10 +164,7 @@ mod test_naif_id {
             NaifIds::PMC(PlanetMassCenter::Mercury).to_string(),
             "Mercury"
         );
-        assert_eq!(
-            NaifIds::SMC(SatelliteMassCenter::Moon).to_string(),
-            "Moon"
-        );
+        assert_eq!(NaifIds::SMC(SatelliteMassCenter::Moon).to_string(), "Moon");
         assert_eq!(
             NaifIds::SMC(SatelliteMassCenter::Phobos).to_string(),
             "Phobos"
@@ -180,9 +177,18 @@ mod test_naif_id {
 
     #[test]
     fn test_naif_ids_try_from() {
-        assert_eq!(NaifIds::try_from(0).unwrap(), NaifIds::SSB(SolarSystemBary::SSB));
-        assert_eq!(NaifIds::try_from(10).unwrap(), NaifIds::SSB(SolarSystemBary::Sun));
-        assert_eq!(NaifIds::try_from(1).unwrap(), NaifIds::PB(PlanetaryBary::Mercury));
+        assert_eq!(
+            NaifIds::try_from(0).unwrap(),
+            NaifIds::SSB(SolarSystemBary::SSB)
+        );
+        assert_eq!(
+            NaifIds::try_from(10).unwrap(),
+            NaifIds::SSB(SolarSystemBary::Sun)
+        );
+        assert_eq!(
+            NaifIds::try_from(1).unwrap(),
+            NaifIds::PB(PlanetaryBary::Mercury)
+        );
         assert_eq!(
             NaifIds::try_from(199).unwrap(),
             NaifIds::PMC(PlanetMassCenter::Mercury)

@@ -155,7 +155,6 @@ impl fmt::Display for JPLEphemHeader {
     }
 }
 
-
 #[cfg(test)]
 mod test_jpl_header {
     use super::*;
@@ -168,7 +167,7 @@ mod test_jpl_header {
             start_ephem: "31-DEC-1549 00:00".to_string(),
             end_ephem: "25-JAN-2650 00:00".to_string(),
             start_jd: 2287184.5,
-            end_jd: 2688976.5
+            end_jd: 2688976.5,
         };
 
         let expected = r#"+ JPL Ephemeris Header +                                +

@@ -1,9 +1,9 @@
 use crate::observations::observations::Observation;
 use crate::observers::observers::Observer;
-use std::collections::HashMap;
-use std::sync::Arc;
 use ahash::RandomState;
 use smallvec::SmallVec;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::initial_orbit_determination::gauss::GaussObs;
 
@@ -51,7 +51,7 @@ pub type MJD = f64; // time in modified julian date
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ObjectNumber {
     Int(u32),
-    String(String)
+    String(String),
 }
 
 pub type Observations = SmallVec<[Observation; 6]>;

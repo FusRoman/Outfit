@@ -1,6 +1,6 @@
 use crate::keplerian_element::KeplerianElements;
-use std::ops::Deref;
 use std::fmt;
+use std::ops::Deref;
 
 /// Result of the Gauss initial orbit determination method.
 ///

@@ -215,9 +215,9 @@ mod test_naif_file {
     use crate::jpl_ephem::naif::naif_ids::{
         planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
     };
-    use hifitime::Epoch;
     #[cfg(feature = "jpl-download")]
     use crate::unit_test_global::JPL_EPHEM_NAIF;
+    use hifitime::Epoch;
 
     #[test]
     #[cfg(feature = "jpl-download")]

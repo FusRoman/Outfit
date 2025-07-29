@@ -128,7 +128,10 @@ pub(crate) fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
 
 #[cfg(test)]
 mod jpl_request_test {
-    use crate::{error_models::ErrorModel, time::{date_to_mjd, mjd_to_jd}};
+    use crate::{
+        error_models::ErrorModel,
+        time::{date_to_mjd, mjd_to_jd},
+    };
 
     use super::*;
 
