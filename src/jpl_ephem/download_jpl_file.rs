@@ -147,15 +147,15 @@ impl EphemFilePath {
     /// The file should be located in the OS cache directory.
     /// On linux, the cache directory is ~/.cache/outfit_cache/jpl_ephem
     /// On windows, the cache directory is C:\Users\<username>\AppData\Local\outfit_cache\jpl_ephem
-    /// 
+    ///
     /// The full path after jpl_ephem should be:
     /// * jpl_horizon/<filename> for JPL Horizon files
     /// * naif/<filename> for NAIF files
-    /// 
-    /// If the file does not exist and the feature 'jpl-download' is activated, 
+    ///
+    /// If the file does not exist and the feature 'jpl-download' is activated,
     /// the file will be downloaded from the JPL website.
     /// Otherwise, an error will be returned.
-    /// 
+    ///
     /// Arguments
     /// ---------
     /// * `file_source`: the source of the ephemeris file

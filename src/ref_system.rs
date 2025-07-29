@@ -817,7 +817,7 @@ fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
 
 /// Apply stellar aberration correction to a relative position vector.
 ///
-/// This function computes the apparent position of a target object by applying 
+/// This function computes the apparent position of a target object by applying
 /// the first-order correction for stellar aberration due to the observer's velocity.
 /// It assumes the classical limit (v ≪ c), using a linear time-delay model.
 ///

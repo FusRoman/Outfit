@@ -2,6 +2,7 @@ pub mod constants;
 mod conversion;
 pub mod env_state;
 mod equinoctial_element;
+pub mod error_models;
 pub mod initial_orbit_determination;
 pub mod jpl_ephem;
 mod kepler;
@@ -13,7 +14,6 @@ pub mod outfit;
 pub mod outfit_errors;
 mod ref_system;
 pub mod time;
-pub mod error_models;
 
 #[cfg(all(test, feature = "jpl-download"))]
 pub(crate) mod unit_test_global {
@@ -22,7 +22,11 @@ pub(crate) mod unit_test_global {
     use camino::Utf8Path;
 
     use crate::{
-        constants::TrajectorySet, error_models::ErrorModel, jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData}, observations::trajectory_ext::TrajectoryExt, outfit::Outfit
+        constants::TrajectorySet,
+        error_models::ErrorModel,
+        jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
+        observations::trajectory_ext::TrajectoryExt,
+        outfit::Outfit,
     };
 
     pub(crate) static OUTFIT_NAIF_TEST: LazyLock<Outfit> =

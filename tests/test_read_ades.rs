@@ -8,12 +8,21 @@ use outfit::outfit::Outfit;
 fn test_read_ades() {
     let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
-    let mut traj_set =
-        TrajectorySet::new_from_ades(&mut outfit, &Utf8Path::new("tests/data/example_ades.xml"), None, None);
+    let mut traj_set = TrajectorySet::new_from_ades(
+        &mut outfit,
+        &Utf8Path::new("tests/data/example_ades.xml"),
+        None,
+        None,
+    );
     assert_eq!(traj_set.len(), 4);
     assert_eq!(traj_set.get(&ObjectNumber::Int(1234457)).unwrap().len(), 1);
 
-    traj_set.add_from_ades(&mut outfit, &Utf8Path::new("tests/data/example_ades2.xml"), None, None);
+    traj_set.add_from_ades(
+        &mut outfit,
+        &Utf8Path::new("tests/data/example_ades2.xml"),
+        None,
+        None,
+    );
 
     assert_eq!(traj_set.len(), 7);
     let traj = traj_set
@@ -26,7 +35,12 @@ fn test_read_ades() {
         "University of Hawaii 88-inch telescope, Maunakea".to_string()
     );
 
-    traj_set.add_from_ades(&mut outfit, &Utf8Path::new("tests/data/flat_ades.xml"), None, None);
+    traj_set.add_from_ades(
+        &mut outfit,
+        &Utf8Path::new("tests/data/flat_ades.xml"),
+        None,
+        None,
+    );
     assert_eq!(traj_set.len(), 41);
 
     let traj = traj_set
