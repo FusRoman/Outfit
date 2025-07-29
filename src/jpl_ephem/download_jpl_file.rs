@@ -58,6 +58,7 @@ impl TryFrom<&str> for EphemFileSource {
 }
 
 impl EphemFileSource {
+    #[cfg(feature = "jpl-download")]
     fn get_baseurl(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/",
@@ -67,6 +68,7 @@ impl EphemFileSource {
         }
     }
 
+    #[cfg(feature = "jpl-download")]
     fn get_version_url(&self) -> String {
         let base_url = self.get_baseurl();
         match self {
