@@ -1,30 +1,20 @@
+#![cfg(feature = "jpl-download")]
+
 mod common;
 
-#[cfg(feature = "jpl-download")]
+use crate::common::assert_orbit_close;
 use approx::assert_relative_eq;
-
-#[cfg(feature = "jpl-download")]
 use camino::Utf8Path;
-
 use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::error_models::ErrorModel;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
-
-#[cfg(feature = "jpl-download")]
 use outfit::keplerian_element::KeplerianElements;
-
 use outfit::observations::observations_ext::ObservationIOD;
-
-#[cfg(feature = "jpl-download")]
 use outfit::observations::trajectory_ext::TrajectoryExt;
-
 use outfit::outfit::Outfit;
 use outfit::outfit_errors::OutfitError;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-
-#[cfg(feature = "jpl-download")]
-use crate::common::assert_orbit_close;
 
 fn run_iod(
     env_state: &mut Outfit,
@@ -53,7 +43,7 @@ fn run_iod(
 }
 
 #[test]
-#[cfg(feature = "jpl-download")]
+
 fn test_gauss_iod() {
     let test_epsilon = 1e-16;
 

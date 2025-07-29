@@ -275,7 +275,18 @@ pub(crate) fn generate_triplets(
 #[cfg(test)]
 mod triplets_iod_tests {
 
+    #[cfg(feature = "jpl-download")]
+    use approx::assert_relative_eq;
+
     use super::*;
+
+    #[cfg(feature = "jpl-download")]
+    pub(crate) fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
+        assert_eq!(a.idx_obs, b.idx_obs);
+        assert_relative_eq!(a.ra, b.ra, max_relative = tol);
+        assert_relative_eq!(a.dec, b.dec, max_relative = tol);
+        assert_relative_eq!(a.time, b.time, max_relative = tol);
+    }
 
     #[test]
     #[cfg(feature = "jpl-download")]
@@ -284,7 +295,6 @@ mod triplets_iod_tests {
 
         use crate::{
             constants::TrajectorySet, error_models::ErrorModel,
-            initial_orbit_determination::gauss::gauss_test::assert_gauss_obs_approx_eq,
             observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
         };
 

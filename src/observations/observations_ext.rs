@@ -728,6 +728,8 @@ mod test_obs_ext {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_rms_trajectory() {
+        use nalgebra::Matrix3;
+
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
         let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
@@ -738,17 +740,18 @@ mod test_obs_ext {
 
         traj.apply_batch_rms_correction(&ErrorModel::FCCT14, 8.0 / 24.0);
 
-        let triplets = GaussObs::new(
-            Vector3::new(34, 35, 36),
-            [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
-            [[
+        let triplets = GaussObs {
+            idx_obs: Vector3::new(34, 35, 36),
+            ra: [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
+            dec: [[
                 0.77917805235018101,
                 0.77908666497129186,
                 0.77899653810797365,
             ]]
             .into(),
-            [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
-        );
+            time: [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
+            observer_position: Matrix3::zeros(),
+        };
 
         let kepler = KeplerianElements {
             reference_epoch: 57049.242334573748,

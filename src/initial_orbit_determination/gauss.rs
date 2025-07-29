@@ -54,48 +54,6 @@ pub(crate) struct GaussObs {
 }
 
 impl GaussObs {
-    /// Create a new `GaussObs` instance from raw observational data.
-    ///
-    /// This constructor initializes the `GaussObs` struct using only the observational content:
-    /// right ascension, declination, observation times, and their corresponding indices. It does
-    /// **not** compute the observer's heliocentric position — the `observer_position` matrix is
-    /// initialized to zero and must be populated separately if needed (e.g., using [`with_observer_position`]).
-    ///
-    /// Arguments
-    /// ---------
-    /// * `idx_obs`: indices of the three observations in the full dataset.
-    /// * `ra`: right ascensions [radians] of the observations (ICRS).
-    /// * `dec`: declinations [radians] of the observations (ICRS).
-    /// * `mjd_time`: observation times [MJD TT].
-    ///
-    /// Returns
-    /// --------
-    /// * A `GaussObs` struct containing the input values and an empty observer position matrix.
-    ///
-    /// Remarks
-    /// -------
-    /// * Use this constructor when only the observational data is available, and the observer geometry
-    ///   will be computed separately.
-    /// * The ordering of RA/DEC/time must be consistent — each index `i` corresponds to a unique epoch.
-    ///
-    /// # See also
-    /// * [`GaussObs::with_observer_position`] – preferred constructor when the observing site is known
-    #[cfg(test)]
-    pub(crate) fn new(
-        idx_obs: Vector3<usize>,
-        ra: Vector3<f64>,
-        dec: Vector3<f64>,
-        mjd_time: Vector3<f64>,
-    ) -> GaussObs {
-        GaussObs {
-            idx_obs,
-            ra,
-            dec,
-            time: mjd_time,
-            observer_position: Matrix3::zeros(),
-        }
-    }
-
     /// Construct a `GaussObs` object from observation data and observer position.
     ///
     /// This constructor initializes a `GaussObs` instance using raw observational inputs (RA/DEC/time)
@@ -456,9 +414,7 @@ impl GaussObs {
                     .map(|complex| complex.re)
                     .collect::<Vec<f64>>())
             }
-            StopReason::Failed(_) => {
-                Err(OutfitError::PolynomialRootFindingFailed)
-            }
+            StopReason::Failed(_) => Err(OutfitError::PolynomialRootFindingFailed),
         }
     }
 
@@ -936,26 +892,24 @@ impl GaussObs {
 #[cfg(test)]
 pub(crate) mod gauss_test {
 
-    use approx::assert_relative_eq;
-
-    use crate::keplerian_element::test_keplerian_element::assert_orbit_close;
-
     use super::*;
-
-    pub(crate) fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
-        assert_eq!(a.idx_obs, b.idx_obs);
-        assert_relative_eq!(a.ra, b.ra, max_relative = tol);
-        assert_relative_eq!(a.dec, b.dec, max_relative = tol);
-        assert_relative_eq!(a.time, b.time, max_relative = tol);
-    }
+    use crate::keplerian_element::test_keplerian_element::assert_orbit_close;
 
     #[test]
     fn test_gauss_prelim() {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
-            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
+            dec: Vector3::new(
+                1.082_468_037_385_525,
+                0.943_580_504_794_621_6,
+                0.827_376_240_789_998_6,
+            ),
+            time: Vector3::new(
+                57028.479297592596,
+                57_049.245_147_592_59,
+                57_063.977_117_592_59,
+            ),
             observer_position: Matrix3::zeros(),
         };
 
@@ -1021,8 +975,16 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
-            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
+            dec: Vector3::new(
+                1.082_468_037_385_525,
+                0.943_580_504_794_621_6,
+                0.827_376_240_789_998_6,
+            ),
+            time: Vector3::new(
+                57028.479297592596,
+                57_049.245_147_592_59,
+                57_063.977_117_592_59,
+            ),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
@@ -1083,8 +1045,16 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
-            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
+            dec: Vector3::new(
+                1.082_468_037_385_525,
+                0.943_580_504_794_621_6,
+                0.827_376_240_789_998_6,
+            ),
+            time: Vector3::new(
+                57028.479297592596,
+                57_049.245_147_592_59,
+                57_063.977_117_592_59,
+            ),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
@@ -1152,8 +1122,16 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
-            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
+            dec: Vector3::new(
+                1.082_468_037_385_525,
+                0.943_580_504_794_621_6,
+                0.827_376_240_789_998_6,
+            ),
+            time: Vector3::new(
+                57028.479297592596,
+                57_049.245_147_592_59,
+                57_063.977_117_592_59,
+            ),
             observer_position: Matrix3::zeros(),
         };
         let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
@@ -1188,8 +1166,16 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6894680985108945, 1.6898614520910629, 1.7526450904422723),
-            dec: Vector3::new(1.0825984522657437, 0.943_679_018_934_623_1, 0.827_517_321_571_201_4),
-            time: Vector3::new(57_028.454_047_592_59, 57_049.231_857_592_59, 57_063.959_487_592_59),
+            dec: Vector3::new(
+                1.0825984522657437,
+                0.943_679_018_934_623_1,
+                0.827_517_321_571_201_4,
+            ),
+            time: Vector3::new(
+                57_028.454_047_592_59,
+                57_049.231_857_592_59,
+                57_063.959_487_592_59,
+            ),
             observer_position: Matrix3::new(
                 -0.264_135_633_607_079,
                 -0.588_973_552_650_573_5,
@@ -1253,9 +1239,21 @@ pub(crate) mod gauss_test {
 
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
-            ra: Vector3::new(1.6894680552416277, 1.689_861_821_442_152, 1.7526488678231147),
-            dec: Vector3::new(1.0825994437405373, 0.943_679_863_334_145, 0.827_517_360_507_228_6),
-            time: Vector3::new(57_028.454_047_592_59, 57_049.231_857_592_59, 57_063.959_487_592_59),
+            ra: Vector3::new(
+                1.6894680552416277,
+                1.689_861_821_442_152,
+                1.7526488678231147,
+            ),
+            dec: Vector3::new(
+                1.0825994437405373,
+                0.943_679_863_334_145,
+                0.827_517_360_507_228_6,
+            ),
+            time: Vector3::new(
+                57_028.454_047_592_59,
+                57_049.231_857_592_59,
+                57_063.959_487_592_59,
+            ),
             observer_position: Matrix3::new(
                 -0.264_135_633_607_079,
                 -0.588_973_552_650_573_5,
@@ -1293,8 +1291,16 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
-            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
+            dec: Vector3::new(
+                1.082_468_037_385_525,
+                0.943_580_504_794_621_6,
+                0.827_376_240_789_998_6,
+            ),
+            time: Vector3::new(
+                57028.479297592596,
+                57_049.245_147_592_59,
+                57_063.977_117_592_59,
+            ),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
