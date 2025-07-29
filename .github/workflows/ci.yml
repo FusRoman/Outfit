@@ -12,7 +12,6 @@ jobs:
 
     strategy:
       matrix:
-        # Deux variantes: sans feature et avec jpl-download
         include:
           - name: Default features
             features: ""
@@ -85,5 +84,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: check version
+        run: |
+          rustc --version
+          cargo clippy --version
       - name: Run cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
