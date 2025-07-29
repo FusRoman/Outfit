@@ -56,7 +56,7 @@ pub(crate) fn parquet_to_trajset(
             all_fields
                 .iter()
                 .position(|f| f.name() == *name)
-                .unwrap_or_else(|| panic!("Column '{}' not found in schema", name))
+                .unwrap_or_else(|| panic!("Column '{name}' not found in schema"))
         })
         .collect();
 

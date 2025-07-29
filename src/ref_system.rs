@@ -82,14 +82,12 @@ pub fn rotpn(
 ) {
     if !chkref(rsys1, epoch1) {
         panic!(
-            "ERROR: Unsupported starting reference system {} {}",
-            rsys1, epoch1
+            "ERROR: Unsupported starting reference system {rsys1} {epoch1}"
         );
     }
     if !chkref(rsys2, epoch2) {
         panic!(
-            "ERROR: Unsupported final reference system {} {}",
-            rsys2, epoch2
+            "ERROR: Unsupported final reference system {rsys2} {epoch2}"
         );
     }
 

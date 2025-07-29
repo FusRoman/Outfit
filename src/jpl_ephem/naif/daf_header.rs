@@ -57,7 +57,7 @@ impl fmt::Display for DAFHeader {
             value = VALUE_WIDTH + 1
         );
 
-        writeln!(f, "{}", border)?;
+        writeln!(f, "{border}")?;
         writeln!(
             f,
             "| {:<label$}| {:<value$}|",
@@ -66,7 +66,7 @@ impl fmt::Display for DAFHeader {
             label = LABEL_WIDTH,
             value = VALUE_WIDTH
         )?;
-        writeln!(f, "{}", border)?;
+        writeln!(f, "{border}")?;
 
         writeln!(
             f,
@@ -133,7 +133,7 @@ impl fmt::Display for DAFHeader {
             value = VALUE_WIDTH
         )?;
 
-        writeln!(f, "{}", border)
+        writeln!(f, "{border}")
     }
 }
 
@@ -168,7 +168,7 @@ mod test_daf_header {
 | Binary Format     | LTL-IEEE (e.g., BIG-IEEE or LTL-IEEE)             |
 +-------------------+---------------------------------------------------+
 "#;
-        let output = format!("{}", header);
+        let output = format!("{header}");
         assert_eq!(output, expected);
     }
 }

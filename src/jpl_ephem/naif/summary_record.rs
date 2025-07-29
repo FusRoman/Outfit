@@ -67,10 +67,10 @@ impl fmt::Display for Summary {
         };
 
         let fields = vec![
-            ("start_epoch", format!("{}", start)),
-            ("end_epoch", format!("{}", end)),
-            ("target", format!("{}", naif_target)),
-            ("center", format!("{}", naif_center)),
+            ("start_epoch", format!("{start}")),
+            ("end_epoch", format!("{end}")),
+            ("target", format!("{naif_target}")),
+            ("center", format!("{naif_center}")),
             ("frame_id", self.frame_id.to_string()),
             ("data_type", naif_type.to_string()),
             ("initial_addr", self.initial_addr.to_string()),
@@ -97,7 +97,7 @@ impl fmt::Display for Summary {
         writeln!(f, "{border}")?;
 
         for (label, value) in fields {
-            writeln!(f, "| {:<label_width$} | {:<value_width$} |", label, value,)?;
+            writeln!(f, "| {label:<label_width$} | {value:<value_width$} |",)?;
         }
 
         writeln!(f, "{border}")
@@ -135,7 +135,7 @@ mod test_summary {
 +--------------+-------------------------+
 "#;
 
-        let output = format!("{}", summary);
+        let output = format!("{summary}");
         assert_eq!(output, expected);
     }
 }

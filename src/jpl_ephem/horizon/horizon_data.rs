@@ -332,7 +332,7 @@ impl HorizonData {
 
         let mut file =
             BufReader::new(File::open(ephem_path.path()).unwrap_or_else(|_| {
-                panic!("Failed to open the JPL ephemeris file: {}", ephem_path)
+                panic!("Failed to open the JPL ephemeris file: {ephem_path}")
             }));
 
         let mut file_data = vec![0u8; 1 << 12];
@@ -382,7 +382,7 @@ impl HorizonData {
 
         HorizonData {
             header: HorizonHeader {
-                jpl_version: format!("DE{}", numde),
+                jpl_version: format!("DE{numde}"),
                 ipt,
                 start_period: ss[0],
                 end_period: ss[1],
@@ -447,7 +447,7 @@ impl HorizonData {
         let records = &self.records[nr];
         let record_body = records
             .get(&body)
-            .unwrap_or_else(|| panic!("Failed to get record for body {} in block {}", body, nr));
+            .unwrap_or_else(|| panic!("Failed to get record for body {body} in block {nr}"));
 
         let ipt_body = self.header.ipt[body as usize];
         let n_subs = ipt_body[2] as usize;

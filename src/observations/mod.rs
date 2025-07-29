@@ -314,7 +314,7 @@ pub(crate) fn extract_80col(
             .filter_map(|line| match from_80col(env_state, line) {
                 Ok(obs) => Some(obs),
                 Err(OutfitError::Parsing80ColumnFileError(ParseObsError::NotCCDObs)) => None,
-                Err(e) => panic!("Error parsing line: {:?}", e),
+                Err(e) => panic!("Error parsing line: {e:?}"),
             })
             .collect(),
         ObjectNumber::String(object_number),

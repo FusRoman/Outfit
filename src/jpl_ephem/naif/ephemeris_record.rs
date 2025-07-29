@@ -211,8 +211,8 @@ impl fmt::Display for EphemerisRecord {
         let radius = Duration::from_seconds(self.radius);
 
         // Conversion des champs complexes en String pour mesurer leur largeur
-        let mid_str = format!("{}", mid);
-        let radius_str = format!("{}", radius);
+        let mid_str = format!("{mid}");
+        let radius_str = format!("{radius}");
 
         // Détermination de la largeur max pour les valeurs à gauche et droite
         let label_width = 16;
@@ -234,7 +234,7 @@ impl fmt::Display for EphemerisRecord {
             label = label_width + 2,
             value = value_width + 2
         )?;
-        writeln!(f, "{}", border_header)?;
+        writeln!(f, "{border_header}")?;
         writeln!(
             f,
             "| {:<label$} | {:<value$} |",
@@ -252,7 +252,7 @@ impl fmt::Display for EphemerisRecord {
             value = value_width
         )?;
 
-        writeln!(f, "{}", border_header)?;
+        writeln!(f, "{border_header}")?;
 
         // Affichage des coefficients Chebyshev
         writeln!(
@@ -263,7 +263,7 @@ impl fmt::Display for EphemerisRecord {
             label = label_width,
             value = value_width
         )?;
-        writeln!(f, "{}", border_header)?;
+        writeln!(f, "{border_header}")?;
 
         for (axis, coeffs) in &[("X", &self.x), ("Y", &self.y), ("Z", &self.z)] {
             writeln!(
@@ -277,7 +277,7 @@ impl fmt::Display for EphemerisRecord {
             for chunk in coeffs.chunks(4) {
                 let line = chunk
                     .iter()
-                    .map(|c| format!("{:>12.4e}", c))
+                    .map(|c| format!("{c:>12.4e}"))
                     .collect::<Vec<_>>()
                     .join(" ");
                 writeln!(
@@ -289,7 +289,7 @@ impl fmt::Display for EphemerisRecord {
                     value = value_width
                 )?;
             }
-            writeln!(f, "{}", border_header)?;
+            writeln!(f, "{border_header}")?;
         }
 
         Ok(())
@@ -378,7 +378,7 @@ mod test_ephemeris_record {
 |                  |    8.0082e-9                                            |
 +------------------+---------------------------------------------------------+
 "#;
-        let output = format!("{}", record);
+        let output = format!("{record}");
         assert_eq!(output, expected);
     }
 

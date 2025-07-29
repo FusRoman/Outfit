@@ -102,7 +102,7 @@ mod test_directory {
             n_records: 25112,
         };
 
-        let output = format!("{}", dir_data);
+        let output = format!("{dir_data}");
         let expected_output = r#"+----------------+----------------------------+
 | Field          | Value                      |
 +----------------+----------------------------+

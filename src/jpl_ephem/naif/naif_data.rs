@@ -36,7 +36,7 @@ impl NaifData {
     pub fn read_naif_file(file_path: &EphemFilePath) -> Self {
         let mut file =
             BufReader::new(File::open(file_path.path()).unwrap_or_else(|_| {
-                panic!("Failed to open the JPL ephemeris file: {}", file_path)
+                panic!("Failed to open the JPL ephemeris file: {file_path}")
             }));
 
         let mut buffer = [0u8; 1 << 10];
@@ -71,7 +71,7 @@ impl NaifData {
         let (_, nsum) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
 
         // ss is the size of the summary record
-        let ss = daf_header.nd as usize + ((daf_header.ni as usize + 1) / 2);
+        let ss = daf_header.nd as usize + (daf_header.ni as usize).div_ceil(2);
 
         let mut jpl_data: DafRecords = HashMap::new();
 
@@ -172,8 +172,7 @@ impl NaifData {
             .get_record(target, center, et_seconds)
             .unwrap_or_else(|| {
                 panic!(
-                    "Failed to get ephemeris record for target: {:?}, center: {:?} at epoch: {}",
-                    target, center, et_seconds
+                    "Failed to get ephemeris record for target: {target:?}, center: {center:?} at epoch: {et_seconds}"
                 )
             });
 
@@ -197,7 +196,7 @@ impl NaifData {
                 "+{:-^78}+",
                 format!(" Target: {}, Center: {} ", target, center)
             );
-            println!("{}", summary); // Use `Display` for `Summary`
+            println!("{summary}"); // Use `Display` for `Summary`
             println!(
                 "| {:<76} |",
                 format!(

@@ -127,6 +127,6 @@ impl FromStr for JPLHorizonVersion {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        JPLHorizonVersion::from_str(s).ok_or_else(|| format!("Invalid JPL Horizon version: {}", s))
+        JPLHorizonVersion::from_str(s).ok_or_else(|| format!("Invalid JPL Horizon version: {s}"))
     }
 }

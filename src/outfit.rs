@@ -68,7 +68,7 @@ impl Outfit {
     pub fn get_observer_from_mpc_code(&self, mpc_code: &MpcCode) -> Arc<Observer> {
         self.get_observatories()
             .get(mpc_code)
-            .unwrap_or_else(|| panic!("MPC code not found: {}", mpc_code))
+            .unwrap_or_else(|| panic!("MPC code not found: {mpc_code}"))
             .clone()
     }
 
