@@ -6,7 +6,7 @@ use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use crate::{
     constants::{ObjectNumber, TrajectorySet, JDTOMJD},
-    observations::observations::Observation,
+    observations::Observation,
 };
 use arrow_array::array::{Float64Array, UInt32Array};
 use camino::Utf8Path;

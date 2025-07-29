@@ -4,7 +4,6 @@ use super::orb_elem::eccentricity_control;
 use core::fmt;
 use nalgebra::Vector3;
 use std::f64::consts::PI;
-use std::f64::EPSILON;
 
 fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
     const JMAX: usize = 70;
@@ -227,11 +226,9 @@ fn solve_kepuni(
     convergency: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
     const JMAX: usize = 100;
-    let contr = convergency.unwrap_or(100.0 * EPSILON);
+    let contr = convergency.unwrap_or(100.0 * f64::EPSILON);
 
-    let Some((mut psi, alpha)) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr) else {
-        return None;
-    };
+    let (mut psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr)?;
 
     // Méthode de Newton pour résoudre l'équation universelle de Kepler
     for _ in 0..JMAX {
@@ -242,7 +239,7 @@ fn solve_kepuni(
 
         let dpsi = -fun / funp;
 
-        if s3.abs() > 1e-2 / EPSILON {
+        if s3.abs() > 1e-2 / f64::EPSILON {
             return None; // Problème de convergence
         }
 
@@ -286,7 +283,7 @@ pub fn velocity_correction(
         return Err(VelocityCorrectionError);
     };
 
-    let eps = 1e3 * EPSILON;
+    let eps = 1e3 * f64::EPSILON;
     let alpha = 2. * energy;
 
     let Some((_, _, _, s2, s3)) = solve_kepuni(dt, r2, sig0, mu, alpha, ecc, Some(eps)) else {

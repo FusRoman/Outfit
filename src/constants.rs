@@ -1,4 +1,4 @@
-use crate::observations::observations::Observation;
+use crate::observations::Observation;
 use crate::observers::observers::Observer;
 use ahash::RandomState;
 use smallvec::SmallVec;

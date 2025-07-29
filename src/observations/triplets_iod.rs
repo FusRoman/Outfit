@@ -11,7 +11,7 @@ use std::collections::BinaryHeap;
 
 use crate::constants::Observations;
 use crate::initial_orbit_determination::gauss::GaussObs;
-use crate::observations::observations::Observation;
+use crate::observations::Observation;
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 

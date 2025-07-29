@@ -6,7 +6,7 @@ use crate::outfit::Outfit;
 use camino::Utf8Path;
 
 use super::ades_reader::parse_ades;
-use super::observations::{extract_80col, observation_from_vec};
+use super::{extract_80col, observation_from_vec};
 use super::parquet_reader::parquet_to_trajset;
 
 /// A trait for the TrajectorySet type def.
