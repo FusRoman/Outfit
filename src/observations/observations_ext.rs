@@ -680,6 +680,7 @@ mod test_obs_ext {
     use super::*;
 
     #[test]
+    #[cfg(feature = "jpl-download")]
     fn test_select_rms_interval() {
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
