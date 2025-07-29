@@ -21,7 +21,7 @@ use hifitime::ut1::Ut1Provider;
 /// Arguments
 /// ---------
 /// * `observers`: an array of references `[&Observer; 3]`, each containing the geodetic parameters
-///                (longitude, normalized radius components) of one observer.
+///   (longitude, normalized radius components) of one observer.
 /// * `mjd_tt`: a [`Vector3<MJD>`] of observation epochs in Terrestrial Time (TT), one per observer.
 /// * `state`: an [`Outfit`] providing access to:
 ///     - the JPL planetary ephemeris (`get_jpl_ephem()`),

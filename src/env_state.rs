@@ -14,7 +14,7 @@ use ureq::{
 /// * `http_client` - A reqwest client used to make HTTP requests
 /// * `ut1_provider` - A provider used to get the current UT1 time
 /// * `observatories` - A lazy map of observatories from the Minor Planet Center.
-///     The key is the MPC code and the value is the observer
+///   The key is the MPC code and the value is the observer
 #[derive(Debug, Clone)]
 pub struct OutfitEnv {
     pub http_client: Agent,
