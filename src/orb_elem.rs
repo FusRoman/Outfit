@@ -17,8 +17,8 @@ fn prodmm(a: &mut [[f64; 3]; 3], b: [[f64; 3]; 3], c: [[f64; 3]; 3]) {
     for j in 0..3 {
         for k in 0..3 {
             let mut s = 0.0;
-            for l in 0..3 {
-                s += w[j][l] * z[l][k];
+            for (l, row) in w[j].iter().enumerate() {
+                s += row * z[l][k];
             }
             a[j][k] = s;
         }
@@ -28,10 +28,10 @@ fn prodmm(a: &mut [[f64; 3]; 3], b: [[f64; 3]; 3], c: [[f64; 3]; 3]) {
 fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
     let z = x;
 
-    for j in 0..3 {
+    for (j, row) in a.iter().enumerate() {
         let mut s = 0.0;
-        for l in 0..3 {
-            s += a[j][l] * z[l];
+        for (l, val) in row.iter().enumerate() {
+            s += val * z[l];
         }
         y[j] = s;
     }
