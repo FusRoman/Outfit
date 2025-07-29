@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::ErrorId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,20 +44,6 @@ impl PlanetMassCenter {
             PlanetMassCenter::Pluto => 999,
         }
     }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            PlanetMassCenter::Mercury => "Mercury".to_string(),
-            PlanetMassCenter::Venus => "Venus".to_string(),
-            PlanetMassCenter::Earth => "Earth".to_string(),
-            PlanetMassCenter::Mars => "Mars".to_string(),
-            PlanetMassCenter::Jupiter => "Jupiter".to_string(),
-            PlanetMassCenter::Saturn => "Saturn".to_string(),
-            PlanetMassCenter::Uranus => "Uranus".to_string(),
-            PlanetMassCenter::Neptune => "Neptune".to_string(),
-            PlanetMassCenter::Pluto => "Pluto".to_string(),
-        }
-    }
 }
 
 impl From<PlanetMassCenter> for i32 {
@@ -72,9 +60,20 @@ impl TryFrom<i32> for PlanetMassCenter {
     }
 }
 
-impl std::fmt::Display for PlanetMassCenter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+impl fmt::Display for PlanetMassCenter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PlanetMassCenter::Mercury => "Mercury",
+            PlanetMassCenter::Venus => "Venus",
+            PlanetMassCenter::Earth => "Earth",
+            PlanetMassCenter::Mars => "Mars",
+            PlanetMassCenter::Jupiter => "Jupiter",
+            PlanetMassCenter::Saturn => "Saturn",
+            PlanetMassCenter::Uranus => "Uranus",
+            PlanetMassCenter::Neptune => "Neptune",
+            PlanetMassCenter::Pluto => "Pluto",
+        };
+        write!(f, "{s}")
     }
 }
 

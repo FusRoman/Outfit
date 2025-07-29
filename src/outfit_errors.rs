@@ -69,10 +69,51 @@ pub enum OutfitError {
 
     #[error("Gauss method failed to find roots")]
     GaussNoRootsFound,
+
+    #[error("Invalid SPK data type: {0}")]
+    InvalidSpkDataType(i32),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
     fn from(err: rand_distr::NormalError) -> Self {
         OutfitError::NoiseInjectionError(err)
+    }
+}
+
+impl PartialEq for OutfitError {
+    fn eq(&self, other: &Self) -> bool {
+        use OutfitError::*;
+        match (self, other) {
+            (InvalidJPLStringFormat(a), InvalidJPLStringFormat(b)) => a == b,
+            (InvalidJPLEphemFileSource(a), InvalidJPLEphemFileSource(b)) => a == b,
+            (InvalidJPLEphemFileVersion(a), InvalidJPLEphemFileVersion(b)) => a == b,
+            (InvalidUrl(a), InvalidUrl(b)) => a == b,
+
+            // Ces erreurs ne sont pas comparables : égalité si même variant
+            (UreqHttpError(_), UreqHttpError(_)) => true,
+            (IoError(_), IoError(_)) => true,
+            #[cfg(feature = "jpl-download")]
+            (ReqwestError(_), ReqwestError(_)) => true,
+
+            (UnableToCreateBaseDir(a), UnableToCreateBaseDir(b)) => a == b,
+            (Utf8PathError(a), Utf8PathError(b)) => a == b,
+            (JPLFileNotFound(a), JPLFileNotFound(b)) => a == b,
+            (RootFindingError(a), RootFindingError(b)) => a == b,
+            (ObservationNotFound(a), ObservationNotFound(b)) => a == b,
+            (InvalidErrorModel(a), InvalidErrorModel(b)) => a == b,
+            (InvalidErrorModelFilePath(a), InvalidErrorModelFilePath(b)) => a == b,
+            (NomParsingError(a), NomParsingError(b)) => a == b,
+            (Parsing80ColumnFileError(a), Parsing80ColumnFileError(b)) => a == b,
+            (NoiseInjectionError(a), NoiseInjectionError(b)) => a == b,
+            (InvalidSpkDataType(a), InvalidSpkDataType(b)) => a == b,
+
+            // Variantes unitaires
+            (SingularDirectionMatrix, SingularDirectionMatrix) => true,
+            (PolynomialRootFindingFailed, PolynomialRootFindingFailed) => true,
+            (SpuriousRootDetected, SpuriousRootDetected) => true,
+            (GaussNoRootsFound, GaussNoRootsFound) => true,
+
+            _ => false,
+        }
     }
 }

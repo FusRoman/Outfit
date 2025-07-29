@@ -1,5 +1,7 @@
 use std::convert::TryFrom;
 
+use crate::outfit_errors::OutfitError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum SpkDataType {
@@ -27,7 +29,7 @@ pub enum SpkDataType {
 }
 
 impl SpkDataType {
-    pub fn from_i32(value: i32) -> Result<Self, ()> {
+    pub fn from_i32(value: i32) -> Result<Self, OutfitError> {
         SpkDataType::try_from(value)
     }
 
@@ -71,7 +73,7 @@ impl From<SpkDataType> for i32 {
 }
 
 impl TryFrom<i32> for SpkDataType {
-    type Error = ();
+    type Error = OutfitError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use SpkDataType::*;
@@ -97,7 +99,7 @@ impl TryFrom<i32> for SpkDataType {
             19 => Ok(ESAPiecewiseInterpolation),
             20 => Ok(ChebyshevVelocityOnly),
             21 => Ok(ExtendedModifiedDifferenceArray),
-            _ => Err(()),
+            _ => Err(OutfitError::InvalidSpkDataType(value)),
         }
     }
 }
@@ -168,7 +170,10 @@ mod test_spk_type {
             SpkDataType::from_i32(21),
             Ok(SpkDataType::ExtendedModifiedDifferenceArray)
         );
-        assert_eq!(SpkDataType::from_i32(22), Err(()));
+        assert_eq!(
+            SpkDataType::from_i32(22),
+            Err(OutfitError::InvalidSpkDataType(22))
+        );
     }
 
     #[test]

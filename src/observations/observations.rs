@@ -184,7 +184,7 @@ impl Observation {
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ParseObsError {
     #[error("The line is too short")]
     TooShortLine,

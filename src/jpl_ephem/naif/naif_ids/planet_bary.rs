@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::ErrorId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,19 +44,6 @@ impl PlanetaryBary {
             PlanetaryBary::Pluto => 9,
         }
     }
-    pub fn to_string(&self) -> String {
-        match self {
-            PlanetaryBary::Mercury => "Mercury".to_string(),
-            PlanetaryBary::Venus => "Venus".to_string(),
-            PlanetaryBary::EarthMoon => "EarthMoonBarycenter".to_string(),
-            PlanetaryBary::Mars => "Mars".to_string(),
-            PlanetaryBary::Jupiter => "Jupiter".to_string(),
-            PlanetaryBary::Saturn => "Saturn".to_string(),
-            PlanetaryBary::Uranus => "Uranus".to_string(),
-            PlanetaryBary::Neptune => "Neptune".to_string(),
-            PlanetaryBary::Pluto => "Pluto".to_string(),
-        }
-    }
 }
 
 impl From<PlanetaryBary> for i32 {
@@ -71,9 +60,20 @@ impl TryFrom<i32> for PlanetaryBary {
     }
 }
 
-impl std::fmt::Display for PlanetaryBary {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+impl fmt::Display for PlanetaryBary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            PlanetaryBary::Mercury => "Mercury",
+            PlanetaryBary::Venus => "Venus",
+            PlanetaryBary::EarthMoon => "Earth-Moon Barycenter",
+            PlanetaryBary::Mars => "Mars",
+            PlanetaryBary::Jupiter => "Jupiter",
+            PlanetaryBary::Saturn => "Saturn",
+            PlanetaryBary::Uranus => "Uranus",
+            PlanetaryBary::Neptune => "Neptune",
+            PlanetaryBary::Pluto => "Pluto",
+        };
+        write!(f, "{s}")
     }
 }
 
