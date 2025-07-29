@@ -220,7 +220,7 @@ impl TrajectoryExt for TrajectorySet {
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     ) -> Self {
-        let observations: Observations = observation_from_batch(env_state, &batch, observer);
+        let observations: Observations = observation_from_batch(env_state, batch, observer);
         let mut traj_set: TrajectorySet = HashMap::default();
         traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
@@ -233,7 +233,7 @@ impl TrajectoryExt for TrajectorySet {
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     ) {
-        let observations: Observations = observation_from_batch(env_state, &batch, observer);
+        let observations: Observations = observation_from_batch(env_state, batch, observer);
         self.insert(
             ObjectNumber::String(object_number.to_string()),
             observations,

@@ -179,12 +179,6 @@ pub(crate) fn generate_triplets(
     max_obs_for_triplets: usize,
     max_triplet: u32,
 ) -> Vec<GaussObs> {
-    let dt_min = dt_min;
-    let dt_max = dt_max;
-    let opt_dt = optimal_interval_time;
-    let max_obs_for_triplets = max_obs_for_triplets;
-    let max_triplet = max_triplet as usize;
-
     // 1. Sort observations by time (in-place)
     observations.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
 
@@ -199,7 +193,7 @@ pub(crate) fn generate_triplets(
     let n = reduced.len();
 
     // Use a max-heap to keep only the best triplets (lowest weights)
-    let mut heap = BinaryHeap::with_capacity(max_triplet + 1);
+    let mut heap = BinaryHeap::with_capacity((max_triplet + 1) as usize);
 
     // Capture reduced by reference to avoid moving it into the closure
     let reduced_ref = &reduced;
@@ -207,7 +201,6 @@ pub(crate) fn generate_triplets(
     // 4. Generate triplets using iterators
     (0..n)
         .flat_map(|i| {
-            let reduced_ref = reduced_ref;
             (i + 1..n).flat_map(move |j| {
                 let reduced_ref = reduced_ref;
                 (j + 1..n).filter_map(move |k| {
@@ -224,7 +217,7 @@ pub(crate) fn generate_triplets(
                         reduced_ref[i].time,
                         reduced_ref[j].time,
                         reduced_ref[k].time,
-                        opt_dt,
+                        optimal_interval_time,
                     );
 
                     Some(WeightedTriplet { weight, i, j, k })
@@ -233,7 +226,7 @@ pub(crate) fn generate_triplets(
         })
         // 5. Maintain a bounded heap of best triplets
         .for_each(|wt| {
-            if heap.len() < max_triplet {
+            if heap.len() < max_triplet as usize {
                 heap.push(wt);
             } else if let Some(top) = heap.peek() {
                 // Replace the worst triplet if a better one is found
