@@ -330,10 +330,10 @@ impl HorizonData {
             count(parse_char6, OLD_MAX).parse(input)
         }
 
-        let mut file =
-            BufReader::new(File::open(ephem_path.path()).unwrap_or_else(|_| {
-                panic!("Failed to open the JPL ephemeris file: {ephem_path}")
-            }));
+        let mut file = BufReader::new(
+            File::open(ephem_path.path())
+                .unwrap_or_else(|_| panic!("Failed to open the JPL ephemeris file: {ephem_path}")),
+        );
 
         let mut file_data = vec![0u8; 1 << 12];
         file.read_exact(&mut file_data)

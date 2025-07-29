@@ -81,14 +81,10 @@ pub fn rotpn(
     date2: f64,
 ) {
     if !chkref(rsys1, epoch1) {
-        panic!(
-            "ERROR: Unsupported starting reference system {rsys1} {epoch1}"
-        );
+        panic!("ERROR: Unsupported starting reference system {rsys1} {epoch1}");
     }
     if !chkref(rsys2, epoch2) {
-        panic!(
-            "ERROR: Unsupported final reference system {rsys2} {epoch2}"
-        );
+        panic!("ERROR: Unsupported final reference system {rsys2} {epoch2}");
     }
 
     let mut rsys = rsys1.to_string();
