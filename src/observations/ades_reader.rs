@@ -11,7 +11,7 @@ use crate::{
     outfit::Outfit,
 };
 
-use super::observations::Observation;
+use super::Observation;
 
 #[derive(Debug, Deserialize)]
 struct StructuredAdes {

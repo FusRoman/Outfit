@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::observations::observations::ParseObsError;
+use crate::observations::ParseObsError;
 
 #[derive(Error, Debug)]
 pub enum OutfitError {

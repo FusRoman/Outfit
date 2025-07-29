@@ -8,7 +8,7 @@ use crate::{
     error_models::ErrorModel,
     initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult},
     keplerian_element::KeplerianElements,
-    observations::observations::Observation,
+    observations::Observation,
     observations::triplets_iod::generate_triplets,
     outfit::Outfit,
     outfit_errors::OutfitError,
