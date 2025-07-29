@@ -1,5 +1,5 @@
 use super::bimap::BiMap;
-use super::observers::Observer;
+use super::Observer;
 use crate::constants::{Degree, Kilometer, MpcCodeObs};
 use std::sync::{Arc, OnceLock};
 

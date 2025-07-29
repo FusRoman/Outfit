@@ -9,7 +9,7 @@ use crate::{
     env_state::OutfitEnv,
     error_models::{get_bias_rms, ErrorModel, ErrorModelData},
     jpl_ephem::download_jpl_file::EphemFileSource,
-    observers::{observatories::Observatories, observers::Observer},
+    observers::{observatories::Observatories, Observer},
     outfit_errors::OutfitError,
 };
 
@@ -207,7 +207,7 @@ mod outfit_struct_test {
     use super::*;
     use ordered_float::NotNan;
 
-    use crate::{observers::observers::Observer, outfit::Outfit};
+    use crate::{observers::Observer, outfit::Outfit};
 
     #[test]
     fn test_observer_from_mpc_code() {

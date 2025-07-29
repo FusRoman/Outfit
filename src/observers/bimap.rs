@@ -15,7 +15,7 @@ impl<K, V> Default for BiMap<K, V>
 where
     K: Eq + Hash + Clone,
     V: Eq + Hash + Clone,
- {
+{
     fn default() -> Self {
         Self::new()
     }
@@ -74,5 +74,9 @@ where
 
     pub fn len(&self) -> usize {
         self.forward.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }

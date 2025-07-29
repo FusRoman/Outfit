@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
 use crate::observations::observation_from_batch;
-use crate::observers::observers::Observer;
+use crate::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
 

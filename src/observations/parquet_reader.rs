@@ -2,7 +2,7 @@ use smallvec::SmallVec;
 use std::{fs::File, sync::Arc};
 
 use crate::constants::ArcSec;
-use crate::observers::observers::Observer;
+use crate::observers::Observer;
 use crate::outfit::Outfit;
 use crate::{
     constants::{ObjectNumber, TrajectorySet, JDTOMJD},
