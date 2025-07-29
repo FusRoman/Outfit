@@ -5,8 +5,6 @@ use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::initial_orbit_determination::gauss::GaussObs;
-
 // Constants
 pub const DPI: f64 = 2. * std::f64::consts::PI;
 pub const SECONDS_PER_DAY: f64 = 86_400.0;

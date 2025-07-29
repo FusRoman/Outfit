@@ -3,7 +3,6 @@ use std::{collections::HashMap, sync::Arc};
 use once_cell::sync::OnceCell;
 
 use ordered_float::NotNan;
-use ureq::http::{self, Uri};
 
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
@@ -43,25 +42,6 @@ impl Outfit {
 
     pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
         &self.env_state.ut1_provider
-    }
-
-    pub(crate) fn get_url<U>(&self, url: U) -> String
-    where
-        Uri: TryFrom<U>,
-        <Uri as TryFrom<U>>::Error: Into<http::Error>,
-    {
-        self.env_state.get_from_url(url)
-    }
-
-    pub(crate) fn post_url<T, I, K, V>(&self, url: T, form: I) -> String
-    where
-        Uri: TryFrom<T>,
-        <Uri as TryFrom<T>>::Error: Into<http::Error>,
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<str>,
-        V: AsRef<str>,
-    {
-        self.env_state.post_from_url(url, form)
     }
 
     /// Get the observatories from the Minor Planet Center

@@ -54,15 +54,6 @@ impl DirectoryData {
             n_records: n_records as usize,
         }
     }
-
-    /// Returns the number of Tchebychev coefficients per ephemeris record.
-    ///
-    /// Returns
-    /// -------
-    /// The number of Tchebychev coefficients per ephemeris record.
-    pub fn nb_coefficients(&self) -> usize {
-        (self.rsize - 2) / 3
-    }
 }
 
 impl std::fmt::Display for DirectoryData {
@@ -101,17 +92,6 @@ impl std::fmt::Display for DirectoryData {
 #[cfg(test)]
 mod test_directory {
     use super::*;
-
-    #[test]
-    fn test_nb_coeff() {
-        let dir_data = DirectoryData {
-            init: -14200747200.0,
-            intlen: 1382400,
-            rsize: 41,
-            n_records: 25112,
-        };
-        assert_eq!(dir_data.nb_coefficients(), 13);
-    }
 
     #[test]
     fn test_directory_display() {
