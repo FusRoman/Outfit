@@ -233,7 +233,7 @@ pub(crate) fn parse_ades(
     error_dec: Option<ArcSec>,
 ) {
     let xml = std::fs::read_to_string(ades)
-        .expect(format!("Failed to read ADES file: {}", ades.to_string()).as_str());
+        .unwrap_or_else(|_| panic!("Failed to read ADES file: {}", ades));
 
     match from_str::<FlatAdes>(&xml) {
         Ok(flat_ades) => {

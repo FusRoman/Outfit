@@ -34,7 +34,7 @@ impl DAFHeader {
                 ni: ni_bytes,
                 fward: fwd,
                 bward: bwd,
-                free: free,
+                free,
                 locfmt: String::from_utf8_lossy(locfmt).trim().to_string(),
                 fptstr: String::from_utf8_lossy(ftpstr).trim().to_string(),
             },

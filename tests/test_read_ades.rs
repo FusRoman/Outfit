@@ -10,7 +10,7 @@ fn test_read_ades() {
 
     let mut traj_set = TrajectorySet::new_from_ades(
         &mut outfit,
-        &Utf8Path::new("tests/data/example_ades.xml"),
+        Utf8Path::new("tests/data/example_ades.xml"),
         None,
         None,
     );
@@ -19,7 +19,7 @@ fn test_read_ades() {
 
     traj_set.add_from_ades(
         &mut outfit,
-        &Utf8Path::new("tests/data/example_ades2.xml"),
+        Utf8Path::new("tests/data/example_ades2.xml"),
         None,
         None,
     );
@@ -29,7 +29,7 @@ fn test_read_ades() {
         .get(&ObjectNumber::String("2016 RD34".into()))
         .unwrap();
     assert_eq!(traj.len(), 2);
-    let obs = traj.get(0).unwrap().get_observer(&outfit);
+    let obs = traj.first().unwrap().get_observer(&outfit);
     assert_eq!(
         *obs.name.as_ref().unwrap(),
         "University of Hawaii 88-inch telescope, Maunakea".to_string()
@@ -37,7 +37,7 @@ fn test_read_ades() {
 
     traj_set.add_from_ades(
         &mut outfit,
-        &Utf8Path::new("tests/data/flat_ades.xml"),
+        Utf8Path::new("tests/data/flat_ades.xml"),
         None,
         None,
     );
@@ -49,7 +49,7 @@ fn test_read_ades() {
 
     assert_eq!(traj.len(), 1);
     assert_eq!(
-        traj.get(0).unwrap().get_observer(&outfit).name,
+        traj.first().unwrap().get_observer(&outfit).name,
         Some("La Palma".into())
     );
 }

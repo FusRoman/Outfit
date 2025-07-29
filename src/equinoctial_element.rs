@@ -571,9 +571,9 @@ mod test_equinoctial_element {
         let equ = EquinoctialElements {
             reference_epoch: 0.0,
             semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.26937368090922720,
-            eccentricity_cos_lon: 8.8564152600135601E-002,
-            tan_half_incl_sin_node: 8.0899701663963020E-004,
+            eccentricity_sin_lon: 0.269_373_680_909_227_2,
+            eccentricity_cos_lon: 8.856_415_260_013_56E-2,
+            tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
             tan_half_incl_cos_node: 0.10168201109730375,
             mean_longitude: 1.6936970079414786,
         };
@@ -592,9 +592,9 @@ mod test_equinoctial_element {
         let equ = EquinoctialElements {
             reference_epoch: 0.0,
             semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.26937368090922720,
-            eccentricity_cos_lon: 8.8564152600135601E-002,
-            tan_half_incl_sin_node: 8.0899701663963020E-004,
+            eccentricity_sin_lon: 0.269_373_680_909_227_2,
+            eccentricity_cos_lon: 8.856_415_260_013_56E-2,
+            tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
             tan_half_incl_cos_node: 0.10168201109730375,
             mean_longitude: 1.6936970079414786,
         };
@@ -621,9 +621,9 @@ mod test_equinoctial_element {
         let equ = EquinoctialElements {
             reference_epoch: 0.0,
             semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.26937368090922720,
-            eccentricity_cos_lon: 8.8564152600135601E-002,
-            tan_half_incl_sin_node: 8.0899701663963020E-004,
+            eccentricity_sin_lon: 0.269_373_680_909_227_2,
+            eccentricity_cos_lon: 8.856_415_260_013_56E-2,
+            tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
             tan_half_incl_cos_node: 0.10168201109730375,
             mean_longitude: 1.6936970079414786,
         };

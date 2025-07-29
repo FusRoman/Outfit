@@ -37,7 +37,7 @@ fn bench_load_parquet(c: &mut Criterion) {
                 b.iter(|| {
                     let _ = TrajectorySet::new_from_parquet(
                         &mut outfit,
-                        &path,
+                        path,
                         ztf_observer.clone(),
                         0.5,
                         0.5,

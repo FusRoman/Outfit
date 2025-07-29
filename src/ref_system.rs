@@ -135,29 +135,27 @@ pub fn rotpn(
                 } else {
                     panic!("ERROR: Internal error (03)");
                 }
-            } else {
-                if rsys == "ECLM" {
-                    let obl = obleq(T2000);
-                    let r = rotmt(-obl, 1);
+            } else if rsys == "ECLM" {
+                let obl = obleq(T2000);
+                let r = rotmt(-obl, 1);
+                *rot = matmul(&r, rot);
+                rsys = "EQUM".to_string();
+            } else if rsys == "EQUT" {
+                let mut r = rnut80(T2000);
+                trsp3(&mut r);
+                *rot = matmul(&r, rot);
+                rsys = "EQUM".to_string();
+            } else if rsys == "EQUM" {
+                if epoch2 == "OFDATE" {
+                    prec(date2, &mut r);
                     *rot = matmul(&r, rot);
-                    rsys = "EQUM".to_string();
-                } else if rsys == "EQUT" {
-                    let mut r = rnut80(T2000);
-                    trsp3(&mut r);
-                    *rot = matmul(&r, rot);
-                    rsys = "EQUM".to_string();
-                } else if rsys == "EQUM" {
-                    if epoch2 == "OFDATE" {
-                        prec(date2, &mut r);
-                        *rot = matmul(&r, rot);
-                        epoch = epoch2.to_string();
-                        date = date2;
-                    } else {
-                        panic!("ERROR: Internal error (04)");
-                    }
+                    epoch = epoch2.to_string();
+                    date = date2;
                 } else {
-                    panic!("ERROR: Internal error (05)");
+                    panic!("ERROR: Internal error (04)");
                 }
+            } else {
+                panic!("ERROR: Internal error (05)");
             }
         } else {
             if rsys == rsys2 {
@@ -383,7 +381,7 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
 pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
     // Compute the fundamental lunar and solar arguments (in radians)
     let t1 = (tjm - T2000) / 36525.0;
-    let t = t1 as f64;
+    let t = t1;
     let t2 = t * t;
     let t3 = t2 * t;
 

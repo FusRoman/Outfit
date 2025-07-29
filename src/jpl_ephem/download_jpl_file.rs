@@ -168,7 +168,7 @@ impl EphemFilePath {
         let local_file = EphemFilePath::try_from(file_source.clone())?;
 
         if local_file.exists() {
-            return Ok(local_file);
+            Ok(local_file)
         } else {
             #[cfg(feature = "jpl-download")]
             {
@@ -181,7 +181,7 @@ impl EphemFilePath {
             }
             #[cfg(not(feature = "jpl-download"))]
             {
-                return Err(OutfitError::JPLFileNotFound(local_file.path().to_string()));
+                Err(OutfitError::JPLFileNotFound(local_file.path().to_string()))
             }
         }
     }

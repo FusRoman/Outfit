@@ -36,12 +36,12 @@ impl Summary {
             Summary {
                 start_epoch,
                 end_epoch,
-                target: target,
-                center: center,
-                frame_id: frame_id,
-                data_type: data_type,
-                initial_addr: initial_addr,
-                final_addr: final_addr,
+                target,
+                center,
+                frame_id,
+                data_type,
+                initial_addr,
+                final_addr,
             },
         ))
     }
@@ -72,7 +72,7 @@ impl fmt::Display for Summary {
             ("target", format!("{}", naif_target)),
             ("center", format!("{}", naif_center)),
             ("frame_id", self.frame_id.to_string()),
-            ("data_type", format!("{}", naif_type.to_string())),
+            ("data_type", naif_type.to_string()),
             ("initial_addr", self.initial_addr.to_string()),
             ("final_addr", self.final_addr.to_string()),
         ];

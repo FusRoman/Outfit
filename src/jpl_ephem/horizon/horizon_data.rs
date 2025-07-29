@@ -241,7 +241,7 @@ fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
             jd_start,
             jd_end,
             coeffs,
-            offset as usize,
+            offset,
             subinterval_number,
             n_coeffs,
         );
@@ -341,10 +341,10 @@ impl HorizonData {
             count(parse_char6, OLD_MAX).parse(input)
         }
 
-        let mut file = BufReader::new(
-            File::open(ephem_path.path())
-                .expect(format!("Failed to open the JPL ephemeris file: {}", ephem_path).as_str()),
-        );
+        let mut file =
+            BufReader::new(File::open(ephem_path.path()).unwrap_or_else(|_| {
+                panic!("Failed to open the JPL ephemeris file: {}", ephem_path)
+            }));
 
         let mut file_data = vec![0u8; 1 << 12];
         file.read_exact(&mut file_data)
@@ -373,7 +373,7 @@ impl HorizonData {
 
         let (_, (mut ipt, numde)) = parse_ipt(&buffer).expect("failed to parse IPT header");
 
-        let ipt_extra = read_ipt_13_14(&mut file, ncon as u32, &version)
+        let ipt_extra = read_ipt_13_14(&mut file, ncon as u32, version)
             .expect("Failed to read IPT[13] and IPT[14]");
 
         ipt[13] = ipt_extra
@@ -398,7 +398,7 @@ impl HorizonData {
                 start_period: ss[0],
                 end_period: ss[1],
                 period_lenght: ss[2],
-                recsize: recsize,
+                recsize,
                 earth_moon_mass_ratio,
             },
             records: blocks,
@@ -424,8 +424,8 @@ impl HorizonData {
             self.header.period_lenght,
         );
 
-        let jd_base = 2400000.5000000000;
-        let et_jd = jd_base + et.trunc() as f64;
+        let jd_base = 2_400_000.5;
+        let et_jd = jd_base + et.trunc();
 
         if et_jd < ephem_start || et_jd > ephem_end {
             panic!("Time outside ephemeris range");
@@ -458,7 +458,7 @@ impl HorizonData {
         let records = &self.records[nr];
         let record_body = records
             .get(&body)
-            .expect(format!("Failed to get record for body {} in block {}", body, nr).as_str());
+            .unwrap_or_else(|| panic!("Failed to get record for body {} in block {}", body, nr));
 
         let ipt_body = self.header.ipt[body as usize];
         let n_subs = ipt_body[2] as usize;
@@ -532,7 +532,9 @@ impl HorizonData {
 
 #[cfg(test)]
 mod test_horizon_reader {
+    #[cfg(feature = "jpl-download")]
     use super::*;
+
     #[cfg(feature = "jpl-download")]
     use crate::unit_test_global::JPL_EPHEM_HORIZON;
 

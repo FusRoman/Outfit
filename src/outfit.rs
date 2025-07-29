@@ -88,7 +88,7 @@ impl Outfit {
     pub fn get_observer_from_mpc_code(&self, mpc_code: &MpcCode) -> Arc<Observer> {
         self.get_observatories()
             .get(mpc_code)
-            .expect(format!("MPC code not found: {}", mpc_code).as_str())
+            .unwrap_or_else(|| panic!("MPC code not found: {}", mpc_code))
             .clone()
     }
 
@@ -198,7 +198,7 @@ fn parse_f32(
     code: &str,
 ) -> Result<f32, std::num::ParseFloatError> {
     s.get(slice)
-        .expect(format!("Failed to parse float for observer code: {code}").as_str())
+        .unwrap_or_else(|| panic!("Failed to parse float for observer code: {code}"))
         .trim()
         .parse()
 }
@@ -206,7 +206,7 @@ fn parse_f32(
 fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
     let name = remain
         .get(27..)
-        .expect(format!("Failed to parse name value for code: {code}").as_str());
+        .unwrap_or_else(|| panic!("Failed to parse name value for code: {code}"));
 
     let Some(longitude) = parse_f32(remain, 1..10, code).ok() else {
         return (0.0, 0.0, 0.0, name.to_string());

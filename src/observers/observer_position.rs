@@ -66,9 +66,9 @@ pub fn helio_obs_pos(
     ];
 
     let pos_obs = [
-        pvobs(observers[0], &epochs[0], &ut1_provider).0,
-        pvobs(observers[1], &epochs[1], &ut1_provider).0,
-        pvobs(observers[2], &epochs[2], &ut1_provider).0,
+        pvobs(observers[0], &epochs[0], ut1_provider).0,
+        pvobs(observers[1], &epochs[1], ut1_provider).0,
+        pvobs(observers[2], &epochs[2], ut1_provider).0,
     ];
     let pos_obs_matrix = Matrix3::from_columns(&pos_obs);
 

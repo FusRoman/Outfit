@@ -21,6 +21,12 @@ pub struct OutfitEnv {
     pub ut1_provider: Ut1Provider,
 }
 
+impl Default for OutfitEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OutfitEnv {
     /// Create a new Outfit object
     ///
@@ -40,7 +46,7 @@ impl OutfitEnv {
 
         OutfitEnv {
             http_client: agent,
-            ut1_provider: ut1_provider,
+            ut1_provider,
         }
     }
 

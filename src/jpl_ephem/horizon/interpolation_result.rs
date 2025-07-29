@@ -45,7 +45,7 @@ impl Add for InterpResult {
     }
 }
 
-impl<'a> Add for &'a InterpResult {
+impl Add for &InterpResult {
     type Output = InterpResult;
 
     /// Adds a reference to an InterpResult instance to another InterpResult.
@@ -91,7 +91,7 @@ impl Sub for InterpResult {
     }
 }
 
-impl<'a> Sub for &'a InterpResult {
+impl Sub for &InterpResult {
     type Output = InterpResult;
 
     /// Subtracts a reference to an InterpResult instance from another InterpResult.
@@ -131,7 +131,7 @@ impl Div<f64> for InterpResult {
     }
 }
 
-impl<'a> Div<f64> for &'a InterpResult {
+impl Div<f64> for &InterpResult {
     type Output = InterpResult;
 
     /// Divides a reference to an InterpResult instance by a scalar value.

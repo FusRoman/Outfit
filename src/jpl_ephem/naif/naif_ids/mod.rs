@@ -40,7 +40,7 @@ impl NaifIds {
             10 => Ok(NaifIds::SSB(SolarSystemBary::Sun)),
             1..=999 => {
                 if let Ok(planet) = PlanetaryBary::from_id(id) {
-                    return Ok(NaifIds::PB(planet));
+                    Ok(NaifIds::PB(planet))
                 } else if let Ok(planet_mass_center) = PlanetMassCenter::from_id(id) {
                     return Ok(NaifIds::PMC(planet_mass_center));
                 } else if let Ok(satellite_mass_center) = SatelliteMassCenter::from_id(id) {
@@ -49,7 +49,7 @@ impl NaifIds {
                     return Err(ErrorId::InvalidNaifId(id));
                 }
             }
-            _ => return Err(ErrorId::InvalidNaifId(id)),
+            _ => Err(ErrorId::InvalidNaifId(id)),
         }
     }
 

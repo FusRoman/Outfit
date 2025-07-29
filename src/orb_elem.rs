@@ -253,13 +253,13 @@ pub fn eccentricity_control(
     ecc_max: f64,
 ) -> Option<(bool, f64, f64, f64)> {
     // Compute squared magnitude of velocity
-    let ast_vel_2 = asteroid_velocity.dot(&asteroid_velocity);
+    let ast_vel_2 = asteroid_velocity.dot(asteroid_velocity);
 
     // Compute distance from the central body
     let distance_to_center = asteroid_position.norm();
 
     // Angular momentum vector h = r × v
-    let angular_momentum = asteroid_position.cross(&asteroid_velocity);
+    let angular_momentum = asteroid_position.cross(asteroid_velocity);
 
     // Squared norm of angular momentum
     let angmom_norm = angular_momentum.dot(&angular_momentum);
@@ -302,12 +302,12 @@ mod orb_elem_test {
         let mut elem = [0.0; 6];
         let mut type_ = String::new();
         let xv = [
-            -0.62355005100316385,
+            -0.623_550_051_003_163_9,
             1.2114681148601605,
-            0.25200059143776038,
-            -1.5549845137774663E-002,
-            -4.6315774892682878E-003,
-            -9.3633621261339246E-004,
+            0.252_000_591_437_760_4,
+            -1.554_984_513_777_466_3E-2,
+            -4.631_577_489_268_288E-3,
+            -9.363_362_126_133_925E-4,
         ];
 
         ccek1(&mut elem, &mut type_, &xv);
@@ -327,15 +327,15 @@ mod orb_elem_test {
     #[test]
     fn test_eccentricity_control() {
         let asteroid_position = Vector3::new(
-            -0.62355005100316385,
-            1.0112601855976919,
-            0.71310036350624140,
+            -0.623_550_051_003_163_9,
+            1.011_260_185_597_692,
+            0.713_100_363_506_241_4,
         );
 
         let asteroid_velocity = Vector3::new(
-            -1.5549845137774663E-002,
-            -3.8769361098376577E-003,
-            -2.7014074002979964E-003,
+            -1.554_984_513_777_466_3E-2,
+            -3.876_936_109_837_657_7E-3,
+            -2.701_407_400_297_996_4E-3,
         );
 
         let (accept_ecc, ecc, peri, energy) =

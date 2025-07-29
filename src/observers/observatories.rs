@@ -43,7 +43,7 @@ impl Observatories {
     pub(crate) fn get_observer_from_uint16(&self, observer_idx: u16) -> &Observer {
         self.obs_to_uint16
             .get_by_value(&observer_idx)
-            .expect(format!("Observer index not found: {}", observer_idx).as_str())
+            .unwrap_or_else(|| panic!("Observer index not found: {}", observer_idx))
     }
 
     /// Get an observer index from an observer
@@ -58,9 +58,8 @@ impl Observatories {
     /// * The observer index
     pub(crate) fn uint16_from_observer(&mut self, observer: Arc<Observer>) -> u16 {
         let obs_idx = self.obs_to_uint16.len() as u16;
-        self.obs_to_uint16
+        *self.obs_to_uint16
             .entry_or_insert_by_key(observer, obs_idx)
-            .clone()
     }
 }
 

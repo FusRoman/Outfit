@@ -435,7 +435,7 @@ impl ObservationsExt for Observations {
     ) -> Vec<GaussObs> {
         generate_triplets(
             self,
-            &state,
+            state,
             dt_min,
             dt_max,
             optimal_interval_time,
@@ -669,19 +669,18 @@ impl ObservationIOD for Observations {
 
 #[cfg(test)]
 mod test_obs_ext {
-    use approx::assert_relative_eq;
-    use camino::Utf8Path;
 
-    use crate::{
-        constants::TrajectorySet, error_models::ErrorModel,
-        observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
-    };
+    use crate::error_models::ErrorModel;
 
     use super::*;
 
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_select_rms_interval() {
+        use camino::Utf8Path;
+
+        use crate::{constants::TrajectorySet, observations::trajectory_ext::TrajectoryExt};
+
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));

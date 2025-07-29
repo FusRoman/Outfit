@@ -131,12 +131,10 @@ impl HorizonRecord {
 
         let mut tcheb_accel = vec![0.0; n_coeff];
 
-        if compute_velocity {
-            if n_coeff > 1 {
-                for i in 3..n_coeff {
-                    tcheb_deriv[i] =
-                        twot * tcheb_deriv[i - 1] + 2.0 * tcheb[i - 1] - tcheb_deriv[i - 2];
-                }
+        if compute_velocity && n_coeff > 1 {
+            for i in 3..n_coeff {
+                tcheb_deriv[i] =
+                    twot * tcheb_deriv[i - 1] + 2.0 * tcheb[i - 1] - tcheb_deriv[i - 2];
             }
         }
 
