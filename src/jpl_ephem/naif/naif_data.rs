@@ -212,6 +212,7 @@ impl NaifData {
 
 #[cfg(test)]
 mod test_naif_file {
+    #[cfg(feature = "jpl-download")]
     use super::*;
 
     #[cfg(feature = "jpl-download")]
