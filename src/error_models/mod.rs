@@ -28,6 +28,9 @@ static FCCT14_RULES: &str = include_str!("data_models/fcct14.rules");
 static CBM10_RULES: &str = include_str!("data_models/cbm10.rules");
 static VFCC17_RULES: &str = include_str!("data_models/vfcc17.rules");
 
+pub(in crate::error_models) type ParseResult<'a> =
+    IResult<&'a str, Vec<((MpcCode, CatalogCode), (f32, f32))>>;
+
 fn is_alphanum(c: char) -> bool {
     c.is_alphanumeric()
 }
@@ -66,15 +69,11 @@ fn parse_catalog_codes(input: &str) -> IResult<&str, Vec<String>> {
     .parse(input)
 }
 
-fn parse_full_line(input: &str) -> IResult<&str, Vec<((MpcCode, CatalogCode), (f32, f32))>> {
+fn parse_full_line(input: &str) -> ParseResult {
     let (input, remain) = opt(take_until("!")).parse(input)?; //ignore comments
     let input = input.trim();
 
-    let input = if remain.is_none() {
-        input
-    } else {
-        remain.unwrap()
-    };
+    let input = remain.unwrap_or(input);
 
     map(
         (parse_station, parse_catalog_codes, parse_rms_values),
@@ -90,7 +89,7 @@ fn parse_full_line(input: &str) -> IResult<&str, Vec<((MpcCode, CatalogCode), (f
 
 fn parse_full_file<F>(file: &str, parse_line: F) -> Result<ErrorModelData, OutfitError>
 where
-    F: Fn(&str) -> IResult<&str, Vec<((MpcCode, CatalogCode), (f32, f32))>>,
+    F: Fn(&str) -> ParseResult,
 {
     let error_map: ErrorModelData = file
         .lines()

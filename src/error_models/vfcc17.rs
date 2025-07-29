@@ -7,9 +7,7 @@ use nom::{
     IResult, Parser,
 };
 
-use crate::constants::MpcCode;
-
-use super::CatalogCode;
+use crate::error_models::ParseResult;
 
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || "*".contains(c)
@@ -48,7 +46,7 @@ fn parse_rms_values(input: &str) -> IResult<&str, (f32, f32)> {
     .parse(input)
 }
 
-pub fn parse_vfcc17_line(input: &str) -> IResult<&str, Vec<((MpcCode, CatalogCode), (f32, f32))>> {
+pub fn parse_vfcc17_line(input: &str) -> ParseResult {
     let (input, remain) = opt(take_until("!")).parse(input)?; // Ignore comments
     let input = remain.unwrap_or(input).trim();
 
