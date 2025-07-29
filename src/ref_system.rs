@@ -340,6 +340,7 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
 /// This function returns the nutation angles (Δψ, Δε), i.e. the periodic deviations in:
 /// - ecliptic longitude (Δψ, nutation in longitude),
 /// - and obliquity of the ecliptic (Δε, nutation in obliquity),
+/// 
 /// both expressed in arcseconds, using the IAU 1980 nutation theory as adopted by the IAU.
 ///
 /// Arguments

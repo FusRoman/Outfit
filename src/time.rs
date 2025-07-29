@@ -25,7 +25,7 @@ pub fn date_to_mjd(date: &Vec<&str>) -> Vec<f64> {
 /// Return
 /// ------
 /// * a vector of jd
-pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
+pub fn mjd_to_jd(mjd: &[f64]) -> Vec<f64> {
     mjd.iter()
         .map(|x| Epoch::from_mjd_utc(*x).to_jde_utc_days())
         .collect()
@@ -40,7 +40,7 @@ pub fn mjd_to_jd(mjd: &Vec<f64>) -> Vec<f64> {
 /// Return
 /// ------
 /// * a vector of MJD
-pub fn jd_to_mjd(jd: &Vec<f64>) -> Vec<f64> {
+pub fn jd_to_mjd(jd: &[f64]) -> Vec<f64> {
     jd.iter()
         .map(|x| Epoch::from_jde_utc(*x).to_mjd_utc_days())
         .collect()
