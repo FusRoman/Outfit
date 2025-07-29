@@ -34,10 +34,10 @@ impl NaifData {
     /// -------
     /// * A `NaifData` instance containing the parsed data.
     pub fn read_naif_file(file_path: &EphemFilePath) -> Self {
-        let mut file =
-            BufReader::new(File::open(file_path.path()).unwrap_or_else(|_| {
-                panic!("Failed to open the JPL ephemeris file: {file_path}")
-            }));
+        let mut file = BufReader::new(
+            File::open(file_path.path())
+                .unwrap_or_else(|_| panic!("Failed to open the JPL ephemeris file: {file_path}")),
+        );
 
         let mut buffer = [0u8; 1 << 10];
         file.read_exact(&mut buffer)
