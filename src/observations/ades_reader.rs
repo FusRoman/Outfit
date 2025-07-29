@@ -233,7 +233,7 @@ pub(crate) fn parse_ades(
     error_dec: Option<ArcSec>,
 ) {
     let xml = std::fs::read_to_string(ades)
-        .unwrap_or_else(|_| panic!("Failed to read ADES file: {}", ades));
+        .unwrap_or_else(|_| panic!("Failed to read ADES file: {ades}"));
 
     match from_str::<FlatAdes>(&xml) {
         Ok(flat_ades) => {
@@ -245,8 +245,7 @@ pub(crate) fn parse_ades(
             }
             Err(structured_err) => {
                 panic!(
-                    "Failed to parse ADES file:\n- Flat error: {}\n- Structured error: {}",
-                    flat_err, structured_err
+                    "Failed to parse ADES file:\n- Flat error: {flat_err}\n- Structured error: {structured_err}"
                 );
             }
         },

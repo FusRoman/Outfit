@@ -131,8 +131,7 @@ impl FromStr for ErrorModel {
             "CBM10" => Ok(ErrorModel::CBM10),
             "VFCC17" => Ok(ErrorModel::VFCC17),
             _ => Err(OutfitError::InvalidErrorModel(format!(
-                "Invalid error model: {}",
-                s
+                "Invalid error model: {s}"
             ))),
         }
     }

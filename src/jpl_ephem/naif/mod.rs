@@ -16,7 +16,7 @@ pub fn print_hex_dump(data: &[u8]) {
 
         // Hex representation
         for byte in chunk {
-            print!("{:02x} ", byte);
+            print!("{byte:02x} ");
         }
 
         // Padding if chunk is not full
@@ -34,7 +34,7 @@ pub fn print_hex_dump(data: &[u8]) {
             } else {
                 '.'
             };
-            print!("{}", ascii);
+            print!("{ascii}");
         }
         println!("|");
     }

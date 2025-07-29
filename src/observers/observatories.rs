@@ -43,7 +43,7 @@ impl Observatories {
     pub(crate) fn get_observer_from_uint16(&self, observer_idx: u16) -> &Observer {
         self.obs_to_uint16
             .get_by_value(&observer_idx)
-            .unwrap_or_else(|| panic!("Observer index not found: {}", observer_idx))
+            .unwrap_or_else(|| panic!("Observer index not found: {observer_idx}"))
     }
 
     /// Get an observer index from an observer

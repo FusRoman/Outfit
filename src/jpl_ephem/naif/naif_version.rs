@@ -54,6 +54,6 @@ impl FromStr for NaifVersion {
     type Err = String;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        NaifVersion::from_str(s).ok_or_else(|| format!("Invalid NAIF version: {}", s))
+        NaifVersion::from_str(s).ok_or_else(|| format!("Invalid NAIF version: {s}"))
     }
 }

@@ -633,16 +633,14 @@ impl ObservationIOD for Observations {
                             }
                             Err(e) => {
                                 eprintln!(
-                                    "Failed to compute RMS for orbit from triplet {:?}: {}",
-                                    triplet, e
+                                    "Failed to compute RMS for orbit from triplet {triplet:?}: {e}"
                                 );
                             }
                         }
                     }
                     Err(e) => {
                         eprintln!(
-                            "Failed to compute preliminary orbit from triplet {:?}: {}",
-                            triplet, e
+                            "Failed to compute preliminary orbit from triplet {triplet:?}: {e}"
                         );
                     }
                 }

@@ -111,7 +111,7 @@ impl EphemFileSource {
 #[cfg(feature = "jpl-download")]
 async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
     let mut file = File::create(path).await?;
-    println!("Downloading {}...", url);
+    println!("Downloading {url}...");
 
     let mut stream = reqwest::get(url).await?.bytes_stream();
 
@@ -122,7 +122,7 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError
 
     file.flush().await?;
 
-    println!("Downloaded {}", url);
+    println!("Downloaded {url}");
     Ok(())
 }
 

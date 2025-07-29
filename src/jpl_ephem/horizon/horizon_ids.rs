@@ -37,7 +37,7 @@ impl TryFrom<u8> for HorizonID {
             12 => Ok(HorizonID::EarthMoonBarycenter),
             13 => Ok(HorizonID::Nutation),
             14 => Ok(HorizonID::Libration),
-            _ => Err(format!("Invalid Horizon ID: {}", value)),
+            _ => Err(format!("Invalid Horizon ID: {value}")),
         }
     }
 }

@@ -143,14 +143,14 @@ impl fmt::Display for GaussResult {
         let argp_deg = orb.periapsis_argument.to_degrees();
         let m_deg = orb.mean_anomaly.to_degrees();
 
-        writeln!(f, "{}", label)?;
+        writeln!(f, "{label}")?;
         writeln!(f, "  Epoch (MJD): {:.5}", orb.reference_epoch)?;
         writeln!(f, "  a   (AU)   : {:.6}", orb.semi_major_axis)?;
         writeln!(f, "  e           : {:.6}", orb.eccentricity)?;
-        writeln!(f, "  i   (deg)  : {:.6}", i_deg)?;
-        writeln!(f, "  Ω   (deg)  : {:.6}", omega_deg)?;
-        writeln!(f, "  ω   (deg)  : {:.6}", argp_deg)?;
-        write!(f, "  M   (deg)  : {:.6}", m_deg)
+        writeln!(f, "  i   (deg)  : {i_deg:.6}")?;
+        writeln!(f, "  Ω   (deg)  : {omega_deg:.6}")?;
+        writeln!(f, "  ω   (deg)  : {argp_deg:.6}")?;
+        write!(f, "  M   (deg)  : {m_deg:.6}")
     }
 }
 
@@ -214,7 +214,7 @@ mod gauss_results_tests {
 
         let result = GaussResult::CorrectedOrbit(orbit);
 
-        let output = format!("{}", result);
+        let output = format!("{result}");
 
         assert!(output.starts_with("[Corrected orbit]"));
         assert!(output.contains("a   (AU)   : 1.234567"));

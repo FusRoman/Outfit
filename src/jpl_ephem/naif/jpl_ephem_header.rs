@@ -100,7 +100,7 @@ impl fmt::Display for JPLEphemHeader {
             label = LABEL_WIDTH + 2,
             value = VALUE_WIDTH + 2
         )?;
-        writeln!(f, "{}", border)?;
+        writeln!(f, "{border}")?;
         writeln!(
             f,
             "| {:<label$} | {:<value$} |",
@@ -149,7 +149,7 @@ impl fmt::Display for JPLEphemHeader {
             label = LABEL_WIDTH,
             value = VALUE_WIDTH
         )?;
-        writeln!(f, "{}", border)?;
+        writeln!(f, "{border}")?;
 
         Ok(())
     }
@@ -180,7 +180,7 @@ mod test_jpl_header {
 | End JD               | 2688976.500000                 |
 +----------------------+--------------------------------+
 "#;
-        let output = format!("{}", header);
+        let output = format!("{header}");
         assert_eq!(output, expected);
     }
 }

@@ -31,7 +31,7 @@ fn bench_load_parquet(c: &mut Criterion) {
     {
         batch_group.throughput(Throughput::Elements(1));
         batch_group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{:?}", batch_size)),
+            BenchmarkId::from_parameter(format!("{batch_size:?}")),
             batch_size,
             |b, batch_size| {
                 b.iter(|| {
