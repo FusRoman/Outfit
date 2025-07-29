@@ -5,6 +5,8 @@ pub mod solar_system_bary;
 
 pub mod naif_type;
 
+use std::fmt;
+
 use planet_bary::PlanetaryBary;
 use planet_mass::PlanetMassCenter;
 use satellite_mass::SatelliteMassCenter;
@@ -64,18 +66,6 @@ impl NaifIds {
             NaifIds::SMC(satellite_mass_center) => satellite_mass_center.to_id(),
         }
     }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            NaifIds::SSB(solar_system_bary) => match solar_system_bary {
-                SolarSystemBary::SSB => "Solar System Barycenter".to_string(),
-                SolarSystemBary::Sun => "Sun".to_string(),
-            },
-            NaifIds::PB(planetary_bary) => planetary_bary.to_string(),
-            NaifIds::PMC(planet_mass_center) => planet_mass_center.to_string(),
-            NaifIds::SMC(satellite_mass_center) => satellite_mass_center.to_string(),
-        }
-    }
 }
 
 impl From<NaifIds> for i32 {
@@ -97,9 +87,17 @@ impl TryFrom<i32> for NaifIds {
     }
 }
 
-impl std::fmt::Display for NaifIds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+impl fmt::Display for NaifIds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NaifIds::SSB(solar_system_bary) => match solar_system_bary {
+                SolarSystemBary::SSB => write!(f, "Solar System Barycenter"),
+                SolarSystemBary::Sun => write!(f, "Sun"),
+            },
+            NaifIds::PB(planetary_bary) => write!(f, "{planetary_bary}"),
+            NaifIds::PMC(planet_mass_center) => write!(f, "{planet_mass_center}"),
+            NaifIds::SMC(satellite_mass_center) => write!(f, "{satellite_mass_center}"),
+        }
     }
 }
 

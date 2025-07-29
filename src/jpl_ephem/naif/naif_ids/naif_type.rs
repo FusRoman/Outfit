@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::{convert::TryFrom, fmt};
 
 use crate::outfit_errors::OutfitError;
 
@@ -35,34 +35,6 @@ impl SpkDataType {
 
     pub fn to_i32(self) -> i32 {
         self as i32
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            SpkDataType::ModifiedDifferenceArray => "Modified Difference Array".to_string(),
-            SpkDataType::ChebyshevPositionOnly => "Chebyshev Position Only".to_string(),
-            SpkDataType::ChebyshevPositionVelocity => "Chebyshev Position Velocity".to_string(),
-            SpkDataType::Reserved4 => "Reserved 4".to_string(),
-            SpkDataType::TwoBodyDiscreteStates => "Two Body Discrete States".to_string(),
-            SpkDataType::Reserved6 => "Reserved 6".to_string(),
-            SpkDataType::Reserved7 => "Reserved 7".to_string(),
-            SpkDataType::EquallySpacedLagrange => "Equally Spaced Lagrange".to_string(),
-            SpkDataType::UnequallySpacedLagrange => "Unequally Spaced Lagrange".to_string(),
-            SpkDataType::TwoLineElements => "Two Line Elements".to_string(),
-            SpkDataType::Reserved11 => "Reserved 11".to_string(),
-            SpkDataType::HermiteUniform => "Hermite Uniform".to_string(),
-            SpkDataType::HermiteNonUniform => "Hermite Non Uniform".to_string(),
-            SpkDataType::ChebyshevNonUniform => "Chebyshev Non Uniform".to_string(),
-            SpkDataType::PrecessingConic => "Precessing Conic".to_string(),
-            SpkDataType::Reserved16 => "Reserved 16".to_string(),
-            SpkDataType::EquinoctialElements => "Equinoctial Elements".to_string(),
-            SpkDataType::ESAHermiteLagrange => "ESA Hermite Lagrange".to_string(),
-            SpkDataType::ESAPiecewiseInterpolation => "ESA Piecewise Interpolation".to_string(),
-            SpkDataType::ChebyshevVelocityOnly => "Chebyshev Velocity Only".to_string(),
-            SpkDataType::ExtendedModifiedDifferenceArray => {
-                "Extended Modified Difference Array".to_string()
-            }
-        }
     }
 }
 
@@ -101,6 +73,35 @@ impl TryFrom<i32> for SpkDataType {
             21 => Ok(ExtendedModifiedDifferenceArray),
             _ => Err(OutfitError::InvalidSpkDataType(value)),
         }
+    }
+}
+
+impl fmt::Display for SpkDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SpkDataType::ModifiedDifferenceArray => "Modified Difference Array",
+            SpkDataType::ChebyshevPositionOnly => "Chebyshev Position Only",
+            SpkDataType::ChebyshevPositionVelocity => "Chebyshev Position Velocity",
+            SpkDataType::Reserved4 => "Reserved 4",
+            SpkDataType::TwoBodyDiscreteStates => "Two Body Discrete States",
+            SpkDataType::Reserved6 => "Reserved 6",
+            SpkDataType::Reserved7 => "Reserved 7",
+            SpkDataType::EquallySpacedLagrange => "Equally Spaced Lagrange",
+            SpkDataType::UnequallySpacedLagrange => "Unequally Spaced Lagrange",
+            SpkDataType::TwoLineElements => "Two Line Elements",
+            SpkDataType::Reserved11 => "Reserved 11",
+            SpkDataType::HermiteUniform => "Hermite Uniform",
+            SpkDataType::HermiteNonUniform => "Hermite Non Uniform",
+            SpkDataType::ChebyshevNonUniform => "Chebyshev Non Uniform",
+            SpkDataType::PrecessingConic => "Precessing Conic",
+            SpkDataType::Reserved16 => "Reserved 16",
+            SpkDataType::EquinoctialElements => "Equinoctial Elements",
+            SpkDataType::ESAHermiteLagrange => "ESA Hermite Lagrange",
+            SpkDataType::ESAPiecewiseInterpolation => "ESA Piecewise Interpolation",
+            SpkDataType::ChebyshevVelocityOnly => "Chebyshev Velocity Only",
+            SpkDataType::ExtendedModifiedDifferenceArray => "Extended Modified Difference Array",
+        };
+        write!(f, "{s}")
     }
 }
 
