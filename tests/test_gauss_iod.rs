@@ -43,13 +43,13 @@ fn test_gauss_iod() {
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
     let path_file = Utf8Path::new("tests/data/2015AB.obs");
-    let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, &path_file);
+    let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, path_file);
 
     let path_file = Utf8Path::new("tests/data/8467.obs");
-    traj_set.add_from_80col(&mut env_state, &path_file);
+    traj_set.add_from_80col(&mut env_state, path_file);
 
     let path_file = Utf8Path::new("tests/data/33803.obs");
-    traj_set.add_from_80col(&mut env_state, &path_file);
+    traj_set.add_from_80col(&mut env_state, path_file);
 
     let (best_orbit, best_rms) = run_iod(
         &mut env_state,

@@ -446,7 +446,7 @@ mod test_naif_file {
             }
         );
 
-        let epoch2 = Epoch::from_mjd_in_time_scale(57049.231857592589, hifitime::TimeScale::TT);
+        let epoch2 = Epoch::from_mjd_in_time_scale(57_049.231_857_592_59, hifitime::TimeScale::TT);
         let interp = JPL_EPHEM_NAIF.ephemeris(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),

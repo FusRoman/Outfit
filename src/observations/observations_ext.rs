@@ -670,7 +670,7 @@ mod test_obs_ext {
 
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
-            TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
+            TrajectorySet::new_from_80col(&mut env_state, Utf8Path::new("tests/data/2015AB.obs"));
 
         let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
         let traj_len = traj_set
@@ -722,23 +722,23 @@ mod test_obs_ext {
 
         let triplets = GaussObs {
             idx_obs: Vector3::new(34, 35, 36),
-            ra: [[1.7897976233412669, 1.7898659093482510, 1.7899347771316527]].into(),
+            ra: [[1.789_797_623_341_267, 1.789_865_909_348_251, 1.7899347771316527]].into(),
             dec: [[
-                0.77917805235018101,
-                0.77908666497129186,
-                0.77899653810797365,
+                0.779_178_052_350_181,
+                0.779_086_664_971_291_9,
+                0.778_996_538_107_973_6,
             ]]
             .into(),
-            time: [[57070.238017592594, 57070.250007592593, 57070.262067592594]].into(),
+            time: [[57070.238017592594, 57_070.250_007_592_59, 57070.262067592594]].into(),
             observer_position: Matrix3::zeros(),
         };
 
         let kepler = KeplerianElements {
-            reference_epoch: 57049.242334573748,
+            reference_epoch: 57_049.242_334_573_75,
             semi_major_axis: 1.8017360713154256,
-            eccentricity: 0.28355914566870571,
+            eccentricity: 0.283_559_145_668_705_7,
             inclination: 0.20267383288689386,
-            ascending_node_longitude: 7.9559790236937815E-003,
+            ascending_node_longitude: 7.955_979_023_693_781E-3,
             periapsis_argument: 1.2451951387589135,
             mean_anomaly: 0.44054589015887125,
         };
@@ -875,7 +875,7 @@ mod test_obs_ext {
             assert_ulps_eq!(traj[1].error_ra, 2.5070681687218917e-6, max_ulps = 2);
             assert_ulps_eq!(traj[1].error_dec, 2.036217397086327e-6, max_ulps = 2);
 
-            assert_ulps_eq!(traj[2].error_ra, 2.5070595078906952E-006, max_ulps = 2);
+            assert_ulps_eq!(traj[2].error_ra, 2.507_059_507_890_695_2E-6, max_ulps = 2);
             assert_ulps_eq!(traj[2].error_dec, 2.036217397086327e-6, max_ulps = 2);
         }
     }

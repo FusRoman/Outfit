@@ -37,7 +37,7 @@ pub(crate) mod unit_test_global {
             let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
             let path_file = Utf8Path::new("tests/data/2015AB.obs");
-            let traj_set = TrajectorySet::new_from_80col(&mut env, &path_file);
+            let traj_set = TrajectorySet::new_from_80col(&mut env, path_file);
             (env, traj_set)
         });
 
