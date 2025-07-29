@@ -1,6 +1,6 @@
 mod vfcc17;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use nom::{
     branch::alt,
@@ -108,15 +108,6 @@ where
 }
 
 impl ErrorModel {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "FCCT14" => Some(ErrorModel::FCCT14),
-            "CBM10" => Some(ErrorModel::CBM10),
-            "VFCC17" => Some(ErrorModel::VFCC17),
-            _ => None,
-        }
-    }
-
     pub(crate) fn read_error_model_file(&self) -> Result<ErrorModelData, OutfitError> {
         let error_map: ErrorModelData = match self {
             ErrorModel::FCCT14 => parse_full_file(FCCT14_RULES, parse_full_line)?,
@@ -128,6 +119,22 @@ impl ErrorModel {
         };
 
         Ok(error_map)
+    }
+}
+
+impl FromStr for ErrorModel {
+    type Err = OutfitError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "FCCT14" => Ok(ErrorModel::FCCT14),
+            "CBM10" => Ok(ErrorModel::CBM10),
+            "VFCC17" => Ok(ErrorModel::VFCC17),
+            _ => Err(OutfitError::InvalidErrorModel(format!(
+                "Invalid error model: {}",
+                s
+            ))),
+        }
     }
 }
 
@@ -162,9 +169,7 @@ impl TryFrom<&str> for ErrorModel {
     type Error = OutfitError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ErrorModel::from_str(value).ok_or_else(|| {
-            OutfitError::InvalidErrorModel(format!("Invalid error model: {}", value))
-        })
+        value.parse()
     }
 }
 
