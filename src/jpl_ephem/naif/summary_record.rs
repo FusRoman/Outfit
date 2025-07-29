@@ -126,7 +126,7 @@ mod test_summary {
 +--------------+-------------------------+
 | start_epoch  | 1549-12-31T00:00:00 ET  |
 | end_epoch    | 2650-01-25T00:00:00 ET  |
-| target       | EarthMoonBarycenter     |
+| target       | Earth-Moon Barycenter   |
 | center       | Solar System Barycenter |
 | frame_id     | 1                       |
 | data_type    | Chebyshev Position Only |

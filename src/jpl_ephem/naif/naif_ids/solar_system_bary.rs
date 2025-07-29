@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::ErrorId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,13 +21,6 @@ impl SolarSystemBary {
         match self {
             SolarSystemBary::SSB => 0,
             SolarSystemBary::Sun => 10,
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            SolarSystemBary::SSB => "Solar System Barycenter".to_string(),
-            SolarSystemBary::Sun => "Sun".to_string(),
         }
     }
 }
@@ -51,9 +46,13 @@ impl TryFrom<i32> for SolarSystemBary {
     }
 }
 
-impl std::fmt::Display for SolarSystemBary {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+impl fmt::Display for SolarSystemBary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SolarSystemBary::SSB => "Solar System Barycenter",
+            SolarSystemBary::Sun => "Sun",
+        };
+        write!(f, "{s}")
     }
 }
 

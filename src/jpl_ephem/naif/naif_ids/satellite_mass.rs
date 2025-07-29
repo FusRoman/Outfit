@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::ErrorId;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,28 +68,6 @@ impl SatelliteMassCenter {
             SatelliteMassCenter::Charon => 901,
         }
     }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            SatelliteMassCenter::Moon => "Moon".to_string(),
-            SatelliteMassCenter::Phobos => "Phobos".to_string(),
-            SatelliteMassCenter::Deimos => "Deimos".to_string(),
-            SatelliteMassCenter::Io => "Io".to_string(),
-            SatelliteMassCenter::Europa => "Europa".to_string(),
-            SatelliteMassCenter::Ganymede => "Ganymede".to_string(),
-            SatelliteMassCenter::Callisto => "Callisto".to_string(),
-            SatelliteMassCenter::Titan => "Titan".to_string(),
-            SatelliteMassCenter::Rhea => "Rhea".to_string(),
-            SatelliteMassCenter::Iapetus => "Iapetus".to_string(),
-            SatelliteMassCenter::Miranda => "Miranda".to_string(),
-            SatelliteMassCenter::Ariel => "Ariel".to_string(),
-            SatelliteMassCenter::Umbriel => "Umbriel".to_string(),
-            SatelliteMassCenter::Titania => "Titania".to_string(),
-            SatelliteMassCenter::Oberon => "Oberon".to_string(),
-            SatelliteMassCenter::Triton => "Triton".to_string(),
-            SatelliteMassCenter::Charon => "Charon".to_string(),
-        }
-    }
 }
 
 impl From<SatelliteMassCenter> for i32 {
@@ -104,9 +84,28 @@ impl TryFrom<i32> for SatelliteMassCenter {
     }
 }
 
-impl std::fmt::Display for SatelliteMassCenter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+impl fmt::Display for SatelliteMassCenter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            SatelliteMassCenter::Moon => "Moon",
+            SatelliteMassCenter::Phobos => "Phobos",
+            SatelliteMassCenter::Deimos => "Deimos",
+            SatelliteMassCenter::Io => "Io",
+            SatelliteMassCenter::Europa => "Europa",
+            SatelliteMassCenter::Ganymede => "Ganymede",
+            SatelliteMassCenter::Callisto => "Callisto",
+            SatelliteMassCenter::Titan => "Titan",
+            SatelliteMassCenter::Rhea => "Rhea",
+            SatelliteMassCenter::Iapetus => "Iapetus",
+            SatelliteMassCenter::Miranda => "Miranda",
+            SatelliteMassCenter::Ariel => "Ariel",
+            SatelliteMassCenter::Umbriel => "Umbriel",
+            SatelliteMassCenter::Titania => "Titania",
+            SatelliteMassCenter::Oberon => "Oberon",
+            SatelliteMassCenter::Triton => "Triton",
+            SatelliteMassCenter::Charon => "Charon",
+        };
+        write!(f, "{s}")
     }
 }
 
