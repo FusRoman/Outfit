@@ -210,7 +210,7 @@ impl GaussObs {
                 ra: Vector3::from_column_slice(&ra_vec),
                 dec: Vector3::from_column_slice(&dec_vec),
                 time: self.time,
-                observer_position: self.observer_position.clone(),
+                observer_position: self.observer_position,
             })
         });
 
@@ -445,18 +445,18 @@ impl GaussObs {
         aberth_epsilon: f64,
         root_acceptance_epsilon: f64,
     ) -> Result<Vec<f64>, OutfitError> {
-        let roots = aberth(&polynom, max_iterations, aberth_epsilon);
+        let roots = aberth(polynom, max_iterations, aberth_epsilon);
         match roots.stop_reason {
             StopReason::Converged(_) | StopReason::MaxIteration(_) => {
-                return Ok(roots
+                Ok(roots
                     .iter()
                     // root criteria acceptance: root must be real and real part must be positive
                     .filter(|complex| complex.re > 0. && complex.im.abs() < root_acceptance_epsilon)
                     .map(|complex| complex.re)
-                    .collect::<Vec<f64>>());
+                    .collect::<Vec<f64>>())
             }
             StopReason::Failed(_) => {
-                return Err(OutfitError::PolynomialRootFindingFailed);
+                Err(OutfitError::PolynomialRootFindingFailed)
             }
         }
     }
@@ -502,7 +502,7 @@ impl GaussObs {
         let obs_pos_t = self.observer_position;
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
-        let rho: Vector3<f64> = -crhom.component_div(&vector_c);
+        let rho: Vector3<f64> = -crhom.component_div(vector_c);
         if rho[1] < 0.01 {
             return Err(OutfitError::SpuriousRootDetected);
         }
@@ -854,8 +854,8 @@ impl GaussObs {
         itmax: i32,
     ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
         // Initialize state with uncorrected values
-        let mut previous_ast_pos = asteroid_position.clone();
-        let mut previous_ast_vel = asteroid_velocity.clone();
+        let mut previous_ast_pos = *asteroid_position;
+        let mut previous_ast_vel = *asteroid_velocity;
         let mut corrected_epoch = 0.0;
 
         // Main correction loop
@@ -953,8 +953,8 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
+            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
             observer_position: Matrix3::zeros(),
         };
 
@@ -1020,17 +1020,17 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
+            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
-                0.86893516436949503,
-                0.37669962110919220,
-                -0.58916318521741273,
-                0.72388725167947765,
-                0.31381865165245848,
-                -0.77438744379695956,
-                0.56128847092611645,
+                0.868_935_164_369_495,
+                0.376_699_621_109_192_2,
+                -0.589_163_185_217_412_7,
+                0.723_887_251_679_477_7,
+                0.313_818_651_652_458_5,
+                -0.774_387_443_796_959_6,
+                0.561_288_470_926_116_4,
                 0.24334971075289916,
             )
             .transpose(),
@@ -1058,13 +1058,13 @@ pub(crate) mod gauss_test {
         };
 
         let polynomial = [
-            -0.47713469392010482,
+            -0.477_134_693_920_104_8,
             0.,
             0.,
             2.0305173353541064,
             0.,
             0.,
-            -2.6158037187590111,
+            -2.615_803_718_759_011,
             0.,
             1.,
         ];
@@ -1082,17 +1082,17 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
+            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
-                0.86893516436949503,
-                0.37669962110919220,
-                -0.58916318521741273,
-                0.72388725167947765,
-                0.31381865165245848,
-                -0.77438744379695956,
-                0.56128847092611645,
+                0.868_935_164_369_495,
+                0.376_699_621_109_192_2,
+                -0.589_163_185_217_412_7,
+                0.723_887_251_679_477_7,
+                0.313_818_651_652_458_5,
+                -0.774_387_443_796_959_6,
+                0.561_288_470_926_116_4,
                 0.24334971075289916,
             )
             .transpose(),
@@ -1101,7 +1101,7 @@ pub(crate) mod gauss_test {
         let (_, _, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
             gauss.gauss_prelim().unwrap();
 
-        let first_root: f64 = 0.73281072546694370;
+        let first_root: f64 = 0.732_810_725_466_943_7;
         let r2m3 = 1. / first_root.powi(3);
         let vector_c: Vector3<f64> = Vector3::new(
             vector_a[0] + vector_b[0] * r2m3,
@@ -1151,8 +1151,8 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
+            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
             observer_position: Matrix3::zeros(),
         };
         let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
@@ -1187,18 +1187,18 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6894680985108945, 1.6898614520910629, 1.7526450904422723),
-            dec: Vector3::new(1.0825984522657437, 0.94367901893462314, 0.82751732157120139),
-            time: Vector3::new(57028.454047592590, 57049.231857592589, 57063.959487592590),
+            dec: Vector3::new(1.0825984522657437, 0.943_679_018_934_623_1, 0.827_517_321_571_201_4),
+            time: Vector3::new(57_028.454_047_592_59, 57_049.231_857_592_59, 57_063.959_487_592_59),
             observer_position: Matrix3::new(
-                -0.26413563360707898,
-                -0.58897355265057350,
-                -0.77419214835037198,
-                0.86904662091008600,
-                0.72401171879164605,
-                0.56151021954891822,
-                0.37674668566657249,
-                0.31387342067709401,
-                0.24344479140165851,
+                -0.264_135_633_607_079,
+                -0.588_973_552_650_573_5,
+                -0.774_192_148_350_372,
+                0.869_046_620_910_086,
+                0.724_011_718_791_646,
+                0.561_510_219_548_918_2,
+                0.376_746_685_666_572_5,
+                0.313_873_420_677_094,
+                0.243_444_791_401_658_5,
             ),
         };
 
@@ -1210,12 +1210,12 @@ pub(crate) mod gauss_test {
         // The floating point differences is very close to one ulp
         // (unit in the last place) of the floating point representation
         let expected_orbit = KeplerianElements {
-            reference_epoch: 57049.229045244218,
+            reference_epoch: 57_049.229_045_244_22,
             semi_major_axis: 1.8014943988486352,
-            eccentricity: 0.28351414224908073,
+            eccentricity: 0.283_514_142_249_080_7,
             inclination: 0.20264170920820326,
-            ascending_node_longitude: 8.1185624442695909E-003,
-            periapsis_argument: 1.2447953118143020,
+            ascending_node_longitude: 8.118_562_444_269_591E-3,
+            periapsis_argument: 1.244_795_311_814_302,
             mean_anomaly: 0.44065425435816186,
         };
 
@@ -1252,19 +1252,19 @@ pub(crate) mod gauss_test {
 
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
-            ra: Vector3::new(1.6894680552416277, 1.6898618214421519, 1.7526488678231147),
-            dec: Vector3::new(1.0825994437405373, 0.94367986333414500, 0.82751736050722857),
-            time: Vector3::new(57028.454047592590, 57049.231857592589, 57063.959487592590),
+            ra: Vector3::new(1.6894680552416277, 1.689_861_821_442_152, 1.7526488678231147),
+            dec: Vector3::new(1.0825994437405373, 0.943_679_863_334_145, 0.827_517_360_507_228_6),
+            time: Vector3::new(57_028.454_047_592_59, 57_049.231_857_592_59, 57_063.959_487_592_59),
             observer_position: Matrix3::new(
-                -0.26413563360707898,
-                -0.58897355265057350,
-                -0.77419214835037198,
-                0.86904662091008600,
-                0.72401171879164605,
-                0.56151021954891822,
-                0.37674668566657249,
-                0.31387342067709401,
-                0.24344479140165851,
+                -0.264_135_633_607_079,
+                -0.588_973_552_650_573_5,
+                -0.774_192_148_350_372,
+                0.869_046_620_910_086,
+                0.724_011_718_791_646,
+                0.561_510_219_548_918_2,
+                0.376_746_685_666_572_5,
+                0.313_873_420_677_094,
+                0.243_444_791_401_658_5,
             ),
         };
 
@@ -1273,11 +1273,11 @@ pub(crate) mod gauss_test {
         // This is the expected orbit based on the Orbfit software
         // The values are obtained from the Orbfit output for the same observations
         let expected_orbfit = KeplerianElements {
-            reference_epoch: 57049.229045608859,
+            reference_epoch: 57_049.229_045_608_86,
             semi_major_axis: 1.8013098187420686,
             eccentricity: 0.28347096712267805,
-            inclination: 0.20261766587244120,
-            ascending_node_longitude: 8.1948054204650823E-003,
+            inclination: 0.202_617_665_872_441_2,
+            ascending_node_longitude: 8.194_805_420_465_082E-3,
             periapsis_argument: 1.2446747244785052,
             mean_anomaly: 0.44073731381184733,
         };
@@ -1292,64 +1292,64 @@ pub(crate) mod gauss_test {
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372),
-            dec: Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861),
-            time: Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593),
+            dec: Vector3::new(1.082_468_037_385_525, 0.943_580_504_794_621_6, 0.827_376_240_789_998_6),
+            time: Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59),
             observer_position: Matrix3::new(
                 -0.26456661713915464,
-                0.86893516436949503,
-                0.37669962110919220,
-                -0.58916318521741273,
-                0.72388725167947765,
-                0.31381865165245848,
-                -0.77438744379695956,
-                0.56128847092611645,
+                0.868_935_164_369_495,
+                0.376_699_621_109_192_2,
+                -0.589_163_185_217_412_7,
+                0.723_887_251_679_477_7,
+                0.313_818_651_652_458_5,
+                -0.774_387_443_796_959_6,
+                0.561_288_470_926_116_4,
                 0.24334971075289916,
             )
             .transpose(),
         };
 
         let ast_pos = Matrix3::new(
-            -0.28811969067349602,
+            -0.288_119_690_673_496,
             1.0666372979405205,
-            0.75148154817972834,
-            -0.62355005100316385,
-            1.0112601855976919,
-            0.71310036350624140,
-            -0.84458504751876651,
-            0.94285394542554213,
-            0.66533915411705014,
+            0.751_481_548_179_728_3,
+            -0.623_550_051_003_163_9,
+            1.011_260_185_597_692,
+            0.713_100_363_506_241_4,
+            -0.844_585_047_518_766_5,
+            0.942_853_945_425_542_1,
+            0.665_339_154_117_050_1,
         )
         .transpose();
 
         let ast_vel = Vector3::new(
-            -1.5549845137774663E-002,
-            -3.8769361098376577E-003,
-            -2.7014074002979964E-003,
+            -1.554_984_513_777_466_3E-2,
+            -3.876_936_109_837_657_7E-3,
+            -2.701_407_400_297_996_4E-3,
         );
 
         let unit_matrix = Matrix3::new(
-            -5.5499346522475138E-002,
+            -5.549_934_652_247_514E-2,
             0.46585594034226024,
-            0.88311837563455031,
-            -6.9729790044853648E-002,
-            0.58273570122793894,
-            0.80966465829668210,
+            0.883_118_375_634_550_3,
+            -6.972_979_004_485_365E-2,
+            0.582_735_701_227_938_9,
+            0.809_664_658_296_682_1,
             -0.12245931009139571,
-            0.66563874383906063,
-            0.73615812165070682,
+            0.665_638_743_839_060_6,
+            0.736_158_121_650_706_8,
         )
         .transpose();
 
         let inv_unit_matrix = Matrix3::new(
             -18.774792915974604,
-            41.814279122702033,
+            41.814_279_122_702_03,
             -23.466669573973437,
-            -8.1647907103431088,
+            -8.164_790_710_343_109,
             11.489343729350425,
             -2.8418335594428177,
-            4.2594827827361170,
-            -3.4329643046497211,
-            2.4345794753281792E-002,
+            4.259_482_782_736_117,
+            -3.432_964_304_649_721,
+            2.434_579_475_328_179E-2,
         )
         .transpose();
 

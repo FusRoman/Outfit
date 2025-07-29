@@ -58,10 +58,10 @@ impl Observation {
     ) -> Self {
         Observation {
             observer,
-            ra: ra,
-            error_ra: error_ra,
-            dec: dec,
-            error_dec: error_dec,
+            ra,
+            error_ra,
+            dec,
+            error_dec,
             time,
         }
     }
@@ -146,7 +146,7 @@ impl Observation {
         let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
         // Compute the observer's geocentric position (accounts for Earth rotation, nutation, etc.)
-        let (geo_obs_pos, _) = geo_obs_pos(&observer, &obs_mjd, &state.get_ut1_provider());
+        let (geo_obs_pos, _) = geo_obs_pos(observer, &obs_mjd, state.get_ut1_provider());
 
         // Observer's heliocentric position = Earth position + observer's geocentric offset
         let xobs = geo_obs_pos + earth_pos_eclj2000;
@@ -285,12 +285,12 @@ pub(crate) fn extract_80col(
     colfile: &Utf8Path,
 ) -> Result<(Observations, ObjectNumber), OutfitError> {
     let file_content = std::fs::read_to_string(colfile)
-        .expect(format!("Could not read file {}", colfile.as_str()).as_str());
+        .unwrap_or_else(|_| panic!("Could not read file {}", colfile.as_str()));
 
     let first_line = file_content
         .lines()
         .next()
-        .expect(format!("Could not read first line of file {}", colfile.as_str()).as_str());
+        .unwrap_or_else(|| panic!("Could not read first line of file {}", colfile.as_str()));
 
     fn get_object_number(line: &str, range: Range<usize>) -> String {
         line[range].trim_start_matches('0').trim().to_string()
@@ -367,10 +367,10 @@ mod test_observations {
 
         let observation_2 = Observation::new(
             2,
-            343.09737500000000,
-            2.7777777777777779E-006,
+            343.097_375,
+            2.777_777_777_777_778E-6,
             -14.784833333333333,
-            2.7777777777777779E-005,
+            2.777_777_777_777_778E-5,
             59001.0,
         );
 

@@ -11,6 +11,16 @@ where
     reverse: HashMap<V, K>,
 }
 
+impl<K, V> Default for BiMap<K, V>
+where
+    K: Eq + Hash + Clone,
+    V: Eq + Hash + Clone,
+ {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V> BiMap<K, V>
 where
     K: Eq + Hash + Clone,

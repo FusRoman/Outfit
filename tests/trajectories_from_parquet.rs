@@ -12,7 +12,7 @@ fn test_load_traj_from_parquet() {
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
 
     let traj_set =
-        TrajectorySet::new_from_parquet(&mut env_state, &path_file, ztf_observer, 0.5, 0.5, None);
+        TrajectorySet::new_from_parquet(&mut env_state, path_file, ztf_observer, 0.5, 0.5, None);
     assert_eq!(traj_set.len(), 4);
     assert_eq!(traj_set.get(&ObjectNumber::Int(1)).unwrap().len(), 3);
 }
@@ -25,7 +25,7 @@ fn test_large_parquet() {
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
 
     let mut traj_set =
-        TrajectorySet::new_from_parquet(&mut env_state, &path_file, ztf_observer, 0.5, 0.5, None);
+        TrajectorySet::new_from_parquet(&mut env_state, path_file, ztf_observer, 0.5, 0.5, None);
 
     assert_eq!(traj_set.len(), 2082);
     assert_eq!(traj_set.get(&ObjectNumber::Int(1)).unwrap().len(), 6);
@@ -44,7 +44,7 @@ fn test_large_parquet() {
     assert_eq!(traj_set.get(&ObjectNumber::Int(3)).unwrap().len(), 10);
     assert_eq!(traj_set.get(&ObjectNumber::Int(4)).unwrap().len(), 10);
 
-    let first_obs = traj.get(0).unwrap();
+    let first_obs = traj.first().unwrap();
     assert_eq!(first_obs.ra, 33.4247141);
     assert_eq!(first_obs.dec, 23.5516817);
     assert_eq!(first_obs.time, 58789.138125000056);

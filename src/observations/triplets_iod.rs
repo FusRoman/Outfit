@@ -274,18 +274,20 @@ pub(crate) fn generate_triplets(
 
 #[cfg(test)]
 mod triplets_iod_tests {
-    use camino::Utf8Path;
 
     use super::*;
-    use crate::{
-        constants::TrajectorySet, error_models::ErrorModel,
-        initial_orbit_determination::gauss::gauss_test::assert_gauss_obs_approx_eq,
-        observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
-    };
 
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_compute_triplets() {
+        use camino::Utf8Path;
+
+        use crate::{
+            constants::TrajectorySet, error_models::ErrorModel,
+            initial_orbit_determination::gauss::gauss_test::assert_gauss_obs_approx_eq,
+            observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
+        };
+
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));

@@ -91,7 +91,7 @@ pub(crate) fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
     );
 
     let match_data = data_regex
-        .captures(&jpl_response)
+        .captures(jpl_response)
         .expect(&error_msg_data)
         .get(1)
         .expect("JPL deserializer: Error when trying to get the match at index 1 for data regex")
@@ -99,7 +99,7 @@ pub(crate) fn deserialize_vector(jpl_response: &String) -> Vec<PosRecord> {
         .replace(" ", "")
         .replace(",\n", "\n");
     let mut match_header = header_regex
-        .captures(&jpl_response)
+        .captures(jpl_response)
         .expect(&error_msg_header)
         .get(1)
         .expect("JPL deserializer: Error when trying to get the match at index 1 for header regex")

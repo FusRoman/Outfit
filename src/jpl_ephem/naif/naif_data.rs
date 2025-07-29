@@ -34,10 +34,10 @@ impl NaifData {
     /// -------
     /// * A `NaifData` instance containing the parsed data.
     pub fn read_naif_file(file_path: &EphemFilePath) -> Self {
-        let mut file = BufReader::new(
-            File::open(file_path.path())
-                .expect(format!("Failed to open the JPL ephemeris file: {}", file_path).as_str()),
-        );
+        let mut file =
+            BufReader::new(File::open(file_path.path()).unwrap_or_else(|_| {
+                panic!("Failed to open the JPL ephemeris file: {}", file_path)
+            }));
 
         let mut buffer = [0u8; 1 << 10];
         file.read_exact(&mut buffer)
@@ -54,7 +54,7 @@ impl NaifData {
         let binding = String::from_utf8_lossy(&ascii_buffer).replace('\0', "\n");
         let ascii_comment = binding.as_str();
 
-        let (_, jpl_header) = JPLEphemHeader::parse(&ascii_comment)
+        let (_, jpl_header) = JPLEphemHeader::parse(ascii_comment)
             .expect("Failed to parse the JPL header with nom !");
 
         let offset_bytes = (daf_header.fward as usize - 1) * 1024;
@@ -99,9 +99,9 @@ impl NaifData {
             );
         }
         NaifData {
-            daf_header: daf_header,
+            daf_header,
             header: jpl_header,
-            jpl_data: jpl_data,
+            jpl_data,
         }
     }
 
@@ -168,17 +168,18 @@ impl NaifData {
     /// * A tuple containing the position and velocity vectors in the J2000 frame.
     /// The position and velocity vectors are in kilometers and kilometers per second, respectively.
     pub fn ephemeris(&self, target: NaifIds, center: NaifIds, et_seconds: f64) -> InterpResult {
-        let record = self.get_record(target, center, et_seconds).expect(
-            format!(
-                "Failed to get ephemeris record for target: {:?}, center: {:?} at epoch: {}",
-                target, center, et_seconds
-            )
-            .as_str(),
-        );
+        let record = self
+            .get_record(target, center, et_seconds)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Failed to get ephemeris record for target: {:?}, center: {:?} at epoch: {}",
+                    target, center, et_seconds
+                )
+            });
 
         let (position, velocity) = record.interpolate(et_seconds);
         InterpResult {
-            position: position,
+            position,
             velocity: Some(velocity),
             acceleration: None,
         }
@@ -212,11 +213,14 @@ impl NaifData {
 #[cfg(test)]
 mod test_naif_file {
     use super::*;
+
+    #[cfg(feature = "jpl-download")]
     use crate::jpl_ephem::naif::naif_ids::{
         planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
     };
     #[cfg(feature = "jpl-download")]
     use crate::unit_test_global::JPL_EPHEM_NAIF;
+    #[cfg(feature = "jpl-download")]
     use hifitime::Epoch;
 
     #[test]

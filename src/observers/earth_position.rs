@@ -60,7 +60,7 @@ mod earth_pos_tests {
     #[ignore]
     fn test_earth_pos_with_mjd() {
         let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-        let test_mjd = vec![57028.479297592596, 57049.245147592592, 57063.977117592593];
+        let test_mjd = vec![57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59];
         let earth_vector = earth_position_from_jpl_horizon(&test_mjd, &state);
         assert_eq!(
             earth_vector,

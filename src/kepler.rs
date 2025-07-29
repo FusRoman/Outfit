@@ -279,10 +279,10 @@ pub fn velocity_correction(
     ecc_max: f64,
 ) -> Result<(Vector3<f64>, f64, f64), VelocityCorrectionError> {
     let mu = GAUSS_GRAV.powi(2);
-    let sig0 = x2.dot(&v2);
+    let sig0 = x2.dot(v2);
     let r2 = x2.norm();
 
-    let Some((_, ecc, _, energy)) = eccentricity_control(&x2, &v2, peri_max, ecc_max) else {
+    let Some((_, ecc, _, energy)) = eccentricity_control(x2, v2, peri_max, ecc_max) else {
         return Err(VelocityCorrectionError);
     };
 
@@ -328,17 +328,17 @@ mod kepler_test {
 
         let dt = -20.765849999996135;
         let r0 = 1.3803870211345761;
-        let sig0 = 3.7013544840038748E-003;
-        let mu = 2.9591220828559115E-004;
-        let alpha = -1.6421583777711407E-004;
-        let e0 = 0.28359959913734450;
+        let sig0 = 3.701_354_484_003_874_8E-3;
+        let mu = 2.959_122_082_855_911_5E-4;
+        let alpha = -1.642_158_377_771_140_7E-4;
+        let e0 = 0.283_599_599_137_344_5;
 
         let (psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
 
         assert_eq!(psi, -15.327414893041848);
         assert_eq!(alpha, -0.00016421583777711407);
 
-        let alpha = 1.6421583777711407E-004;
+        let alpha = 1.642_158_377_771_140_7E-4;
         let (psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
 
         assert_eq!(psi, -73.1875935362658);
@@ -352,10 +352,10 @@ mod kepler_test {
     fn test_solve_kepuni() {
         let dt = -20.765849999996135;
         let r0 = 1.3803870211345761;
-        let sig0 = 3.7013544840038748E-003;
-        let mu = 2.9591220828559115E-004;
-        let alpha = -1.6421583777711407E-004;
-        let e0 = 0.28359959913734450;
+        let sig0 = 3.701_354_484_003_874_8E-3;
+        let mu = 2.959_122_082_855_911_5E-4;
+        let alpha = -1.642_158_377_771_140_7E-4;
+        let e0 = 0.283_599_599_137_344_5;
 
         let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
 
@@ -365,7 +365,7 @@ mod kepler_test {
         assert_eq!(s2, 117.0876676813769);
         assert_eq!(s3, -598.9874390519309);
 
-        let alpha = 1.6421583777711407E-004;
+        let alpha = 1.642_158_377_771_140_7E-4;
         let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
 
         assert_eq!(psi, -15.1324122746124);
@@ -378,27 +378,27 @@ mod kepler_test {
     #[test]
     fn test_velocity_correction() {
         let x1 = Vector3::new(
-            -0.84356112612968326,
-            0.93728832737077283,
-            0.65918390102977664,
+            -0.843_561_126_129_683_3,
+            0.937_288_327_370_772_8,
+            0.659_183_901_029_776_6,
         );
 
         let x2 = Vector3::new(
-            -0.62312162291738404,
+            -0.623_121_622_917_384,
             1.0076797884556383,
-            0.70812568798442455,
+            0.708_125_687_984_424_5,
         );
 
         let v2 = Vector3::new(
-            -1.5524310368624056E-002,
-            -3.9841041766040678E-003,
-            -2.7640154361637183E-003,
+            -1.552_431_036_862_405_6E-2,
+            -3.984_104_176_604_068E-3,
+            -2.764_015_436_163_718_3E-3,
         );
         let dt = 14.731970000000729;
 
         let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1.).unwrap();
 
-        assert_eq!(f, 0.98816487709729062);
+        assert_eq!(f, 0.988_164_877_097_290_6);
         assert_eq!(g, 14.674676076120734);
         assert_eq!(
             v2.as_slice(),

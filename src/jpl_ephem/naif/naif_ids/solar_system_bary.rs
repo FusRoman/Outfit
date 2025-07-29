@@ -65,7 +65,7 @@ mod test_solarsystem_bary {
     fn test_solar_system_bary() {
         assert_eq!(SolarSystemBary::from_id(0).unwrap(), SolarSystemBary::SSB);
         assert_eq!(SolarSystemBary::from_id(10).unwrap(), SolarSystemBary::Sun);
-        assert_eq!(SolarSystemBary::from_id(1).is_err(), true);
+        assert!(SolarSystemBary::from_id(1).is_err());
     }
 
     #[test]

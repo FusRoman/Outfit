@@ -46,7 +46,7 @@ impl Observer {
         Observer {
             longitude: NotNan::try_from(longitude).expect("Longitude cannot be NaN"),
             rho_cos_phi: NotNan::try_from(rho_cos_phi).expect("Longitude cannot be NaN"),
-            rho_sin_phi: NotNan::try_from(rho_sin_phi as f64).expect("Longitude cannot be NaN"),
+            rho_sin_phi: NotNan::try_from(rho_sin_phi).expect("Longitude cannot be NaN"),
             name,
             ra_accuracy,
             dec_accuracy,

@@ -57,13 +57,13 @@ impl KeplerianElements {
         let mean_anomaly = principal_angle(mean_longitude - dig);
 
         Self {
-            reference_epoch: reference_epoch,
+            reference_epoch,
             semi_major_axis: a,
             eccentricity: ecc,
-            inclination: inclination,
+            inclination,
             ascending_node_longitude: omega_node,
             periapsis_argument: periapsis_arg,
-            mean_anomaly: mean_anomaly,
+            mean_anomaly,
         }
     }
 }
