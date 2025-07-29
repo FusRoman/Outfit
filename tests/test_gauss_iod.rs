@@ -42,6 +42,7 @@ fn run_iod(
 }
 
 #[test]
+#[cfg(feature = "jpl-download")]
 fn test_gauss_iod() {
     let test_epsilon = 1e-16;
 

@@ -284,6 +284,7 @@ mod triplets_iod_tests {
     };
 
     #[test]
+    #[cfg(feature = "jpl-download")]
     fn test_compute_triplets() {
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
