@@ -5,9 +5,10 @@ pub mod trajectory_ext;
 pub(crate) mod triplets_iod;
 
 use crate::{
-    constants::{ArcSec, Degree, ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC},
+    constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC},
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
+    observations::trajectory_ext::ObservationBatch,
     observers::{observer_position::geo_obs_pos, observers::Observer},
     outfit::Outfit,
     outfit_errors::OutfitError,
@@ -320,34 +321,32 @@ pub(crate) fn extract_80col(
     ))
 }
 
-/// Create a vector of Observations from vectors of right ascension, declination, time, and observer
-/// Each observations should have been observed by the same observer.
+/// Create a vector of Observations from a batch of right ascension, declination, and time values.
 ///
-/// Arguments
-/// ---------
-/// * `ra`: a vector of right ascension
-/// * `dec`: a vector of declination
-/// * `time`: a vector of time
+/// Each observation in the batch is assumed to come from the same observer.
+///
+/// # Arguments
+/// * `env_state`: global Outfit state
+/// * `batch`: RA/DEC/time values with their corresponding uncertainties
 /// * `observer`: the observer
 ///
-/// Return
-/// ------
-/// * a vector of Observations
-pub(crate) fn observation_from_vec(
+/// # Returns
+/// A vector of [`Observation`] corresponding to the given inputs.
+pub(crate) fn observation_from_batch(
     env_state: &mut Outfit,
-    ra: &Vec<Degree>,
-    error_ra: ArcSec,
-    dec: &Vec<Degree>,
-    error_dec: ArcSec,
-    time: &Vec<MJD>,
+    batch: &ObservationBatch<'_>,
     observer: Arc<Observer>,
 ) -> Observations {
     let obs_uin16 = env_state.uint16_from_observer(observer);
-    // TODO: replace error_ra and error_dec with the correct values
-    ra.iter()
-        .zip(dec.iter())
-        .zip(time.iter())
-        .map(|((ra, dec), time)| Observation::new(obs_uin16, *ra, error_ra, *dec, error_dec, *time))
+
+    batch
+        .ra
+        .iter()
+        .zip(batch.dec.iter())
+        .zip(batch.time.iter())
+        .map(|((ra, dec), time)| {
+            Observation::new(obs_uin16, *ra, batch.error_ra, *dec, batch.error_dec, *time)
+        })
         .collect()
 }
 
