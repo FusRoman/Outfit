@@ -69,20 +69,4 @@ impl OutfitEnv {
             .expect("Failed to read response body")
     }
 
-    pub(crate) fn post_from_url<T, I, K, V>(&self, url: T, form: I) -> String
-    where
-        Uri: TryFrom<T>,
-        <Uri as TryFrom<T>>::Error: Into<http::Error>,
-        I: IntoIterator<Item = (K, V)>,
-        K: AsRef<str>,
-        V: AsRef<str>,
-    {
-        self.http_client
-            .post(url)
-            .send_form(form)
-            .expect("Post request failed")
-            .body_mut()
-            .read_to_string()
-            .expect("Failed to read response body")
-    }
 }

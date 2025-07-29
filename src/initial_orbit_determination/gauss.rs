@@ -80,6 +80,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::with_observer_position`] – preferred constructor when the observing site is known
+    #[cfg(test)]
     pub(crate) fn new(
         idx_obs: Vector3<usize>,
         ra: Vector3<f64>,
