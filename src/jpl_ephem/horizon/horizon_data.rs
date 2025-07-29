@@ -85,17 +85,16 @@ fn dimension(index: usize) -> usize {
 /// -------
 /// * Size of the record in bytes
 fn compute_recsize(ipt: IPT) -> usize {
-    let mut kernel_size = 4; // mots de 32 bits
+    let kernel_size: usize = 4
+        + (0..15)
+            .map(|i| {
+                let n_subintervals = ipt[i][1] as usize;
+                let n_coeffs = ipt[i][2] as usize;
+                let dim = dimension(i);
+                2 * n_subintervals * n_coeffs * dim
+            })
+            .sum::<usize>();
 
-    for i in 0..15 {
-        let n_subintervals = ipt[i][1] as usize;
-        let n_coeffs = ipt[i][2] as usize;
-        let dim = dimension(i);
-
-        kernel_size += 2 * n_subintervals * n_coeffs * dim;
-    }
-
-    // 1 mot = 4 octets → recsize en octets
     kernel_size * 4
 }
 
@@ -111,10 +110,6 @@ fn compute_recsize(ipt: IPT) -> usize {
 fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     let mut ipt: IPT = [[0; 3]; 15];
 
-    // On saute les 5 premiers doubles (5 * 8 = 40 octets)
-    // let (input, _) = take(40usize)(input)?;
-
-    // On lit ensuite 40 entiers u32 (40 * 4 = 160 octets)
     let mut input_remaining = input;
     for i in 0..36 {
         let (rest, val) = le_u32(input_remaining)?;
@@ -146,23 +141,20 @@ fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
 /// -------
 /// * A tuple containing the remaining input and the IPT 13 and 14 elements
 fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
-    let mut ipt_13 = [0u32; 3];
-    let mut ipt_14 = [0u32; 3];
-    let mut remaining = input;
-
-    for i in 0..3 {
-        let (rest, val) = le_u32(remaining)?;
-        ipt_13[i] = val;
-        remaining = rest;
+    fn parse_three(mut input: &[u8]) -> IResult<&[u8], [u32; 3]> {
+        let mut result = [0u32; 3];
+        for slot in &mut result {
+            let (rest, val) = le_u32(input)?;
+            *slot = val;
+            input = rest;
+        }
+        Ok((input, result))
     }
 
-    for i in 0..3 {
-        let (rest, val) = le_u32(remaining)?;
-        ipt_14[i] = val;
-        remaining = rest;
-    }
+    let (input, ipt_13) = parse_three(input)?;
+    let (input, ipt_14) = parse_three(input)?;
 
-    Ok((remaining, [ipt_13, ipt_14]))
+    Ok((input, [ipt_13, ipt_14]))
 }
 
 /// Read the IPT[13] and IPT[14] elements from the file
@@ -270,41 +262,38 @@ fn parse_all_blocks(
     ncoeff: usize,
     ipt: IPT,
 ) -> std::io::Result<HorizonRecords> {
-    // Skip les 2 premiers blocs (header texte + header binaire)
     let offset = 2 * recsize;
     file.seek(std::io::SeekFrom::Start(offset as u64))?;
 
-    // Lis tout le reste du fichier
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
 
-    // Vérifie que la taille est un multiple du recsize
     let n_blocks = buffer.len() / recsize;
-    let mut blocks: HorizonRecords = Vec::with_capacity(n_blocks);
 
-    for i in 0..n_blocks {
-        let start = i * recsize;
-        let end = start + recsize;
-        let slice = &buffer[start..end];
+    (0..n_blocks)
+        .map(|i| {
+            let start = i * recsize;
+            let end = start + recsize;
+            let slice = &buffer[start..end];
 
-        let (_, block) = parse_block(slice, ncoeff).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse block {i}"),
-            )
-        })?;
+            let (_, block) = parse_block(slice, ncoeff).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to parse block {i}"),
+                )
+            })?;
 
-        let mut records = HashMap::new();
-        for body in 0..12 {
-            let ipt_body = ipt[body];
+            let records = (0..12)
+                .map(|body| {
+                    let ipt_body = ipt[body];
+                    let body_rec = extract_body_records(&block, ipt_body);
+                    (body as u8, body_rec)
+                })
+                .collect::<HashMap<u8, _>>();
 
-            let body_rec = extract_body_records(&block, ipt_body);
-            records.insert(body as u8, body_rec);
-        }
-        blocks.push(records);
-    }
-
-    Ok(blocks)
+            Ok(records)
+        })
+        .collect()
 }
 
 impl HorizonData {
