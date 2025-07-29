@@ -177,9 +177,9 @@ impl EphemFilePath {
                 let url = file_source.get_version_url();
 
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                rt.block_on(async { download_big_file(&url, &local_file.path()).await })?;
+                rt.block_on(async { download_big_file(&url, local_file.path()).await })?;
 
-                return Ok(local_file);
+                Ok(local_file)
             }
             #[cfg(not(feature = "jpl-download"))]
             {

@@ -400,9 +400,9 @@ mod test_observations {
         let obs = Observation {
             observer: 0,
             ra: 1.7899347771316527,
-            error_ra: 1.7700245206085460E-006,
-            dec: 0.77899653810797365,
-            error_dec: 1.2595828918293177E-006,
+            error_ra: 1.770_024_520_608_546E-6,
+            dec: 0.778_996_538_107_973_6,
+            error_dec: 1.259_582_891_829_317_7E-6,
             time: 57070.262067592594,
         };
 
@@ -411,11 +411,11 @@ mod test_observations {
             .get_observer_from_mpc_code(&"F51".to_string());
 
         let equinoctial_element = EquinoctialElements {
-            reference_epoch: 57049.242334573748,
+            reference_epoch: 57_049.242_334_573_75,
             semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.26937368090922720,
-            eccentricity_cos_lon: 8.8564152600135601E-002,
-            tan_half_incl_sin_node: 8.0899701663963020E-004,
+            eccentricity_sin_lon: 0.269_373_680_909_227_2,
+            eccentricity_cos_lon: 8.856_415_260_013_56E-2,
+            tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
             tan_half_incl_cos_node: 0.10168201109730375,
             mean_longitude: 1.6936970079414786,
         };

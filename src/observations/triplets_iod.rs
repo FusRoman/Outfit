@@ -293,7 +293,7 @@ mod triplets_iod_tests {
 
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
         let mut traj_set =
-            TrajectorySet::new_from_80col(&mut env_state, &Utf8Path::new("tests/data/2015AB.obs"));
+            TrajectorySet::new_from_80col(&mut env_state, Utf8Path::new("tests/data/2015AB.obs"));
 
         let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
         let traj_len = traj_set

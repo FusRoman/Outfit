@@ -462,7 +462,7 @@ mod observer_pos_tests {
     fn test_helio_pos_obs() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
-        let tmjd = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
+        let tmjd = Vector3::new(57028.479297592596, 57_049.245_147_592_59, 57_063.977_117_592_59);
 
         // longitude, latitude and height of Pan-STARRS 1, Haleakala
         let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);

@@ -703,7 +703,7 @@ mod test_horizon_reader {
         );
 
         let (record, tau) = JPL_EPHEM_HORIZON
-            .get_record_horizon(10, 57049.231857592589)
+            .get_record_horizon(10, 57_049.231_857_592_59)
             .unwrap();
 
         let res = record.interpolate(tau, true, true, 2);
