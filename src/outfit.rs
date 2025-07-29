@@ -49,7 +49,7 @@ impl Outfit {
     /// Return
     /// ------
     /// * A map of observatories from the Minor Planet Center
-    ///    The key is the MPC code and the value is the observer
+    ///   The key is the MPC code and the value is the observer
     pub(crate) fn get_observatories(&self) -> &MpcCodeObs {
         self.observatories
             .mpc_code_obs
@@ -78,7 +78,7 @@ impl Outfit {
     /// Return
     /// ------
     /// * A map of observatories from the Minor Planet Center
-    ///    The key is the MPC code and the value is the observer
+    ///   The key is the MPC code and the value is the observer
     pub(crate) fn init_observatories(&self) -> MpcCodeObs {
         let mut observatories: MpcCodeObs = HashMap::new();
 

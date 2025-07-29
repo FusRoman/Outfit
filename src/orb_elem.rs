@@ -64,7 +64,7 @@ fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
 /// * `elem` – A mutable array to hold the resulting orbital elements (output).
 /// * `type_` – A mutable string that will be set to `"KEP"` (elliptic) or `"COM"` (cometary/parabolic/hyperbolic).
 /// * `xv` – A 6-element array `[x, y, z, vx, vy, vz]` in heliocentric J2000 coordinates.
-///          Positions are in astronomical units (AU) and velocities in AU/day.
+///   Positions are in astronomical units (AU) and velocities in AU/day.
 ///
 /// # Note
 /// This function does not account for planetary perturbations or relativistic corrections.

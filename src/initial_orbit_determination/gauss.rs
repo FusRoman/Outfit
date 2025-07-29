@@ -378,7 +378,7 @@ impl GaussObs {
     /// Arguments
     /// ---------
     /// * `polynom` – Array of 9 coefficients `[c₀, ..., c₈]` representing the polynomial:
-    ///     c₀ + c₁·r + c₂·r² + ... + c₈·r⁸ = 0
+    ///   c₀ + c₁·r + c₂·r² + ... + c₈·r⁸ = 0
     /// * `max_iterations` – Maximum number of iterations for the Aberth root-finding algorithm.
     /// * `aberth_epsilon` – Convergence threshold for the Aberth iterations.
     /// * `root_acceptance_epsilon` – Threshold on the imaginary part below which a root is considered real.
