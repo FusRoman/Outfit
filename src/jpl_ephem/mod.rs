@@ -27,7 +27,7 @@ impl JPLEphem {
                 let horizon_data = HorizonData::read_horizon_file(&file_path);
                 Ok(JPLEphem::HorizonFile(horizon_data))
             }
-            EphemFilePath::NAIF(..) => {
+            EphemFilePath::Naif(..) => {
                 let naif_data = NaifData::read_naif_file(&file_path);
                 Ok(JPLEphem::NaifFile(naif_data))
             }

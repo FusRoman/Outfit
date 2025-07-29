@@ -13,7 +13,7 @@ use crate::outfit_errors::OutfitError;
 #[derive(Debug, Clone)]
 pub enum EphemFileSource {
     JPLHorizon(JPLHorizonVersion),
-    NAIF(NaifVersion),
+    Naif(NaifVersion),
 }
 
 impl TryFrom<&str> for EphemFileSource {
@@ -41,7 +41,7 @@ impl TryFrom<&str> for EphemFileSource {
             }
             "naif" => {
                 if let Ok(version) = NaifVersion::from_str(parts[1]) {
-                    Ok(EphemFileSource::NAIF(version))
+                    Ok(EphemFileSource::Naif(version))
                 } else {
                     Err(OutfitError::InvalidJPLEphemFileVersion(format!(
                         "Invalid NAIF version: {}",
@@ -62,7 +62,7 @@ impl EphemFileSource {
     fn get_baseurl(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/",
-            EphemFileSource::NAIF(_) => {
+            EphemFileSource::Naif(_) => {
                 "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/"
             }
         }
@@ -75,21 +75,21 @@ impl EphemFileSource {
             EphemFileSource::JPLHorizon(jpl_version) => {
                 format!("{}{}", base_url, jpl_version.get_filename())
             }
-            EphemFileSource::NAIF(version) => format!("{}{}", base_url, version.get_filename()),
+            EphemFileSource::Naif(version) => format!("{}{}", base_url, version.get_filename()),
         }
     }
 
     fn get_cache_dir(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "jpl_horizon",
-            EphemFileSource::NAIF(_) => "naif",
+            EphemFileSource::Naif(_) => "naif",
         }
     }
 
     fn filename(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(version) => version.to_filename(),
-            EphemFileSource::NAIF(version) => version.get_filename(),
+            EphemFileSource::Naif(version) => version.get_filename(),
         }
     }
 }
@@ -128,7 +128,7 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError
 
 pub enum EphemFilePath {
     JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
-    NAIF(Utf8PathBuf, NaifVersion),
+    Naif(Utf8PathBuf, NaifVersion),
 }
 
 impl std::fmt::Display for EphemFilePath {
@@ -137,7 +137,7 @@ impl std::fmt::Display for EphemFilePath {
             EphemFilePath::JPLHorizon(path, version) => {
                 write!(f, "JPL Horizon: {} ({})", path, version.get_filename())
             }
-            EphemFilePath::NAIF(path, version) => {
+            EphemFilePath::Naif(path, version) => {
                 write!(f, "NAIF: {} ({})", path, version.get_filename())
             }
         }
@@ -191,28 +191,28 @@ impl EphemFilePath {
     pub fn exists(&self) -> bool {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.exists(),
-            EphemFilePath::NAIF(path, _) => path.exists(),
+            EphemFilePath::Naif(path, _) => path.exists(),
         }
     }
 
     pub fn path(&self) -> &Utf8Path {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path,
-            EphemFilePath::NAIF(path, _) => path,
+            EphemFilePath::Naif(path, _) => path,
         }
     }
 
     pub fn file_name(&self) -> Option<&str> {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.file_name(),
-            EphemFilePath::NAIF(path, _) => path.file_name(),
+            EphemFilePath::Naif(path, _) => path.file_name(),
         }
     }
 
     pub fn extension(&self) -> Option<&str> {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.extension(),
-            EphemFilePath::NAIF(path, _) => path.extension(),
+            EphemFilePath::Naif(path, _) => path.extension(),
         }
     }
 }
@@ -241,7 +241,7 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
             EphemFileSource::JPLHorizon(version) => {
                 Ok(EphemFilePath::JPLHorizon(local_file, version))
             }
-            EphemFileSource::NAIF(version) => Ok(EphemFilePath::NAIF(local_file, version)),
+            EphemFileSource::Naif(version) => Ok(EphemFilePath::Naif(local_file, version)),
         }
     }
 }
