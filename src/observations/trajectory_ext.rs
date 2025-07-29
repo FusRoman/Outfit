@@ -1,13 +1,22 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
+use crate::observations::observation_from_batch;
 use crate::observers::observers::Observer;
 use crate::outfit::Outfit;
 use camino::Utf8Path;
 
 use super::ades_reader::parse_ades;
-use super::{extract_80col, observation_from_vec};
+use super::extract_80col;
 use super::parquet_reader::parquet_to_trajset;
+
+pub struct ObservationBatch<'a> {
+    pub ra: &'a [Degree],
+    pub error_ra: ArcSec,
+    pub dec: &'a [Degree],
+    pub error_dec: ArcSec,
+    pub time: &'a [MJD],
+}
 
 /// A trait for the TrajectorySet type def.
 /// This trait provides methods to create a TrajectorySet from different sources.
@@ -82,11 +91,7 @@ pub trait TrajectoryExt {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        error_ra: ArcSec,
-        dec: &Vec<Degree>,
-        error_dec: ArcSec,
-        time: &Vec<MJD>,
+        batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     ) -> Self;
 
@@ -107,11 +112,7 @@ pub trait TrajectoryExt {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        error_ra: ArcSec,
-        dec: &Vec<Degree>,
-        error_dec: ArcSec,
-        time: &Vec<MJD>,
+        batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     );
 
@@ -216,15 +217,10 @@ impl TrajectoryExt for TrajectorySet {
     fn new_from_vec(
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        error_ra: ArcSec,
-        dec: &Vec<Degree>,
-        error_dec: ArcSec,
-        time: &Vec<MJD>,
+        batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     ) -> Self {
-        let observations: Observations =
-            observation_from_vec(env_state, ra, error_ra, dec, error_dec, time, observer);
+        let observations: Observations = observation_from_batch(env_state, &batch, observer);
         let mut traj_set: TrajectorySet = HashMap::default();
         traj_set.insert(ObjectNumber::String(object_number.into()), observations);
         traj_set
@@ -234,15 +230,10 @@ impl TrajectoryExt for TrajectorySet {
         &mut self,
         env_state: &mut Outfit,
         object_number: &str,
-        ra: &Vec<Degree>,
-        error_ra: ArcSec,
-        dec: &Vec<Degree>,
-        error_dec: ArcSec,
-        time: &Vec<MJD>,
+        batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
     ) {
-        let observations: Observations =
-            observation_from_vec(env_state, ra, error_ra, dec, error_dec, time, observer);
+        let observations: Observations = observation_from_batch(env_state, &batch, observer);
         self.insert(
             ObjectNumber::String(object_number.to_string()),
             observations,

@@ -177,6 +177,12 @@ pub struct IODParamsBuilder {
     params: IODParams,
 }
 
+impl Default for IODParamsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IODParamsBuilder {
     /// Create a new builder initialized with default values.
     pub fn new() -> Self {
