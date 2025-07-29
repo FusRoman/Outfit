@@ -8,6 +8,7 @@ use camino::Utf8Path;
 use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::error_models::ErrorModel;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
+use outfit::initial_orbit_determination::IODParams;
 use outfit::keplerian_element::KeplerianElements;
 use outfit::observations::observations_ext::ObservationIOD;
 use outfit::observations::trajectory_ext::TrajectoryExt;
@@ -20,26 +21,18 @@ fn run_iod(
     env_state: &mut Outfit,
     traj_set: &mut TrajectorySet,
     traj_number: &ObjectNumber,
-    gap_max: f64,
 ) -> Result<(Option<GaussResult>, f64), OutfitError> {
     let obs = traj_set.get_mut(traj_number).unwrap();
     let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
 
-    obs.estimate_best_orbit(
-        env_state,
-        &ErrorModel::FCCT14,
-        &mut rng,
-        10,
-        1.1,
-        -1.1,
-        30.0,
-        Some(0.03),
-        Some(150.),
-        None,
-        Some(obs.len()),
-        Some(30),
-        gap_max,
-    )
+    let default = IODParams::builder()
+        .n_noise_realizations(10)
+        .noise_scale(1.1)
+        .max_obs_for_triplets(obs.len())
+        .max_triplets(30)
+        .build()?;
+
+    obs.estimate_best_orbit(env_state, &ErrorModel::FCCT14, &mut rng, &default)
 }
 
 #[test]
@@ -62,7 +55,6 @@ fn test_gauss_iod() {
         &mut env_state,
         &mut traj_set,
         &ObjectNumber::String("K09R05F".into()),
-        8.0 / 24.0, // 8 hours in days
     )
     .unwrap();
 
@@ -85,7 +77,6 @@ fn test_gauss_iod() {
         &mut env_state,
         &mut traj_set,
         &ObjectNumber::String("8467".into()),
-        8.0 / 24.0, // 8 hours in days
     )
     .unwrap();
 
@@ -107,7 +98,6 @@ fn test_gauss_iod() {
         &mut env_state,
         &mut traj_set,
         &ObjectNumber::String("33803".into()),
-        8.0 / 24.0, // 8 hours in days
     )
     .unwrap();
 

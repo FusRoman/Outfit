@@ -173,17 +173,17 @@ fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize
 pub(crate) fn generate_triplets(
     observations: &mut Observations,
     state: &Outfit,
-    dt_min: Option<f64>,
-    dt_max: Option<f64>,
-    optimal_interval_time: Option<f64>,
-    max_obs_for_triplets: Option<usize>,
-    max_triplet: Option<u32>,
+    dt_min: f64,
+    dt_max: f64,
+    optimal_interval_time: f64,
+    max_obs_for_triplets: usize,
+    max_triplet: u32,
 ) -> Vec<GaussObs> {
-    let dt_min = dt_min.unwrap_or(0.03);
-    let dt_max = dt_max.unwrap_or(150.0);
-    let opt_dt = optimal_interval_time.unwrap_or(20.0);
-    let max_obs_for_triplets = max_obs_for_triplets.unwrap_or(100);
-    let max_triplet = max_triplet.unwrap_or(10) as usize;
+    let dt_min = dt_min;
+    let dt_max = dt_max;
+    let opt_dt = optimal_interval_time;
+    let max_obs_for_triplets = max_obs_for_triplets;
+    let max_triplet = max_triplet as usize;
 
     // 1. Sort observations by time (in-place)
     observations.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
@@ -312,15 +312,7 @@ mod triplets_iod_tests {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = generate_triplets(
-            traj_mut,
-            &env_state,
-            Some(0.03),
-            Some(150.),
-            None,
-            Some(traj_len),
-            Some(10),
-        );
+        let triplets = generate_triplets(traj_mut, &env_state, 0.03, 150.0, 20.0, traj_len, 10);
 
         assert_eq!(
             triplets.len(),

@@ -6,10 +6,9 @@ use crate::{
     constants::{Observations, Radian},
     equinoctial_element::EquinoctialElements,
     error_models::ErrorModel,
-    initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult},
+    initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult, IODParams},
     keplerian_element::KeplerianElements,
-    observations::Observation,
-    observations::triplets_iod::generate_triplets,
+    observations::{triplets_iod::generate_triplets, Observation},
     outfit::Outfit,
     outfit_errors::OutfitError,
 };
@@ -118,11 +117,11 @@ trait ObservationsExt {
     fn compute_triplets(
         &mut self,
         state: &Outfit,
-        dt_min: Option<f64>,
-        dt_max: Option<f64>,
-        optimal_interval_time: Option<f64>,
-        max_obs_for_triplets: Option<usize>,
-        max_triplet: Option<u32>,
+        dt_min: f64,
+        dt_max: f64,
+        optimal_interval_time: f64,
+        max_obs_for_triplets: usize,
+        max_triplet: u32,
     ) -> Vec<GaussObs>;
 
     /// Select the interval of observations for RMS calculation.
@@ -410,16 +409,7 @@ pub trait ObservationIOD {
         state: &Outfit,
         error_model: &ErrorModel,
         rng: &mut impl rand::Rng,
-        n_noise_realizations: usize,
-        noise_scale: f64,
-        extf: f64,
-        dtmax: f64,
-        dt_min: Option<f64>,
-        dt_max_triplet: Option<f64>,
-        optimal_interval_time: Option<f64>,
-        max_obs_for_triplets: Option<usize>,
-        max_triplets: Option<u32>,
-        gap_max: f64,
+        params: &IODParams,
     ) -> Result<(Option<GaussResult>, f64), OutfitError>;
 }
 
@@ -427,11 +417,11 @@ impl ObservationsExt for Observations {
     fn compute_triplets(
         &mut self,
         state: &Outfit,
-        dt_min: Option<f64>,
-        dt_max: Option<f64>,
-        optimal_interval_time: Option<f64>,
-        max_obs_for_triplets: Option<usize>,
-        max_triplet: Option<u32>,
+        dt_min: f64,
+        dt_max: f64,
+        optimal_interval_time: f64,
+        max_obs_for_triplets: usize,
+        max_triplet: u32,
     ) -> Vec<GaussObs> {
         generate_triplets(
             self,
@@ -590,28 +580,19 @@ impl ObservationIOD for Observations {
         state: &Outfit,
         error_model: &ErrorModel,
         rng: &mut impl rand::Rng,
-        n_noise_realizations: usize,
-        noise_scale: f64,
-        extf: f64,
-        dtmax: f64,
-        dt_min: Option<f64>,
-        dt_max_triplet: Option<f64>,
-        optimal_interval_time: Option<f64>,
-        max_obs_for_triplets: Option<usize>,
-        max_triplets: Option<u32>,
-        gap_max: f64,
+        params: &IODParams,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
         // Apply uncertainty calibration based on RMS statistics from the error model
-        self.apply_batch_rms_correction(error_model, gap_max);
+        self.apply_batch_rms_correction(error_model, params.gap_max);
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
         let triplets = self.compute_triplets(
             state,
-            dt_min,
-            dt_max_triplet,
-            optimal_interval_time,
-            max_obs_for_triplets,
-            max_triplets,
+            params.dt_min,
+            params.dt_max_triplet,
+            params.optimal_interval_time,
+            params.max_obs_for_triplets,
+            params.max_triplets,
         );
 
         let mut best_rms = f64::MAX;
@@ -626,8 +607,8 @@ impl ObservationIOD for Observations {
             let realizations = triplet.generate_noisy_realizations(
                 &error_ra,
                 &error_dec,
-                n_noise_realizations,
-                noise_scale,
+                params.n_noise_realizations,
+                params.noise_scale,
                 rng,
             )?;
 
@@ -636,7 +617,13 @@ impl ObservationIOD for Observations {
                 match realization.prelim_orbit() {
                     Ok(orbit) => {
                         // Evaluate how well this orbit fits the full observation set
-                        match self.rms_orbit_error(state, &realization, &orbit, extf, dtmax) {
+                        match self.rms_orbit_error(
+                            state,
+                            &realization,
+                            &orbit,
+                            params.extf,
+                            params.dtmax,
+                        ) {
                             Ok(rms) => {
                                 // Keep orbit if it's the best (lowest RMS) so far
                                 if rms < best_rms {
@@ -695,14 +682,7 @@ mod test_obs_ext {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(
-            &env_state,
-            Some(0.03),
-            Some(150.),
-            None,
-            Some(traj_len),
-            Some(10),
-        );
+        let triplets = traj.compute_triplets(&env_state, 0.03, 150.0, 20.0, traj_len, 10);
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
@@ -985,21 +965,26 @@ mod test_obs_ext {
         let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
 
         let gap_max = 8.0 / 24.0; // 8 hours in days
+
+        let params = IODParams {
+            n_noise_realizations: 5,
+            noise_scale: 1.0,
+            extf: -1.0,
+            dtmax: 30.0,
+            dt_min: 0.03,
+            dt_max_triplet: 150.0,
+            optimal_interval_time: 20.0,
+            max_obs_for_triplets: traj_len,
+            max_triplets: 10,
+            gap_max,
+        };
+
         let (best_orbit, best_rms) = traj
             .estimate_best_orbit(
                 &OUTFIT_HORIZON_TEST.0,
                 &ErrorModel::FCCT14,
                 &mut rng,
-                5,
-                1.0,
-                -1.0,
-                30.0,
-                Some(0.03),
-                Some(150.),
-                None,
-                Some(traj_len),
-                Some(10),
-                gap_max,
+                &params,
             )
             .unwrap();
 

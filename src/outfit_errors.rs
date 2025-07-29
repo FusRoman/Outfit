@@ -72,6 +72,9 @@ pub enum OutfitError {
 
     #[error("Invalid SPK data type: {0}")]
     InvalidSpkDataType(i32),
+
+    #[error("Invalid IOD parameter: {0}")]
+    InvalidIODParameter(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
