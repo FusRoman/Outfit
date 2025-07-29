@@ -7,13 +7,13 @@ use tokio::{fs::File, io::AsyncWriteExt};
 #[cfg(feature = "jpl-download")]
 use tokio_stream::StreamExt;
 
-use super::{horizon::horizon_version::JPLHorizonVersion, naif::naif_version::NAIFVersion};
+use super::{horizon::horizon_version::JPLHorizonVersion, naif::naif_version::NaifVersion};
 use crate::outfit_errors::OutfitError;
 
 #[derive(Debug, Clone)]
 pub enum EphemFileSource {
     JPLHorizon(JPLHorizonVersion),
-    NAIF(NAIFVersion),
+    NAIF(NaifVersion),
 }
 
 impl TryFrom<&str> for EphemFileSource {
@@ -40,7 +40,7 @@ impl TryFrom<&str> for EphemFileSource {
                 }
             }
             "naif" => {
-                if let Ok(version) = NAIFVersion::from_str(parts[1]) {
+                if let Ok(version) = NaifVersion::from_str(parts[1]) {
                     Ok(EphemFileSource::NAIF(version))
                 } else {
                     Err(OutfitError::InvalidJPLEphemFileVersion(format!(
@@ -128,7 +128,7 @@ async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError
 
 pub enum EphemFilePath {
     JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
-    NAIF(Utf8PathBuf, NAIFVersion),
+    NAIF(Utf8PathBuf, NaifVersion),
 }
 
 impl std::fmt::Display for EphemFilePath {

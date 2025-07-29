@@ -797,6 +797,7 @@ impl GaussObs {
     /// * [`velocity_correction`] – Lagrange-based velocity update.
     /// * [`eccentricity_control`] – Filters solutions based on dynamic acceptability.
     /// * [`position_vector_and_reference_epoch`] – Recomputes full asteroid positions at each epoch.
+    #[allow(clippy::too_many_arguments)]
     fn pos_and_vel_correction(
         &self,
         asteroid_position: &Matrix3<f64>,
