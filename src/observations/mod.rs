@@ -9,7 +9,7 @@ use crate::{
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
     observations::trajectory_ext::ObservationBatch,
-    observers::{observer_position::geo_obs_pos, observers::Observer},
+    observers::{observer_position::geo_obs_pos, Observer},
     outfit::Outfit,
     outfit_errors::OutfitError,
     ref_system::{cartesian_to_radec, correct_aberration, rotpn},
@@ -54,7 +54,7 @@ impl Observation {
     /// Return
     /// ------
     /// * a new Observation struct
-    /// The coordinates and the associated errors are converted from degrees and arcseconds respectively to radians.
+    ///   The coordinates and the associated errors are converted from degrees and arcseconds respectively to radians.
     pub fn new(
         observer: u16,
         ra: Radian,

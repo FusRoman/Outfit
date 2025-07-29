@@ -1,7 +1,7 @@
 use crate::constants::MJD;
 use crate::outfit::Outfit;
 
-use super::super::observers::observers::Observer;
+use super::super::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
 
 use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
