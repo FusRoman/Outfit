@@ -53,6 +53,18 @@ pub(crate) struct GaussObs {
     pub(crate) observer_position: Matrix3<f64>,
 }
 
+type GaussPrelimResult = Result<
+    (
+        f64,
+        f64,
+        Matrix3<f64>,
+        Matrix3<f64>,
+        Vector3<f64>,
+        Vector3<f64>,
+    ),
+    OutfitError,
+>;
+
 impl GaussObs {
     /// Construct a `GaussObs` object from observation data and observer position.
     ///
@@ -269,19 +281,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant used for time normalization.
-    fn gauss_prelim(
-        &self,
-    ) -> Result<
-        (
-            f64,
-            f64,
-            Matrix3<f64>,
-            Matrix3<f64>,
-            Vector3<f64>,
-            Vector3<f64>,
-        ),
-        OutfitError,
-    > {
+    fn gauss_prelim(&self) -> GaussPrelimResult {
         let tau1 = GAUSS_GRAV * (self.time[0] - self.time[1]);
         let tau3 = GAUSS_GRAV * (self.time[2] - self.time[1]);
         let tau13 = tau3 - tau1;
@@ -561,6 +561,7 @@ impl GaussObs {
     /// * [`eccentricity_control`] – checks if an orbit meets physical bounds.
     /// * [`position_vector_and_reference_epoch`] – computes the full 3×3 object position matrix.
     /// * [`gibbs_correction`] – estimates the velocity at central epoch from positions.
+    #[allow(clippy::too_many_arguments)]
     fn accept_root(
         &self,
         root: f64,
@@ -596,11 +597,8 @@ impl GaussObs {
         let asteroid_vel = self.gibbs_correction(&ast_pos_all_time, tau1, tau3);
 
         // Apply eccentricity and perihelion distance control
-        let Some((is_accepted, _, _, _)) =
-            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.0)
-        else {
-            return None;
-        };
+        let (is_accepted, _, _, _) =
+            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.0)?;
 
         // Accept only orbits within eccentricity and perihelion limits
         if is_accepted {
@@ -642,7 +640,7 @@ impl GaussObs {
     /// * [`rotpn`] – computes the rotation matrix between celestial reference frames.
     /// * [`ccek1`] – converts position and velocity vectors to orbital elements.
     /// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – definition of the orbital elements struct.
-    fn from_position_velocity_to_orbit(
+    fn compute_orbit_from_state(
         &self,
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
@@ -747,7 +745,7 @@ impl GaussObs {
         ) else {
             // If correction failed or diverged, return preliminary orbit
             return Ok(GaussResult::PrelimOrbit(
-                self.from_position_velocity_to_orbit(
+                self.compute_orbit_from_state(
                     &asteroid_pos_all_time.column(1).into(),
                     &asteroid_vel,
                     reference_epoch,
@@ -757,7 +755,7 @@ impl GaussObs {
 
         // Correction succeeded; return refined orbit
         Ok(GaussResult::CorrectedOrbit(
-            self.from_position_velocity_to_orbit(
+            self.compute_orbit_from_state(
                 &corrected_pos.column(1).into(),
                 &corrected_vel,
                 corrected_epoch,
