@@ -58,8 +58,7 @@ impl Observatories {
     /// * The observer index
     pub(crate) fn uint16_from_observer(&mut self, observer: Arc<Observer>) -> u16 {
         let obs_idx = self.obs_to_uint16.len() as u16;
-        *self.obs_to_uint16
-            .entry_or_insert_by_key(observer, obs_idx)
+        *self.obs_to_uint16.entry_or_insert_by_key(observer, obs_idx)
     }
 }
 
