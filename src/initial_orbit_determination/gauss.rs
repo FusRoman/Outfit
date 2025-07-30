@@ -648,13 +648,10 @@ impl GaussObs {
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
     ) -> KeplerianElements {
-        // Initialize a 3x3 rotation matrix
-        let mut roteqec = [[0.0; 3]; 3];
-
         // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        rotpn(&mut roteqec, &ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
         // Apply the transformation to position and velocity vectors
         let matrix_elc_transform = Matrix3::from(roteqec).transpose();

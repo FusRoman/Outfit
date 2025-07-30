@@ -80,11 +80,9 @@ pub fn helio_obs_pos(
     ];
     let earth_pos_matrix = Matrix3::from_columns(&earth_pos);
 
-    let mut rot = [[0.0; 3]; 3];
-
     let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
     let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-    rotpn(&mut rot, &ref_sys1, &ref_sys2);
+    let rot = rotpn(&ref_sys1, &ref_sys2);
     let rot_matrix = Matrix3::from(rot).transpose();
 
     earth_pos_matrix + rot_matrix * pos_obs_matrix
@@ -120,11 +118,9 @@ pub(crate) fn geo_obs_pos(
     let obs_vel = rot_mat * dvbf;
 
     // Transformation in the ecliptic mean J2000
-    let mut rot1 = [[0.; 3]; 3];
-
     let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
     let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-    rotpn(&mut rot1, &ref_sys1, &ref_sys2);
+    let rot1 = rotpn(&ref_sys1, &ref_sys2);
 
     let rot1_mat = Matrix3::from(rot1).transpose();
     let obs_pos = rot1_mat * obs_pos;
@@ -190,13 +186,10 @@ pub(crate) fn pvobs(
     // Earth rotation matrix
     let rot = rotmt(-gast, 2);
 
-    // Transformation in the ecliptic mean J2000
-    let mut rot1 = [[0.; 3]; 3];
-
     // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
     let rer_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
     let rer_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-    rotpn(&mut rot1, &rer_sys1, &rer_sys2);
+    let rot1 = rotpn(&rer_sys1, &rer_sys2);
 
     let rot1_mat = Matrix3::from(rot1).transpose();
     let rot_mat = Matrix3::from(rot).transpose();
