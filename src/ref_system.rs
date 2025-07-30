@@ -104,7 +104,7 @@ impl RefSystem {
 /// * [`rnut80`] – IAU 1980 nutation model
 /// * [`rotmt`] – rotation matrix around X/Y/Z axes
 /// * [`obleq`] – mean obliquity of the ecliptic (in radians)
-pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> [[f64; 3]; 3] {
+pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> Matrix3<f64> {
     let mut rsys = *ref_sys1;
     let mut epoch = ref_sys1.epoch();
     let mut date = if epoch == RefEpoch::J2000 {
@@ -113,7 +113,7 @@ pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> [[f64; 3]; 3] {
         epoch.date()
     };
 
-    let mut rot = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    let mut rot = Matrix3::identity();
 
     let mut nit = 0;
 
@@ -128,24 +128,20 @@ pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> [[f64; 3]; 3] {
             true
         };
 
-        let mut r = [[0.0; 3]; 3];
-
         if epdif {
             if epoch != RefEpoch::J2000 {
                 if let RefSystem::Eclm(e) = rsys {
                     let obl = obleq(date);
                     let r = rotmt(-obl, 1);
-                    rot = matmul(&r, &rot);
+                    rot *= r;
                     rsys = RefSystem::Equm(e);
                 } else if let RefSystem::Equt(e) = rsys {
-                    let mut r = rnut80(date);
-                    trsp3(&mut r);
-                    rot = matmul(&r, &rot);
+                    let r = rnut80(date);
+                    rot *= r.transpose();
                     rsys = RefSystem::Equm(e);
                 } else if let RefSystem::Equm(_) = rsys {
-                    prec(date, &mut r);
-                    trsp3(&mut r);
-                    rot = matmul(&r, &rot);
+                    let r = prec(date);
+                    rot *= r.transpose();
                     epoch = RefEpoch::J2000;
                     date = T2000;
                 } else {
@@ -154,17 +150,16 @@ pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> [[f64; 3]; 3] {
             } else if let RefSystem::Eclm(e) = rsys {
                 let obl = obleq(T2000);
                 let r = rotmt(-obl, 1);
-                rot = matmul(&r, &rot);
+                rot *= r;
                 rsys = RefSystem::Equm(e);
             } else if let RefSystem::Equt(e) = rsys {
-                let mut r = rnut80(T2000);
-                trsp3(&mut r);
-                rot = matmul(&r, &rot);
+                let r = rnut80(T2000);
+                rot *= r.transpose();
                 rsys = RefSystem::Equm(e);
             } else if let RefSystem::Equm(_) = rsys {
                 if let RefEpoch::Epoch(_) = ref_sys2.epoch() {
-                    prec(ref_sys2.epoch().date(), &mut r);
-                    rot = matmul(&r, &rot);
+                    let r = prec(ref_sys2.epoch().date());
+                    rot *= r;
                     epoch = ref_sys2.epoch();
                     date = ref_sys2.epoch().date();
                 } else {
@@ -179,24 +174,23 @@ pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> [[f64; 3]; 3] {
             }
 
             if let RefSystem::Equt(e) = rsys {
-                let mut r = rnut80(date);
-                trsp3(&mut r);
-                rot = matmul(&r, &rot);
+                let r = rnut80(date);
+                rot *= r.transpose();
                 rsys = RefSystem::Equm(e);
             } else if let RefSystem::Eclm(e) = rsys {
                 let obl = obleq(date);
                 let r = rotmt(-obl, 0);
-                rot = matmul(&r, &rot);
+                rot *= r;
                 rsys = RefSystem::Equm(e);
             } else if let RefSystem::Equm(e) = rsys {
                 if let RefSystem::Equt(_) = ref_sys2 {
                     let r = rnut80(date);
-                    rot = matmul(&r, &rot);
+                    rot *= r;
                     rsys = RefSystem::Equt(e);
                 } else if let RefSystem::Eclm(_) = ref_sys2 {
                     let obl = obleq(date);
                     let r = rotmt(obl, 0);
-                    rot = matmul(&r, &rot);
+                    rot *= r;
                     rsys = RefSystem::Eclm(e);
                 } else {
                     panic!("ERROR: Internal error (06)");
@@ -260,42 +254,47 @@ pub fn obleq(tjm: f64) -> Radian {
     ((ob3 * t + ob2) * t + ob1) * t + ob0
 }
 
-/// Construct a right-handed rotation matrix around a principal axis (X, Y, or Z).
+/// Construct a right-handed 3×3 rotation matrix around one of the principal axes (X, Y, or Z).
 ///
-/// This function returns a 3×3 matrix representing an **active rotation**
-/// of a vector in ℝ³ by an angle `alpha` around the axis indexed by `k`.
-/// The rotation is applied in the **direct (positive/trigonometric)** sense:
-/// i.e., counter-clockwise when looking along the axis toward the origin.
+/// This function builds a [`nalgebra::Matrix3`] representing an **active rotation**
+/// of a 3D vector by an angle `alpha` around the chosen axis.
+/// The rotation follows the **direct (positive/trigonometric)** sense:
+/// counter-clockwise when looking **along the axis toward the origin**.
 ///
-/// Arguments
-/// ---------
-/// * `alpha`: rotation angle in radians (positive = direct sense).
-/// * `k`: index of the axis of rotation:
-///     - `0` → X-axis,
-///     - `1` → Y-axis,
-///     - `2` → Z-axis.
+/// # Arguments
 ///
-/// Returns
-/// --------
-/// * A 3×3 rotation matrix `R` such that the rotated vector is `x′ = R · x`.
+/// * `alpha` - Rotation angle in **radians** (positive = direct/trigonometric sense).
+/// * `k` - Index of the axis of rotation:
+///   * `0` → X-axis
+///   * `1` → Y-axis
+///   * `2` → Z-axis
 ///
-/// Remarks
-/// -------
-/// * This routine follows the OrbFit convention:
-///     - it rotates the **vector** in a fixed reference frame,
-///     - i.e., it does **not** represent a change of basis.
-/// * The matrix is orthonormal and satisfies `Rᵀ = R⁻¹`.
-/// * Used internally in [`prec`], [`rnut80`], and [`rotpn`] for sequential transformations.
+/// # Returns
 ///
-/// Panics
-/// -------
-/// * Panics if `k > 2`, as only axes 0–2 (X, Y, Z) are valid.
+/// A 3×3 rotation matrix `R` such that the rotated vector is `x' = R · x`.
+///
+/// # Remarks
+///
+/// * This function uses [`nalgebra::Rotation3::from_axis_angle`] internally,
+///   which ensures orthonormality and numerical stability.
+/// * The returned matrix is **orthonormal** and satisfies `R.transpose() == R.inverse()`.
+/// * This corresponds to OrbFit's convention:
+///   - the rotation is **applied to the vector** in a fixed frame,
+///     and does **not** represent a change of basis.
+/// * Internally used in:
+///   - [`prec`] for precession
+///   - [`rnut80`] for nutation
+///   - [`rotpn`] for building compound frame transformations
+///
+/// # Panics
+///
+/// Panics if `k > 2`, as only axes 0–2 are valid.
 ///
 /// # See also
 /// * [`prec`] – uses `rotmt` for precession angle rotations
 /// * [`rnut80`] – applies sequential `rotmt` matrices for nutation
 /// * [`rotpn`] – assembles compound frame transformations
-pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
+pub fn rotmt(alpha: f64, k: usize) -> Matrix3<f64> {
     let axis = match k {
         0 => Vector3::x_axis(),
         1 => Vector3::y_axis(),
@@ -303,12 +302,7 @@ pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
         _ => panic!("**** ROTMT: invalid axis index {k} (must be 0,1,2) ****"),
     };
 
-    // Build the rotation using nalgebra
-    let rotation = Rotation3::from_axis_angle(&axis, alpha);
-
-    // Convert to [[f64; 3]; 3]
-    let mat: Matrix3<f64> = rotation.into_inner();
-    mat.into()
+    Rotation3::from_axis_angle(&axis, alpha).into()
 }
 
 /// Compute the nutation angles in longitude and obliquity using the IAU 1980 (Wahr) model.
@@ -643,7 +637,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
 /// * [`obleq`] – computes the mean obliquity ε (radians)
 /// * [`rotmt`] – builds the individual axis rotation matrices
 /// * [`rotpn`] – uses `rnut80` to transform between Equm and Equt systems
-fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
+fn rnut80(tjm: f64) -> Matrix3<f64> {
     // Mean obliquity of the ecliptic at date (ε)
     let epsm = obleq(tjm);
 
@@ -662,33 +656,7 @@ fn rnut80(tjm: f64) -> [[f64; 3]; 3] {
     let r2 = rotmt(-dpsi, 2);
     let r3 = rotmt(-epst, 0);
 
-    // Multiply: rp = R2 · R1
-    let mut rp = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            rp[i][j] = r2[i][0] * r1[0][j] + r2[i][1] * r1[1][j] + r2[i][2] * r1[2][j];
-        }
-    }
-
-    // Final nutation matrix: R = R3 · (R2 · R1)
-    let mut rnut = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            rnut[i][j] = r3[i][0] * rp[0][j] + r3[i][1] * rp[1][j] + r3[i][2] * rp[2][j];
-        }
-    }
-
-    rnut
-}
-
-fn trsp3(matrix: &mut [[f64; 3]; 3]) {
-    for i in 0..2 {
-        for j in (i + 1)..3 {
-            let temp = matrix[i][j];
-            matrix[i][j] = matrix[j][i];
-            matrix[j][i] = temp;
-        }
-    }
+    (r1 * r2) * r3
 }
 
 /// Compute the precession matrix from J2000 to the mean equator and equinox of a given epoch (IAU 1976 model).
@@ -732,10 +700,7 @@ fn trsp3(matrix: &mut [[f64; 3]; 3]) {
 /// # See also
 /// * [`rotmt`] – constructs the rotation matrices used here
 /// * [`rotpn`] – uses `prec` when converting between epochs `"OFDATE"` and `"J2000"`
-fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
-    // Initialize intermediate matrix for storing R2 · R1
-    let mut rp = [[0.0; 3]; 3];
-
+fn prec(tjm: f64) -> Matrix3<f64> {
     // Precession polynomial coefficients (in radians)
     let zed = 0.6406161 * RADEG;
     let zd = 0.6406161 * RADEG;
@@ -765,29 +730,8 @@ fn prec(tjm: f64, rprec: &mut [[f64; 3]; 3]) {
     let r2 = rotmt(theta, 1); // Y-axis
     let r3 = rotmt(-z, 2); // Z-axis
 
-    // Compute intermediate matrix: rp = R2 · R1
-    for i in 0..3 {
-        for j in 0..3 {
-            rp[i][j] = r2[i][0] * r1[0][j] + r2[i][1] * r1[1][j] + r2[i][2] * r1[2][j];
-        }
-    }
-
-    // Final precession matrix: rprec = R3 · (R2 · R1)
-    for i in 0..3 {
-        for j in 0..3 {
-            rprec[i][j] = r3[i][0] * rp[0][j] + r3[i][1] * rp[1][j] + r3[i][2] * rp[2][j];
-        }
-    }
-}
-
-fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
-    let mut result = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            result[i][j] = (0..3).map(|k| a[i][k] * b[k][j]).sum();
-        }
-    }
-    result
+    // Compute the combined rotation matrix R3 . (R2 . R1)
+    (r1 * r2) * r3
 }
 
 /// Apply stellar aberration correction to a relative position vector.
@@ -907,7 +851,7 @@ mod ref_system_test {
                 0.9999999992477547,
             ],
         ];
-        assert_eq!(rnut, ref_rnut);
+        assert_eq!(rnut, ref_rnut.into());
     }
 
     mod test_rotpn {
@@ -936,7 +880,7 @@ mod ref_system_test {
             let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
             let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
 
             let ref_roteqec = [
                 [
@@ -957,7 +901,7 @@ mod ref_system_test {
             ];
 
             let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000));
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
         }
 
         #[test]
@@ -971,7 +915,7 @@ mod ref_system_test {
             let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
             let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
 
             let ref_roteqec = [
                 [
@@ -992,7 +936,7 @@ mod ref_system_test {
             ];
 
             let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000));
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
         }
 
         #[test]
@@ -1018,7 +962,7 @@ mod ref_system_test {
             let ref_sys1 = RefSystem::Equt(RefEpoch::J2000);
             let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
 
             let ref_roteqec = [
                 [
@@ -1035,7 +979,7 @@ mod ref_system_test {
             ];
 
             let roteqec = rotpn(&ref_sys1, &RefSystem::Eclm(RefEpoch::J2000));
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
         }
 
         #[test]
@@ -1060,7 +1004,7 @@ mod ref_system_test {
                 #[allow(clippy::needless_range_loop)]
                 for j in 0..3 {
                     let expected = if i == j { 1.0 } else { 0.0 };
-                    if (rot[i][j] - expected).abs() > tol {
+                    if (rot[(i, j)] - expected).abs() > tol {
                         is_identity = false;
                     }
                 }
@@ -1074,7 +1018,7 @@ mod ref_system_test {
             // 2. For 1000 days, the diagonal term (rot[1][1]) must differ from 1 by at least 1e-7
             // This ensures that the precession effect has been applied.
             // -------------------------------------------------------------------------
-            let delta = (1.0 - rot[1][1]).abs();
+            let delta = (1.0 - rot[(1, 1)]).abs();
             assert!(
                 delta > 1e-7,
                 "rot[1][1] difference too small: {delta}, expected > 1e-7"
@@ -1105,7 +1049,7 @@ mod ref_system_test {
                 ],
             ];
 
-            assert_matrix_eq(&roteqec, &expected, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &expected, TOLERANCE);
 
             let ref_roteqec = [
                 [
@@ -1128,7 +1072,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60730.5));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
         }
 
         #[test]
@@ -1155,7 +1099,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60730.5));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
 
             let ref_roteqec = [
                 [
@@ -1178,7 +1122,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60730.5));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
         }
 
         #[test]
@@ -1205,7 +1149,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Equm(RefEpoch::Epoch(60730.5));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
 
             let ref_roteqec = [
                 [
@@ -1224,7 +1168,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60730.5));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
+            assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
         }
 
         #[test]
@@ -1252,7 +1196,7 @@ mod ref_system_test {
             let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
 
-            assert_eq!(roteqec, ref_roteqec);
+            assert_eq!(roteqec, ref_roteqec.into());
         }
 
         #[test]
@@ -1261,19 +1205,19 @@ mod ref_system_test {
             let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
             let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
 
             // Identity in OFDATE (Eclm)
             let ref_sys1 = RefSystem::Eclm(RefEpoch::Epoch(60000.));
             let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60000.));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
 
             // Identity in OFDATE (Equt)
             let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(60000.));
             let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60000.));
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
-            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+            assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
         }
 
         #[test]
@@ -1283,15 +1227,15 @@ mod ref_system_test {
 
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
             let roteqec2 = rotpn(&ref_sys2, &ref_sys1);
-            let prod = matmul(&roteqec2, &roteqec);
+            let prod = roteqec2 * roteqec;
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
                 #[allow(clippy::needless_range_loop)]
                 for j in 0..3 {
                     if i == j {
-                        assert!((prod[i][j] - 1.0).abs() < 1e-12);
+                        assert!((prod[(i, j)] - 1.0).abs() < 1e-12);
                     } else {
-                        assert!(prod[i][j].abs() < 1e-12);
+                        assert!(prod[(i, j)].abs() < 1e-12);
                     }
                 }
             }
@@ -1304,18 +1248,17 @@ mod ref_system_test {
             let ref_sys1 = RefSystem::Equm(RefEpoch::Epoch(80000.));
             let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
             let roteqec = rotpn(&ref_sys1, &ref_sys2);
+
             // Just check the rotation matrix is orthonormal (basic sanity)
-            let mut rt = roteqec;
-            trsp3(&mut rt);
-            let prod = matmul(&roteqec, &rt);
+            let prod = roteqec * roteqec.transpose();
             #[allow(clippy::needless_range_loop)]
             for i in 0..3 {
                 #[allow(clippy::needless_range_loop)]
                 for j in 0..3 {
                     if i == j {
-                        assert!((prod[i][j] - 1.0).abs() < 1e-12);
+                        assert!((prod[(i, j)] - 1.0).abs() < 1e-12);
                     } else {
-                        assert!(prod[i][j].abs() < 1e-12);
+                        assert!(prod[(i, j)].abs() < 1e-12);
                     }
                 }
             }
@@ -1328,7 +1271,7 @@ mod ref_system_test {
             let forward = rotpn(&ref_sys1, &ref_sys2);
             let backward = rotpn(&ref_sys2, &ref_sys1);
 
-            let prod = matmul(&backward, &forward);
+            let prod = backward * forward;
 
             let tol = 1e-5;
             #[allow(clippy::needless_range_loop)]
@@ -1336,9 +1279,9 @@ mod ref_system_test {
                 #[allow(clippy::needless_range_loop)]
                 for j in 0..3 {
                     if i == j {
-                        assert!((prod[i][j] - 1.0).abs() < tol);
+                        assert!((prod[(i, j)] - 1.0).abs() < tol);
                     } else {
-                        assert!(prod[i][j].abs() < tol);
+                        assert!(prod[(i, j)].abs() < tol);
                     }
                 }
             }

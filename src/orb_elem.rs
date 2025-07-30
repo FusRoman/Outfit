@@ -122,7 +122,7 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
     // === 3. Transform position and velocity to the orbital frame
     let r1 = rotmt(ainc, 0); // Rotation around X-axis (inclination)
     let r2 = rotmt(anod, 2); // Rotation around Z-axis (node)
-    prodmm(&mut rot, r1, r2); // rot = r1 * r2
+    prodmm(&mut rot, r1.into(), r2.into()); // rot = r1 * r2
 
     prodmv(&mut xorb, rot, xv[0..3].try_into().unwrap()); // orbital position
     prodmv(&mut vorb, rot, xv[3..6].try_into().unwrap()); // orbital velocity
