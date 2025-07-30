@@ -1,16 +1,13 @@
 use crate::constants::MJD;
-use crate::earth_orientation::equequ;
 use crate::outfit::Outfit;
 use crate::ref_system::{RefEpoch, RefSystem};
-use crate::time::gmst;
 
 use super::super::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
 
-use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS};
-use super::super::ref_system::{rotmt, rotpn};
+use super::super::constants::{EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS};
+use super::super::ref_system::rotpn;
 use hifitime::prelude::Epoch;
-use hifitime::ut1::Ut1Provider;
 
 /// Compute the heliocentric equatorial positions of three different observers at their respective observation times.
 ///
@@ -88,100 +85,6 @@ pub fn helio_obs_pos(
     let rot_matrix = Matrix3::from(rot).transpose();
 
     earth_pos_matrix + rot_matrix * pos_obs_matrix
-}
-
-/// Compute the geocentric position and velocity of an Earth-based observer
-/// in the **mean ecliptic J2000 frame**.
-///
-/// This function transforms the observer's fixed coordinates on Earth into
-/// an inertial frame (mean ecliptic J2000) by accounting for:
-///
-/// 1. Earth's rotation (conversion from Earth-fixed to Earth-rotating frame),
-/// 2. Sidereal time at the given epoch (rotation around the Z-axis),
-/// 3. Precession and nutation (conversion from true equator of date to
-///    mean ecliptic J2000).
-///
-/// The result is the **geocentric position and velocity** of the observer in AU and AU/day,
-/// expressed in the mean ecliptic frame of J2000.
-///
-/// # Arguments
-///
-/// * `observer` – [`Observer`] structure containing the observer’s geodetic position
-///   on Earth (longitude, latitude, height).
-/// * `tmjd` – [`Epoch`] of observation, used to compute Earth rotation and
-///   sidereal angles (expressed internally in TT and UT1 timescales).
-/// * `ut1_provider` – Source for UT1-UTC offsets, needed to convert UTC to UT1
-///   before computing Greenwich sidereal time.
-///
-/// # Returns
-///
-/// A tuple `(position, velocity)`:
-///
-/// * `position`: Geocentric position vector of the observer in AU,
-/// * `velocity`: Geocentric velocity vector of the observer in AU/day,
-///   both expressed in the **mean ecliptic J2000 frame**.
-///
-/// # Steps
-///
-/// 1. Compute the observer's fixed coordinates in the Earth body frame (`body_fixed_coord`).
-/// 2. Compute the observer’s velocity due to Earth’s rotation:
-///    `v = ω × r`, with ω being the Earth's rotation vector.
-/// 3. Convert from TT to UT1 to get the Greenwich sidereal apparent time (GAST).
-/// 4. Apply a rotation around the Z-axis to go from the Earth-fixed frame
-///    to the true equator and equinox of date (EQUT).
-/// 5. Apply the transformation from EQUT at the date to the mean ecliptic J2000 frame
-///    using [`rotpn`].
-///
-/// # Notes
-///
-/// * Positions and velocities are expressed in AU and AU/day.
-/// * This computation matches the classical IAU conventions but uses the `hifitime`
-///   crate for UT1/TT conversion instead of OrbFit's legacy time scales.
-///
-/// # See also
-///
-/// * [`Observer::body_fixed_coord`] – fixed Earth coordinates of the observer.
-/// * [`rotpn`] – general frame transformation routine.
-/// * [`gmst`] / [`equequ`] – sidereal time and equation of equinoxes.
-/// * [`rotmt`] – builds the Earth rotation matrix.
-pub(crate) fn geo_obs_pos(
-    observer: &Observer,
-    tmjd: &Epoch,
-    ut1_provider: &Ut1Provider,
-) -> (Vector3<f64>, Vector3<f64>) {
-    // Initialisation
-    let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
-
-    // Get the coordinates of the observer on Earth
-    let dxbf = observer.body_fixed_coord();
-
-    // Get the observer velocity due to Earth rotation
-    let dvbf = omega.cross(&dxbf);
-
-    // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
-    // based on the hifitime crate
-    let mjd_ut1 = tmjd.to_ut1(ut1_provider.to_owned());
-    let tut = mjd_ut1.to_mjd_tai_days();
-
-    // Compute the Greenwich sideral apparent time
-    let gast = gmst(tut) + equequ(tmjd.to_mjd_tt_days());
-
-    // Earth rotation matrix
-    let rot = rotmt(-gast, 2);
-    let rot_mat = Matrix3::from(rot).transpose();
-
-    let obs_pos = rot_mat * dxbf;
-    let obs_vel = rot_mat * dvbf;
-
-    // Transformation in the ecliptic mean J2000
-    let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
-    let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-    let rot1 = rotpn(&ref_sys1, &ref_sys2);
-
-    let rot1_mat = Matrix3::from(rot1).transpose();
-    let obs_pos = rot1_mat * obs_pos;
-    let obs_vel = rot1_mat * obs_vel;
-    (obs_pos, obs_vel)
 }
 
 /// Convert geodetic latitude and height into normalized parallax coordinates

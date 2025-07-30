@@ -9,7 +9,7 @@ use crate::{
     conversion::{parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
     observations::trajectory_ext::ObservationBatch,
-    observers::{observer_position::geo_obs_pos, Observer},
+    observers::Observer,
     outfit::Outfit,
     outfit_errors::OutfitError,
     ref_system::{cartesian_to_radec, correct_aberration, rotpn, RefEpoch, RefSystem},
@@ -116,7 +116,7 @@ impl Observation {
     /// Returns an `OutfitError` if ephemeris data or propagation fails (e.g. missing JPL ephemeris).
     ///
     /// # See also
-    /// * [`geo_obs_pos`] – Computes geocentric position of the observer including Earth rotation and nutation.
+    /// * [`pvobs`] – Computes geocentric position of the observer including Earth rotation and nutation.
     /// * [`correct_aberration`] – Applies aberration correction to the apparent direction of the body.
     /// * [`cartesian_to_radec`] – Converts 3D Cartesian vectors into equatorial coordinates (RA/DEC).
     /// * [`solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
@@ -154,7 +154,7 @@ impl Observation {
         let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
         // Compute the observer's geocentric position (accounts for Earth rotation, nutation, etc.)
-        let (geo_obs_pos, _) = geo_obs_pos(observer, &obs_mjd, state.get_ut1_provider());
+        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider());
 
         // Observer's heliocentric position = Earth position + observer's geocentric offset
         let xobs = geo_obs_pos + earth_pos_eclj2000;
