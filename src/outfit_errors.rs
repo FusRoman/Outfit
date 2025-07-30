@@ -75,6 +75,9 @@ pub enum OutfitError {
 
     #[error("Invalid IOD parameter: {0}")]
     InvalidIODParameter(String),
+
+    #[error("Invalid reference system: {0}")]
+    InvalidRefSystem(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {

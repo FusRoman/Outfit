@@ -1,6 +1,9 @@
 use nalgebra::{Matrix3, Rotation3, Vector3};
 
-use crate::earth_orientation::{obleq, prec, rnut80};
+use crate::{
+    earth_orientation::{obleq, prec, rnut80},
+    outfit_errors::OutfitError,
+};
 
 use super::constants::{EPS, T2000};
 
@@ -53,6 +56,51 @@ impl RefSystem {
                 | (RefSystem::Eclm(_), RefSystem::Eclm(_))
         )
     }
+
+    fn transform_to_equm_date(
+        &self,
+        target_epoch: RefEpoch,
+    ) -> Result<(RefSystem, Matrix3<f64>), OutfitError> {
+        match self.epoch() {
+            RefEpoch::J2000 => match self {
+                RefSystem::Eclm(e) => Ok((RefSystem::Equm(*e), rotmt(-obleq(T2000), 1))),
+                RefSystem::Equt(e) => Ok((RefSystem::Equm(*e), rnut80(T2000).transpose())),
+                RefSystem::Equm(_) => match target_epoch {
+                    RefEpoch::J2000 => Err(OutfitError::InvalidRefSystem(
+                        "Cannot convert Equm to Equm J2000, already in that system".into(),
+                    )),
+                    RefEpoch::Epoch(target_date) => Ok((
+                        RefSystem::Equm(RefEpoch::Epoch(target_date)),
+                        prec(target_date),
+                    )),
+                },
+            },
+            RefEpoch::Epoch(_) => match self {
+                RefSystem::Eclm(e) => Ok((RefSystem::Equm(*e), rotmt(-obleq(e.date()), 1))),
+                RefSystem::Equt(e) => Ok((RefSystem::Equm(*e), rnut80(e.date()).transpose())),
+                RefSystem::Equm(e) => {
+                    Ok((RefSystem::Equm(RefEpoch::J2000), prec(e.date()).transpose()))
+                }
+            },
+        }
+    }
+
+    fn transform_to_target_system(
+        &self,
+        target_system: RefSystem,
+    ) -> Result<(RefSystem, Matrix3<f64>), OutfitError> {
+        match self {
+            RefSystem::Equt(e) => Ok((RefSystem::Equm(*e), rnut80(e.date()).transpose())),
+            RefSystem::Eclm(e) => Ok((RefSystem::Equm(*e), rotmt(-obleq(e.date()), 0))),
+            RefSystem::Equm(e) => match target_system {
+                RefSystem::Equt(_) => Ok((RefSystem::Equt(*e), rnut80(e.date()))),
+                RefSystem::Eclm(_) => Ok((RefSystem::Eclm(*e), rotmt(obleq(e.date()), 0))),
+                RefSystem::Equm(_) => Err(OutfitError::InvalidRefSystem(
+                    "Cannot convert Equm to Equm, already in that system".into(),
+                )),
+            },
+        }
+    }
 }
 
 /// Compute the rotation matrix between two celestial reference systems and epochs.
@@ -104,100 +152,37 @@ impl RefSystem {
 /// * [`rnut80`] – IAU 1980 nutation model
 /// * [`rotmt`] – rotation matrix around X/Y/Z axes
 /// * [`obleq`] – mean obliquity of the ecliptic (in radians)
-pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> Matrix3<f64> {
+pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> Result<Matrix3<f64>, OutfitError> {
     let mut rsys = *ref_sys1;
-    let mut epoch = ref_sys1.epoch();
-    let mut date = if epoch == RefEpoch::J2000 {
-        T2000
-    } else {
-        epoch.date()
-    };
 
     let mut rot = Matrix3::identity();
 
     let mut nit = 0;
 
     loop {
-        let epdif = if epoch == ref_sys2.epoch() {
-            if epoch == RefEpoch::J2000 {
+        let epdif = if rsys.epoch() == ref_sys2.epoch() {
+            if rsys.epoch() == RefEpoch::J2000 {
                 false
             } else {
-                (date - ref_sys2.epoch().date()).abs() > EPS
+                (rsys.epoch().date() - ref_sys2.epoch().date()).abs() > EPS
             }
         } else {
             true
         };
 
         if epdif {
-            if epoch != RefEpoch::J2000 {
-                if let RefSystem::Eclm(e) = rsys {
-                    let obl = obleq(date);
-                    let r = rotmt(-obl, 1);
-                    rot *= r;
-                    rsys = RefSystem::Equm(e);
-                } else if let RefSystem::Equt(e) = rsys {
-                    let r = rnut80(date);
-                    rot *= r.transpose();
-                    rsys = RefSystem::Equm(e);
-                } else if let RefSystem::Equm(_) = rsys {
-                    let r = prec(date);
-                    rot *= r.transpose();
-                    epoch = RefEpoch::J2000;
-                    date = T2000;
-                } else {
-                    panic!("ERROR: Internal error (03)");
-                }
-            } else if let RefSystem::Eclm(e) = rsys {
-                let obl = obleq(T2000);
-                let r = rotmt(-obl, 1);
-                rot *= r;
-                rsys = RefSystem::Equm(e);
-            } else if let RefSystem::Equt(e) = rsys {
-                let r = rnut80(T2000);
-                rot *= r.transpose();
-                rsys = RefSystem::Equm(e);
-            } else if let RefSystem::Equm(_) = rsys {
-                if let RefEpoch::Epoch(_) = ref_sys2.epoch() {
-                    let r = prec(ref_sys2.epoch().date());
-                    rot *= r;
-                    epoch = ref_sys2.epoch();
-                    date = ref_sys2.epoch().date();
-                } else {
-                    panic!("ERROR: Internal error (04)");
-                }
-            } else {
-                panic!("ERROR: Internal error (05)");
-            }
+            let (new_ref, rot_mat) = rsys.transform_to_equm_date(ref_sys2.epoch())?;
+
+            rot *= rot_mat;
+            rsys = new_ref;
         } else {
             if rsys.variant_eq(ref_sys2) {
-                return rot;
+                return Ok(rot);
             }
 
-            if let RefSystem::Equt(e) = rsys {
-                let r = rnut80(date);
-                rot *= r.transpose();
-                rsys = RefSystem::Equm(e);
-            } else if let RefSystem::Eclm(e) = rsys {
-                let obl = obleq(date);
-                let r = rotmt(-obl, 0);
-                rot *= r;
-                rsys = RefSystem::Equm(e);
-            } else if let RefSystem::Equm(e) = rsys {
-                if let RefSystem::Equt(_) = ref_sys2 {
-                    let r = rnut80(date);
-                    rot *= r;
-                    rsys = RefSystem::Equt(e);
-                } else if let RefSystem::Eclm(_) = ref_sys2 {
-                    let obl = obleq(date);
-                    let r = rotmt(obl, 0);
-                    rot *= r;
-                    rsys = RefSystem::Eclm(e);
-                } else {
-                    panic!("ERROR: Internal error (06)");
-                }
-            } else {
-                panic!("ERROR: Internal error (07)");
-            }
+            let (new_ref, rot_mat) = rsys.transform_to_target_system(*ref_sys2)?;
+            rot *= rot_mat;
+            rsys = new_ref;
         }
 
         nit += 1;
@@ -285,7 +270,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
 
         let ref_roteqec = [
@@ -306,7 +291,7 @@ mod ref_system_test {
             ],
         ];
 
-        let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000));
+        let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000)).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
     }
 
@@ -320,7 +305,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
 
         let ref_roteqec = [
@@ -341,7 +326,7 @@ mod ref_system_test {
             ],
         ];
 
-        let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000));
+        let roteqec = rotpn(&ref_sys1, &RefSystem::Equt(RefEpoch::J2000)).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
     }
 
@@ -367,7 +352,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Equt(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
 
         let ref_roteqec = [
@@ -384,7 +369,7 @@ mod ref_system_test {
             ],
         ];
 
-        let roteqec = rotpn(&ref_sys1, &RefSystem::Eclm(RefEpoch::J2000));
+        let roteqec = rotpn(&ref_sys1, &RefSystem::Eclm(RefEpoch::J2000)).unwrap();
         assert_eq!(roteqec, ref_roteqec.into());
     }
 
@@ -397,7 +382,7 @@ mod ref_system_test {
         // Compute transformation from Equm@OFDATE(date1) to Equm@OFDATE(date2)
         let ref_sys1 = RefSystem::Equm(RefEpoch::Epoch(date1));
         let ref_sys2 = RefSystem::Equm(RefEpoch::Epoch(date2));
-        let rot = rotpn(&ref_sys1, &ref_sys2);
+        let rot = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         // -------------------------------------------------------------------------
         // 1. The resulting rotation matrix should NOT be the identity matrix
@@ -435,7 +420,7 @@ mod ref_system_test {
     fn test_rotpn_equt_of_date() {
         let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(60725.5));
         let ref_sys2 = RefSystem::Equm(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         let expected = [
             [
@@ -476,7 +461,7 @@ mod ref_system_test {
         ];
 
         let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
     }
@@ -503,7 +488,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Equm(RefEpoch::Epoch(60725.5));
         let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
 
@@ -526,7 +511,7 @@ mod ref_system_test {
         ];
 
         let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
     }
@@ -553,7 +538,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Eclm(RefEpoch::Epoch(60725.5));
         let ref_sys2 = RefSystem::Equm(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
 
@@ -572,7 +557,7 @@ mod ref_system_test {
         ];
 
         let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60730.5));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_matrix_eq(&roteqec.into(), &ref_roteqec, TOLERANCE);
     }
@@ -600,7 +585,7 @@ mod ref_system_test {
         let tmjd = 57028.479297592596;
         let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd));
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         assert_eq!(roteqec, ref_roteqec.into());
     }
@@ -610,19 +595,19 @@ mod ref_system_test {
         // Identity in J2000 Equm
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
 
         // Identity in OFDATE (Eclm)
         let ref_sys1 = RefSystem::Eclm(RefEpoch::Epoch(60000.));
         let ref_sys2 = RefSystem::Eclm(RefEpoch::Epoch(60000.));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
 
         // Identity in OFDATE (Equt)
         let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(60000.));
         let ref_sys2 = RefSystem::Equt(RefEpoch::Epoch(60000.));
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
         assert_eq!(roteqec, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]].into());
     }
 
@@ -631,8 +616,8 @@ mod ref_system_test {
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
 
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
-        let roteqec2 = rotpn(&ref_sys2, &ref_sys1);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
+        let roteqec2 = rotpn(&ref_sys2, &ref_sys1).unwrap();
         let prod = roteqec2 * roteqec;
         #[allow(clippy::needless_range_loop)]
         for i in 0..3 {
@@ -653,7 +638,7 @@ mod ref_system_test {
 
         let ref_sys1 = RefSystem::Equm(RefEpoch::Epoch(80000.));
         let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
         // Just check the rotation matrix is orthonormal (basic sanity)
         let prod = roteqec * roteqec.transpose();
@@ -674,8 +659,8 @@ mod ref_system_test {
     fn test_rotpn_round_trip_equt_equm() {
         let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(60725.5));
         let ref_sys2 = RefSystem::Equm(RefEpoch::Epoch(60730.5));
-        let forward = rotpn(&ref_sys1, &ref_sys2);
-        let backward = rotpn(&ref_sys2, &ref_sys1);
+        let forward = rotpn(&ref_sys1, &ref_sys2).unwrap();
+        let backward = rotpn(&ref_sys2, &ref_sys1).unwrap();
 
         let prod = backward * forward;
 

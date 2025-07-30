@@ -14,6 +14,7 @@ use crate::initial_orbit_determination::gauss::GaussObs;
 use crate::observations::Observation;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
+use crate::outfit_errors::OutfitError;
 
 /// Internal structure used to store a weighted observation triplet during
 /// the selection process.
@@ -178,7 +179,7 @@ pub(crate) fn generate_triplets(
     optimal_interval_time: f64,
     max_obs_for_triplets: usize,
     max_triplet: u32,
-) -> Vec<GaussObs> {
+) -> Result<Vec<GaussObs>, OutfitError> {
     // 1. Sort observations by time (in-place)
     observations.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
 
@@ -305,7 +306,8 @@ mod triplets_iod_tests {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = generate_triplets(traj_mut, &env_state, 0.03, 150.0, 20.0, traj_len, 10);
+        let triplets =
+            generate_triplets(traj_mut, &env_state, 0.03, 150.0, 20.0, traj_len, 10).unwrap();
 
         assert_eq!(
             triplets.len(),

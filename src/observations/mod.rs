@@ -143,7 +143,7 @@ impl Observation {
         // Construct rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2)?;
         let matrix_elc_transform = Matrix3::from(roteqec);
 
         // Transform Earth's position to ecliptic J2000 frame
@@ -154,7 +154,7 @@ impl Observation {
         let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
         // Compute the observer's geocentric position (accounts for Earth rotation, nutation, etc.)
-        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider());
+        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider())?;
 
         // Observer's heliocentric position = Earth position + observer's geocentric offset
         let xobs = geo_obs_pos + earth_pos_eclj2000;
