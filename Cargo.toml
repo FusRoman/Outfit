@@ -50,6 +50,7 @@ tokio-stream = { version = "0.1.17", default-features = false, optional = true }
 [dev-dependencies]
 approx = { version = "0.5.1", default-features = false }
 criterion = { version = "0.5.1", default-features = false }
+husky-rs = "0.1.5"
 
 [features]
 jpl-download = ["dep:reqwest", "dep:tokio", "dep:tokio-stream"]
