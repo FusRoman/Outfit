@@ -1,5 +1,6 @@
 use crate::constants::MJD;
 use crate::outfit::Outfit;
+use crate::ref_system::{RefEpoch, RefSystem};
 
 use super::super::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
@@ -48,7 +49,7 @@ use hifitime::ut1::Ut1Provider;
 ///
 /// # See also
 /// * [`pvobs`] – computes the observer’s geocentric position in the ecliptic mean J2000 frame
-/// * [`rotpn`] – transforms vectors between celestial reference frames (e.g., ECLM to EQUM)
+/// * [`rotpn`] – transforms vectors between celestial reference frames (e.g., Eclm to Equm)
 /// * [`Outfit::get_jpl_ephem`] – accesses planetary ephemerides for Earth position
 /// * [`Outfit::get_ut1_provider`] – provides Earth orientation parameters (e.g., ΔUT1)
 pub fn helio_obs_pos(
@@ -80,7 +81,10 @@ pub fn helio_obs_pos(
     let earth_pos_matrix = Matrix3::from_columns(&earth_pos);
 
     let mut rot = [[0.0; 3]; 3];
-    rotpn(&mut rot, "ECLM", "J2000", 0.0, "EQUM", "J2000", 0.0);
+
+    let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
+    let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
+    rotpn(&mut rot, &ref_sys1, &ref_sys2);
     let rot_matrix = Matrix3::from(rot).transpose();
 
     earth_pos_matrix + rot_matrix * pos_obs_matrix
@@ -117,15 +121,11 @@ pub(crate) fn geo_obs_pos(
 
     // Transformation in the ecliptic mean J2000
     let mut rot1 = [[0.; 3]; 3];
-    rotpn(
-        &mut rot1,
-        "EQUT",
-        "OFDATE",
-        tmjd.to_mjd_tt_days(),
-        "ECLM",
-        "J2000",
-        0.,
-    );
+
+    let ref_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
+    let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+    rotpn(&mut rot1, &ref_sys1, &ref_sys2);
+
     let rot1_mat = Matrix3::from(rot1).transpose();
     let obs_pos = rot1_mat * obs_pos;
     let obs_vel = rot1_mat * obs_vel;
@@ -192,15 +192,11 @@ pub(crate) fn pvobs(
 
     // Transformation in the ecliptic mean J2000
     let mut rot1 = [[0.; 3]; 3];
-    rotpn(
-        &mut rot1,
-        "EQUT",
-        "OFDATE",
-        tmjd.to_mjd_tt_days(),
-        "ECLM",
-        "J2000",
-        0.,
-    );
+
+    // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
+    let rer_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
+    let rer_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+    rotpn(&mut rot1, &rer_sys1, &rer_sys2);
 
     let rot1_mat = Matrix3::from(rot1).transpose();
     let rot_mat = Matrix3::from(rot).transpose();

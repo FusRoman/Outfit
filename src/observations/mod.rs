@@ -12,7 +12,7 @@ use crate::{
     observers::{observer_position::geo_obs_pos, Observer},
     outfit::Outfit,
     outfit_errors::OutfitError,
-    ref_system::{cartesian_to_radec, correct_aberration, rotpn},
+    ref_system::{cartesian_to_radec, correct_aberration, rotpn, RefEpoch, RefSystem},
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
@@ -142,7 +142,10 @@ impl Observation {
 
         // Construct rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+
+        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
+        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+        rotpn(&mut roteqec, &ref_sys1, &ref_sys2);
         let matrix_elc_transform = Matrix3::from(roteqec);
 
         // Transform Earth's position to ecliptic J2000 frame
