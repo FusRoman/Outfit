@@ -1,5 +1,6 @@
 pub mod constants;
 mod conversion;
+pub mod earth_orientation;
 pub mod env_state;
 mod equinoctial_element;
 pub mod error_models;

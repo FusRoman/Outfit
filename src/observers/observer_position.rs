@@ -1,12 +1,14 @@
 use crate::constants::MJD;
+use crate::earth_orientation::equequ;
 use crate::outfit::Outfit;
 use crate::ref_system::{RefEpoch, RefSystem};
+use crate::time::gmst;
 
 use super::super::observers::Observer;
 use nalgebra::{Matrix3, Vector3};
 
-use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, RADSEC, T2000};
-use super::super::ref_system::{nutn80, obleq, rotmt, rotpn};
+use super::super::constants::{DPI, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS};
+use super::super::ref_system::{rotmt, rotpn};
 use hifitime::prelude::Epoch;
 use hifitime::ut1::Ut1Provider;
 
@@ -88,6 +90,60 @@ pub fn helio_obs_pos(
     earth_pos_matrix + rot_matrix * pos_obs_matrix
 }
 
+/// Compute the geocentric position and velocity of an Earth-based observer
+/// in the **mean ecliptic J2000 frame**.
+///
+/// This function transforms the observer's fixed coordinates on Earth into
+/// an inertial frame (mean ecliptic J2000) by accounting for:
+///
+/// 1. Earth's rotation (conversion from Earth-fixed to Earth-rotating frame),
+/// 2. Sidereal time at the given epoch (rotation around the Z-axis),
+/// 3. Precession and nutation (conversion from true equator of date to
+///    mean ecliptic J2000).
+///
+/// The result is the **geocentric position and velocity** of the observer in AU and AU/day,
+/// expressed in the mean ecliptic frame of J2000.
+///
+/// # Arguments
+///
+/// * `observer` – [`Observer`] structure containing the observer’s geodetic position
+///   on Earth (longitude, latitude, height).
+/// * `tmjd` – [`Epoch`] of observation, used to compute Earth rotation and
+///   sidereal angles (expressed internally in TT and UT1 timescales).
+/// * `ut1_provider` – Source for UT1-UTC offsets, needed to convert UTC to UT1
+///   before computing Greenwich sidereal time.
+///
+/// # Returns
+///
+/// A tuple `(position, velocity)`:
+///
+/// * `position`: Geocentric position vector of the observer in AU,
+/// * `velocity`: Geocentric velocity vector of the observer in AU/day,
+///   both expressed in the **mean ecliptic J2000 frame**.
+///
+/// # Steps
+///
+/// 1. Compute the observer's fixed coordinates in the Earth body frame (`body_fixed_coord`).
+/// 2. Compute the observer’s velocity due to Earth’s rotation:
+///    `v = ω × r`, with ω being the Earth's rotation vector.
+/// 3. Convert from TT to UT1 to get the Greenwich sidereal apparent time (GAST).
+/// 4. Apply a rotation around the Z-axis to go from the Earth-fixed frame
+///    to the true equator and equinox of date (EQUT).
+/// 5. Apply the transformation from EQUT at the date to the mean ecliptic J2000 frame
+///    using [`rotpn`].
+///
+/// # Notes
+///
+/// * Positions and velocities are expressed in AU and AU/day.
+/// * This computation matches the classical IAU conventions but uses the `hifitime`
+///   crate for UT1/TT conversion instead of OrbFit's legacy time scales.
+///
+/// # See also
+///
+/// * [`Observer::body_fixed_coord`] – fixed Earth coordinates of the observer.
+/// * [`rotpn`] – general frame transformation routine.
+/// * [`gmst`] / [`equequ`] – sidereal time and equation of equinoxes.
+/// * [`rotmt`] – builds the Earth rotation matrix.
 pub(crate) fn geo_obs_pos(
     observer: &Observer,
     tmjd: &Epoch,
@@ -203,105 +259,6 @@ pub(crate) fn pvobs(
     (dx, dv)
 }
 
-/// Compute the Greenwich Mean Sidereal Time (GMST) in radians
-/// for a given Modified Julian Date (UT1 time scale).
-///
-/// This function implements the IAU 1982/2000 polynomial formula
-/// for the mean sidereal time at 0h UT1, plus the fractional-day
-/// correction term due to Earth's rotation rate.
-///
-/// # Arguments
-/// * `tjm` - Modified Julian Date (MJD, UT1 time scale)
-///
-/// # Returns
-/// * GMST angle in radians, normalized to the interval [0, 2π).
-///
-/// # Details
-/// The GMST is computed in two steps:
-/// 1. Use a cubic polynomial (coefficients C0–C3) to get GMST at 0h UT1
-///    in seconds for the given date.
-/// 2. Add the contribution of Earth's rotation during the fractional day
-///    using the factor `RAP`, which converts solar days to sidereal days.
-///
-/// # References
-/// * IAU 1982, IERS Conventions 1996/2000.
-/// * Explanatory Supplement to the Astronomical Almanac (1992).
-fn gmst(tjm: f64) -> f64 {
-    // Polynomial coefficients for GMST at 0h UT1 (in seconds)
-    const C0: f64 = 24110.54841;
-    const C1: f64 = 8640184.812866;
-    const C2: f64 = 9.3104e-2;
-    const C3: f64 = -6.2e-6;
-
-    // Ratio of sidereal day to solar day
-    const RAP: f64 = 1.00273790934;
-
-    // Extract the integer MJD (0h UT1) and compute centuries since J2000.0
-    let itjm = tjm.floor();
-    let t = (itjm - T2000) / 36525.0;
-
-    // Step 1: GMST at 0h UT1 using the polynomial expression
-    let mut gmst0 = ((C3 * t + C2) * t + C1) * t + C0;
-
-    // Convert GMST from seconds to radians (86400 seconds per day)
-    gmst0 *= DPI / 86400.0;
-
-    // Step 2: Add the contribution from the fraction of the day
-    // tjm.fract() is the fraction of the current day (0 to 1)
-    // Multiplied by 2π (DPI) to convert into radians of a solar day,
-    // and then scaled by RAP to account for the faster rotation of sidereal time.
-    let h = tjm.fract() * DPI;
-    let mut gmst = gmst0 + h * RAP;
-
-    // Normalize GMST to the [0, 2π) range
-    let mut i: i64 = (gmst / DPI).floor() as i64;
-    if gmst < 0.0 {
-        i -= 1;
-    }
-    gmst -= i as f64 * DPI;
-
-    gmst
-}
-
-/// Compute the equation of the equinoxes (nutation correction) in radians.
-///
-/// This term accounts for the small difference between apparent sidereal time
-/// and mean sidereal time due to the nutation of Earth's rotation axis.
-///
-/// # Arguments
-/// * `tjm` - Modified Julian Date (MJD, TT or TDB time scale)
-///
-/// # Returns
-/// * Equation of the equinoxes in **radians**.
-///
-/// # Details
-/// The equation of the equinoxes is computed as:
-///
-/// ```text
-/// Eq_eq = Δψ * cos(ε)
-/// ```
-///
-/// where:
-/// * `Δψ` is the nutation in longitude (in arcseconds),
-/// * `ε` is the mean obliquity of the ecliptic (in radians).
-///
-/// The function converts `Δψ` from arcseconds to radians using `RADSEC`.
-///
-/// # See also
-/// * [`obleq`] – Computes the mean obliquity of the ecliptic.
-/// * [`nutn80`] – Computes the 1980 IAU nutation model (Δψ and Δε).
-fn equequ(tjm: f64) -> f64 {
-    // Compute the mean obliquity of the ecliptic (ε, in radians)
-    let oblm = obleq(tjm);
-
-    // Compute nutation in longitude (Δψ) and nutation in obliquity (Δε)
-    // Δψ is returned in arcseconds.
-    let (dpsi, _deps) = nutn80(tjm);
-
-    // Apply Eq_eq = Δψ * cos(ε), converting Δψ from arcseconds to radians using RADSEC
-    RADSEC * dpsi * oblm.cos()
-}
-
 /// Convert geodetic latitude and height into normalized parallax coordinates
 /// on the Earth.
 ///
@@ -403,17 +360,6 @@ mod observer_pos_tests {
         let (pxy1, pz1) = geodetic_to_parallax(20.707233557, 3067.694);
         assert_eq!(pxy1, 0.9362410003211518);
         assert_eq!(pz1, 0.35154299856304305);
-    }
-
-    #[test]
-    fn test_gmst() {
-        let tut = 57028.478514610404;
-        let res_gmst = gmst(tut);
-        assert_eq!(res_gmst, 4.851925725092499);
-
-        let tut = T2000;
-        let res_gmst = gmst(tut);
-        assert_eq!(res_gmst, 4.894961212789145);
     }
 
     #[test]
