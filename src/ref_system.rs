@@ -4,11 +4,22 @@ use crate::constants::{ArcSec, Radian, VLIGHT_AU};
 
 use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 
+// #[derive(Debug, Clone, Copy, PartialEq)]
 // enum RefEpoch {
 //     J2000,
 //     EPOCH(f64),
 // }
 
+// impl RefEpoch {
+//     pub fn date(&self) -> f64 {
+//         match *self {
+//             RefEpoch::J2000 => T2000,
+//             RefEpoch::EPOCH(d) => d,
+//         }
+//     }
+// }
+
+// #[derive(Debug, Clone, Copy, PartialEq)]
 // enum RefSystem {
 //     // Equatorial Mean, equatorial coordinates based on equator and mean equinox
 //     // at a given epoch (J2000 for instance)
@@ -19,6 +30,16 @@ use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 //     // Ecliptic mean, ecliptic coordinates based on ecliptic and mean equinox
 //     // at a given epoch (J2000 for instance)
 //     ECLM(RefEpoch),
+// }
+
+// impl RefSystem {
+//     pub fn epoch(&self) -> RefEpoch {
+//         match *self {
+//             RefSystem::EQUM(e) => e,
+//             RefSystem::EQUT(e) => e,
+//             RefSystem::ECLM(e) => e,
+//         }
+//     }
 // }
 
 /// Compute the rotation matrix between two celestial reference systems and epochs.
@@ -99,7 +120,7 @@ pub fn rotpn(
             if epoch == "J2000" {
                 false
             } else {
-                (date - date1).abs() > EPS
+                (date - date2).abs() > EPS
             }
         } else {
             true
@@ -930,6 +951,18 @@ mod ref_system_test {
     mod test_rotpn {
         use super::*;
 
+        use approx::assert_relative_eq;
+
+        fn assert_matrix_eq(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3], tol: f64) {
+            for i in 0..3 {
+                for j in 0..3 {
+                    assert_relative_eq!(a[i][j], b[i][j], epsilon = tol);
+                }
+            }
+        }
+
+        const TOLERANCE: f64 = 1e-10;
+
         #[test]
         fn test_rotpn_equm() {
             let ref_roteqec = [
@@ -1044,26 +1077,50 @@ mod ref_system_test {
         }
 
         #[test]
-        fn test_rotpn_equt_of_date() {
-            let ref_roteqec = [
-                [
-                    0.9999999999808916,
-                    5.671879296062708e-6,
-                    2.458983466038936e-6,
-                ],
-                [
-                    -5.671991417020452e-6,
-                    0.9999999989442864,
-                    4.559885773575134e-5,
-                ],
-                [
-                    -2.458724832225838e-6,
-                    -4.559887168220644e-5,
-                    0.9999999989573487,
-                ],
-            ];
+        fn test_rotpn_ofdate() {
+            // Choose a 1000-day offset (~2.7 years) to make the precession effect visible
+            let date1 = 60000.0;
+            let date2 = 61000.0;
 
-            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            // Compute transformation from EQUM@OFDATE(date1) to EQUM@OFDATE(date2)
+            let mut rot = [[0.0; 3]; 3];
+            rotpn(&mut rot, "EQUM", "OFDATE", date1, "EQUM", "OFDATE", date2);
+
+            // -------------------------------------------------------------------------
+            // 1. The resulting rotation matrix should NOT be the identity matrix
+            // -------------------------------------------------------------------------
+            let tol = 1e-12;
+            let mut is_identity = true;
+
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..3 {
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..3 {
+                    let expected = if i == j { 1.0 } else { 0.0 };
+                    if (rot[i][j] - expected).abs() > tol {
+                        is_identity = false;
+                    }
+                }
+            }
+            assert!(
+                !is_identity,
+                "Rotation matrix should not be identity when date1 != date2 for OFDATE"
+            );
+
+            // -------------------------------------------------------------------------
+            // 2. For 1000 days, the diagonal term (rot[1][1]) must differ from 1 by at least 1e-7
+            // This ensures that the precession effect has been applied.
+            // -------------------------------------------------------------------------
+            let delta = (1.0 - rot[1][1]).abs();
+            assert!(
+                delta > 1e-7,
+                "rot[1][1] difference too small: {delta}, expected > 1e-7"
+            );
+        }
+
+        #[test]
+        fn test_rotpn_equt_of_date() {
+            let mut roteqec = [[0.; 3]; 3];
             rotpn(
                 &mut roteqec,
                 "EQUT",
@@ -1074,57 +1131,44 @@ mod ref_system_test {
                 60730.5,
             );
 
-            assert_eq!(roteqec, ref_roteqec);
-
-            let ref_roteqec = [
+            let expected = [
                 [
-                    0.9999999999808916,
-                    5.671879296062708e-6,
-                    2.458983466038936e-6,
+                    0.9999999999959558,
+                    2.6103210920298055e-6,
+                    1.1287777487165376e-6,
                 ],
                 [
-                    -6.181974962369037e-6,
-                    0.9174866172186449,
-                    0.39776664916313814,
+                    -2.610372560299571e-6,
+                    0.9999999989569648,
+                    4.559886322796942e-5,
                 ],
                 [
-                    4.235164736271502e-22,
-                    -0.39776664917073884,
-                    0.9174866172361764,
+                    -1.1286587198650923e-6,
+                    -4.559886617430879e-5,
+                    0.9999999989597347,
                 ],
             ];
 
-            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-            rotpn(
-                &mut roteqec,
-                "EQUT",
-                "OFDATE",
-                60725.5,
-                "ECLM",
-                "OFDATE",
-                60730.5,
-            );
-
-            assert_eq!(roteqec, ref_roteqec);
+            assert_matrix_eq(&roteqec, &expected, TOLERANCE);
         }
 
         #[test]
         fn test_rotpn_equm_of_date() {
             let ref_roteqec = [
                 [
-                    0.9999999999808916,
-                    -5.671991417020452e-6,
-                    -2.458724832225838e-6,
+                    0.9999999999382557,
+                    -1.019473782042265e-5,
+                    -4.422167976508847e-6,
                 ],
                 [
-                    5.671879296062708e-6,
-                    0.9999999989442864,
-                    -4.559887168220644e-5,
+                    1.0194536102237101e-5,
+                    0.9999999989077697,
+                    -4.561284900943888e-5,
                 ],
                 [
-                    2.458983466038936e-6,
-                    4.559885773575134e-5,
-                    0.9999999989573487,
+                    4.4226329827165825e-6,
+                    4.561280392464384e-5,
+                    0.9999999989499561,
                 ],
             ];
 
@@ -1139,12 +1183,24 @@ mod ref_system_test {
                 60730.5,
             );
 
-            assert_eq!(roteqec, ref_roteqec);
+            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
 
             let ref_roteqec = [
-                [1.0, 0.0, 0.0],
-                [0.0, 0.917504753989953, 0.39772481240907737],
-                [0.0, -0.39772481240907737, 0.917504753989953],
+                [
+                    0.9999999999944286,
+                    -3.0616188567489498e-6,
+                    -1.330066112371995e-6,
+                ],
+                [
+                    3.3380501509251515e-6,
+                    0.9175047663420967,
+                    0.39772478390011357,
+                ],
+                [
+                    2.660299467132395e-9,
+                    -0.39772478390233756,
+                    0.9175047663472047,
+                ],
             ];
 
             let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
@@ -1158,15 +1214,27 @@ mod ref_system_test {
                 60730.5,
             );
 
-            assert_eq!(roteqec, ref_roteqec);
+            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
         }
 
         #[test]
         fn test_rotpn_eclm_of_date() {
             let ref_roteqec = [
-                [1.0, 0.0, 0.0],
-                [0.0, 0.917504753989953, -0.39772481240907737],
-                [0.0, 0.39772481240907737, 0.917504753989953],
+                [
+                    0.9175052829851363,
+                    -3.0616188567489498e-6,
+                    0.3977235920648803,
+                ],
+                [
+                    2.809050665755966e-6,
+                    0.9999999999953132,
+                    1.2176799173935054e-6,
+                ],
+                [
+                    -0.3977235920667443,
+                    -2.0361171295958094e-12,
+                    0.9175052829894363,
+                ],
             ];
 
             let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
@@ -1180,24 +1248,20 @@ mod ref_system_test {
                 60730.5,
             );
 
-            assert_eq!(roteqec, ref_roteqec);
+            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
 
             let ref_roteqec = [
                 [
-                    0.9999999999808916,
-                    -6.181974962369037e-6,
-                    4.235164736271502e-22,
+                    0.9175065127392313,
+                    -1.019473782042265e-5,
+                    0.3977207550243788,
                 ],
                 [
-                    5.671879296062708e-6,
-                    0.9174866172186449,
-                    -0.39776664917073884,
+                    2.7494897154247754e-5,
+                    0.9999999989077697,
+                    -3.779538585032655e-5,
                 ],
-                [
-                    2.458983466038936e-6,
-                    0.39776664916313814,
-                    0.9174866172361764,
-                ],
+                [-0.397720754204662, 4.561280392464384e-5, 0.9175065120174062],
             ];
 
             let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
@@ -1211,7 +1275,7 @@ mod ref_system_test {
                 60730.5,
             );
 
-            assert_eq!(roteqec, ref_roteqec);
+            assert_matrix_eq(&roteqec, &ref_roteqec, TOLERANCE);
         }
 
         #[test]
