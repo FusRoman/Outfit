@@ -1,3 +1,8 @@
 #!/bin/sh
 
-echo "Running pre-commit hook"
+#!/bin/sh
+echo "Running cargo fmt..."
+cargo fmt --all -- --check || exit 1
+
+echo "Running cargo clippy..."
+cargo clippy --all-targets --all-features -- -D warnings || exit 1
