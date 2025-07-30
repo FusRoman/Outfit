@@ -1,4 +1,6 @@
-use crate::constants::{ArcSec, Degree};
+use nalgebra::Vector3;
+
+use crate::constants::{ArcSec, Degree, DPI};
 
 /// Estimate the accuracy of a numeric string based on its decimal precision.
 ///
@@ -72,6 +74,50 @@ pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
     let dec_deg = sign * (d + m / 60.0 + s / 3600.0);
     let acc_arcsec = compute_accuracy(s_raw, 1. / 3600.)?;
     Some((dec_deg, acc_arcsec))
+}
+
+/// Convert a 3D Cartesian position vector to right ascension and declination.
+///
+/// Given a position vector expressed in Cartesian coordinates (typically in an equatorial frame),
+/// this function returns the corresponding right ascension (α), declination (δ), and norm (distance).
+///
+/// Arguments
+/// ---------
+/// * `cartesian_position`: 3D position vector in Cartesian coordinates [AU or any length unit].
+///
+/// Returns
+/// --------
+/// * Tuple `(α, δ, ρ)`:
+///     - `α`: right ascension in radians, in the range [0, 2π).
+///     - `δ`: declination in radians, in the range [−π/2, +π/2].
+///     - `ρ`: Euclidean norm of the vector (distance to the origin).
+///
+/// Remarks
+/// -------
+/// * If the input vector has zero norm, the result is `(0.0, 0.0, 0.0)`.
+/// * The RA computation uses `atan2` to preserve quadrant information.
+/// * This function is used when converting inertial position vectors to observable angles.
+///
+/// # See also
+/// * [`correct_aberration`] – apply aberration correction before calling this if needed
+pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
+    let pos_norm = cartesian_position.norm();
+    if pos_norm == 0. {
+        return (0.0, 0.0, pos_norm);
+    }
+
+    let delta = (cartesian_position.z / pos_norm).asin();
+
+    let cos_delta = delta.cos();
+    if cos_delta == 0.0 {
+        return (0.0, delta, pos_norm);
+    }
+
+    let cos_alpha = cartesian_position.x / (pos_norm * cos_delta);
+    let sin_alpha = cartesian_position.y / (pos_norm * cos_delta);
+    let alpha = sin_alpha.atan2(cos_alpha);
+    let alpha = if alpha < 0.0 { alpha + DPI } else { alpha };
+    (alpha, delta, pos_norm)
 }
 
 #[cfg(test)]

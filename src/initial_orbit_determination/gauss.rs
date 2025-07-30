@@ -8,7 +8,7 @@ use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 use crate::initial_orbit_determination::gauss_result::GaussResult;
 use crate::kepler::velocity_correction;
 use crate::keplerian_element::KeplerianElements;
-use crate::observers::observer_position::helio_obs_pos;
+use crate::observers::helio_obs_pos;
 use crate::observers::Observer;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;

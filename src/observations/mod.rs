@@ -5,19 +5,19 @@ pub mod trajectory_ext;
 pub(crate) mod triplets_iod;
 
 use crate::{
-    constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC},
-    conversion::{parse_dec_to_deg, parse_ra_to_deg},
+    constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC, VLIGHT_AU},
+    conversion::{cartesian_to_radec, parse_dec_to_deg, parse_ra_to_deg},
     equinoctial_element::EquinoctialElements,
     observations::trajectory_ext::ObservationBatch,
     observers::Observer,
     outfit::Outfit,
     outfit_errors::OutfitError,
-    ref_system::{cartesian_to_radec, correct_aberration, rotpn, RefEpoch, RefSystem},
+    ref_system::{rotpn, RefEpoch, RefSystem},
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
 use hifitime::Epoch;
-use nalgebra::Matrix3;
+use nalgebra::{Matrix3, Vector3};
 use std::{f64::consts::PI, ops::Range, sync::Arc};
 use thiserror::Error;
 
@@ -190,6 +190,41 @@ impl Observation {
         // Return the total normalized squared residuals (RA² + DEC²)
         Ok(rms_ra + rms_dec)
     }
+}
+
+/// Apply stellar aberration correction to a relative position vector.
+///
+/// This function computes the apparent position of a target object by applying
+/// the first-order correction for stellar aberration due to the observer's velocity.
+/// It assumes the classical limit (v ≪ c), using a linear time-delay model.
+///
+/// Arguments
+/// ---------
+/// * `xrel`: relative position vector from observer to object [AU].
+/// * `vrel`: velocity of the observer relative to the barycenter [AU/day].
+///
+/// Returns
+/// --------
+/// * Corrected position vector (same units and directionality as `xrel`),
+///   shifted by the aberration effect.
+///
+/// Formula
+/// -------
+/// The corrected position is given by:
+/// ```text
+/// x_corr = xrel − (‖xrel‖ / c) · vrel
+/// ```
+/// where `c` is the speed of light in AU/day (`VLIGHT_AU`).
+///
+/// Remarks
+/// -------
+/// * This function does **not** normalize the output.
+/// * Suitable for use in astrometric modeling or when computing apparent direction
+///   of celestial objects as seen from a moving observer.
+pub(crate) fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
+    let norm_vector = xrel.norm();
+    let dt = norm_vector / VLIGHT_AU;
+    xrel - dt * vrel
 }
 
 #[derive(Error, Debug, PartialEq)]

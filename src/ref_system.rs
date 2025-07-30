@@ -1,11 +1,8 @@
 use nalgebra::{Matrix3, Rotation3, Vector3};
 
-use crate::{
-    constants::VLIGHT_AU,
-    earth_orientation::{obleq, prec, rnut80},
-};
+use crate::earth_orientation::{obleq, prec, rnut80};
 
-use super::constants::{DPI, EPS, T2000};
+use super::constants::{EPS, T2000};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RefEpoch {
@@ -259,85 +256,6 @@ pub fn rotmt(alpha: f64, k: usize) -> Matrix3<f64> {
     };
 
     Rotation3::from_axis_angle(&axis, alpha).into()
-}
-
-/// Apply stellar aberration correction to a relative position vector.
-///
-/// This function computes the apparent position of a target object by applying
-/// the first-order correction for stellar aberration due to the observer's velocity.
-/// It assumes the classical limit (v ≪ c), using a linear time-delay model.
-///
-/// Arguments
-/// ---------
-/// * `xrel`: relative position vector from observer to object [AU].
-/// * `vrel`: velocity of the observer relative to the barycenter [AU/day].
-///
-/// Returns
-/// --------
-/// * Corrected position vector (same units and directionality as `xrel`),
-///   shifted by the aberration effect.
-///
-/// Formula
-/// -------
-/// The corrected position is given by:
-/// ```text
-/// x_corr = xrel − (‖xrel‖ / c) · vrel
-/// ```
-/// where `c` is the speed of light in AU/day (`VLIGHT_AU`).
-///
-/// Remarks
-/// -------
-/// * This function does **not** normalize the output.
-/// * Suitable for use in astrometric modeling or when computing apparent direction
-///   of celestial objects as seen from a moving observer.
-pub(crate) fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
-    let norm_vector = xrel.norm();
-    let dt = norm_vector / VLIGHT_AU;
-    xrel - dt * vrel
-}
-
-/// Convert a 3D Cartesian position vector to right ascension and declination.
-///
-/// Given a position vector expressed in Cartesian coordinates (typically in an equatorial frame),
-/// this function returns the corresponding right ascension (α), declination (δ), and norm (distance).
-///
-/// Arguments
-/// ---------
-/// * `cartesian_position`: 3D position vector in Cartesian coordinates [AU or any length unit].
-///
-/// Returns
-/// --------
-/// * Tuple `(α, δ, ρ)`:
-///     - `α`: right ascension in radians, in the range [0, 2π).
-///     - `δ`: declination in radians, in the range [−π/2, +π/2].
-///     - `ρ`: Euclidean norm of the vector (distance to the origin).
-///
-/// Remarks
-/// -------
-/// * If the input vector has zero norm, the result is `(0.0, 0.0, 0.0)`.
-/// * The RA computation uses `atan2` to preserve quadrant information.
-/// * This function is used when converting inertial position vectors to observable angles.
-///
-/// # See also
-/// * [`correct_aberration`] – apply aberration correction before calling this if needed
-pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
-    let pos_norm = cartesian_position.norm();
-    if pos_norm == 0. {
-        return (0.0, 0.0, pos_norm);
-    }
-
-    let delta = (cartesian_position.z / pos_norm).asin();
-
-    let cos_delta = delta.cos();
-    if cos_delta == 0.0 {
-        return (0.0, delta, pos_norm);
-    }
-
-    let cos_alpha = cartesian_position.x / (pos_norm * cos_delta);
-    let sin_alpha = cartesian_position.y / (pos_norm * cos_delta);
-    let alpha = sin_alpha.atan2(cos_alpha);
-    let alpha = if alpha < 0.0 { alpha + DPI } else { alpha };
-    (alpha, delta, pos_norm)
 }
 
 #[cfg(test)]
