@@ -1,4 +1,4 @@
-use nalgebra::Vector3;
+use nalgebra::{Matrix3, Rotation3, Vector3};
 
 use crate::constants::{ArcSec, Radian, VLIGHT_AU};
 
@@ -296,30 +296,19 @@ pub fn obleq(tjm: f64) -> Radian {
 /// * [`rnut80`] – applies sequential `rotmt` matrices for nutation
 /// * [`rotpn`] – assembles compound frame transformations
 pub fn rotmt(alpha: f64, k: usize) -> [[f64; 3]; 3] {
-    if k > 2 {
-        panic!("**** ROTMT: k = ??? ****");
-    }
+    let axis = match k {
+        0 => Vector3::x_axis(),
+        1 => Vector3::y_axis(),
+        2 => Vector3::z_axis(),
+        _ => panic!("**** ROTMT: invalid axis index {k} (must be 0,1,2) ****"),
+    };
 
-    let cosa = alpha.cos();
-    let sina = alpha.sin();
+    // Build the rotation using nalgebra
+    let rotation = Rotation3::from_axis_angle(&axis, alpha);
 
-    let mut r = [[0.0; 3]; 3];
-
-    let i1 = k;
-    let i2 = (i1 + 1) % 3;
-    let i3 = (i2 + 1) % 3;
-
-    r[i1][i1] = 1.0;
-    r[i1][i2] = 0.0;
-    r[i1][i3] = 0.0;
-    r[i2][i1] = 0.0;
-    r[i2][i2] = cosa;
-    r[i2][i3] = sina;
-    r[i3][i1] = 0.0;
-    r[i3][i2] = -sina;
-    r[i3][i3] = cosa;
-
-    r
+    // Convert to [[f64; 3]; 3]
+    let mat: Matrix3<f64> = rotation.into_inner();
+    mat.into()
 }
 
 /// Compute the nutation angles in longitude and obliquity using the IAU 1980 (Wahr) model.
