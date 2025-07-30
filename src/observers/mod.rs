@@ -2,11 +2,16 @@ pub mod bimap;
 pub mod observatories;
 pub(crate) mod observer_position;
 
-use nalgebra::Vector3;
+use hifitime::ut1::Ut1Provider;
+use hifitime::Epoch;
+use nalgebra::{Matrix3, Vector3};
 use ordered_float::NotNan;
 
-use crate::constants::ERAU;
 use crate::constants::{Degree, Kilometer};
+use crate::constants::{DPI, ERAU};
+use crate::earth_orientation::equequ;
+use crate::ref_system::{rotmt, rotpn, RefEpoch, RefSystem};
+use crate::time::gmst;
 
 use observer_position::geodetic_to_parallax;
 
@@ -78,10 +83,87 @@ impl Observer {
             ERAU * self.rho_sin_phi.into_inner(),
         )
     }
+
+    /// Compute the observer’s geocentric position and velocity in the ecliptic J2000 frame.
+    ///
+    /// This function calculates the position and velocity of a ground-based observer relative to the Earth's
+    /// center of mass, accounting for Earth rotation (via GMST), nutation, and the observer’s geographic location.
+    /// The result is expressed in the ecliptic mean J2000 frame, suitable for use in orbital initial determination.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `observer`: a reference to an [`Observer`] containing the site longitude and parallax parameters.
+    /// * `tmjd`: observation epoch as a [`hifitime::Epoch`] in TT.
+    /// * `ut1_provider`: a reference to a [`hifitime::ut1::Ut1Provider`] for accurate UT1 conversion.
+    ///
+    /// Returns
+    /// --------
+    /// * `(dx, dv)` – Tuple of:
+    ///     - `dx`: observer geocentric position vector in ecliptic mean J2000 frame [AU].
+    ///     - `dv`: observer velocity vector due to Earth's rotation, in the same frame [AU/day].
+    ///
+    /// Remarks
+    /// -------
+    /// * Internally, this function:
+    ///     1. Computes the body-fixed coordinates of the observer.
+    ///     2. Derives its rotational velocity: `v = ω × r`.
+    ///     3. Applies Earth orientation corrections using:
+    ///         - Greenwich Mean Sidereal Time (GMST),
+    ///         - Equation of the equinoxes,
+    ///         - Precession and nutation transformation (`rotpn`).
+    ///     4. Returns position and velocity in the J2000 ecliptic frame (used in classical orbital mechanics).
+    ///
+    /// # See also
+    /// * [`Observer::body_fixed_coord`] – observer's base vector in Earth-fixed frame
+    /// * [`rotpn`] – rotation between reference frames
+    /// * [`gmst`], [`equequ`] – time-dependent Earth orientation
+    pub(crate) fn pvobs(
+        &self,
+        tmjd: &Epoch,
+        ut1_provider: &Ut1Provider,
+    ) -> (Vector3<f64>, Vector3<f64>) {
+        // Initialisation
+        let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
+
+        // Get the coordinates of the observer on Earth
+        let dxbf = self.body_fixed_coord();
+
+        // Get the observer velocity due to Earth rotation
+        let dvbf = omega.cross(&dxbf);
+
+        // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
+        // based on the hifitime crate
+        let mjd_ut1 = tmjd.to_ut1(ut1_provider.to_owned());
+        let tut = mjd_ut1.to_mjd_tai_days();
+
+        // Compute the Greenwich sideral apparent time
+        let gast = gmst(tut) + equequ(tmjd.to_mjd_tt_days());
+
+        // Earth rotation matrix
+        let rot = rotmt(-gast, 2);
+
+        // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
+        let rer_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
+        let rer_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+        let rot1 = rotpn(&rer_sys1, &rer_sys2);
+
+        let rot1_mat = Matrix3::from(rot1).transpose();
+        let rot_mat = Matrix3::from(rot).transpose();
+
+        let rotmat = rot1_mat * rot_mat;
+
+        // Apply transformation to the observer position and velocity
+        let dx = rotmat * dxbf;
+        let dv = rotmat * dvbf;
+
+        (dx, dv)
+    }
 }
 
 #[cfg(test)]
 mod observer_test {
+
+    use crate::{error_models::ErrorModel, outfit::Outfit};
 
     use super::*;
 
@@ -120,5 +202,35 @@ mod observer_test {
                 0.000014988110430544328
             )
         )
+    }
+
+    #[test]
+    fn pvobs_test() {
+        let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+        let tmjd = 57028.479297592596;
+        let epoch = Epoch::from_mjd_in_time_scale(tmjd, hifitime::TimeScale::TT);
+        // longitude, latitude and height of Pan-STARRS 1, Haleakala
+        let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
+        let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()), None, None);
+
+        let (observer_position, observer_velocity) =
+            &pan_starrs.pvobs(&epoch, state.get_ut1_provider());
+
+        assert_eq!(
+            observer_position.as_slice(),
+            [
+                -2.086211182493635e-5,
+                3.718476815327979e-5,
+                2.4978996447997476e-7
+            ]
+        );
+        assert_eq!(
+            observer_velocity.as_slice(),
+            [
+                -0.0002143246535691577,
+                -0.00012059801691431748,
+                5.262184624215718e-5
+            ]
+        );
     }
 }
