@@ -1,6 +1,8 @@
 use hifitime::{Epoch, TimeScale};
 use std::str::FromStr;
 
+use crate::constants::{DPI, T2000};
+
 /// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to modified julian date (MJD)
 ///
 /// Argument
@@ -83,6 +85,66 @@ pub fn frac_date_to_mjd(date_str: &str) -> Result<f64, String> {
     Ok(epoch.to_mjd_tt_days())
 }
 
+/// Compute the Greenwich Mean Sidereal Time (GMST) in radians
+/// for a given Modified Julian Date (UT1 time scale).
+///
+/// This function implements the IAU 1982/2000 polynomial formula
+/// for the mean sidereal time at 0h UT1, plus the fractional-day
+/// correction term due to Earth's rotation rate.
+///
+/// # Arguments
+/// * `tjm` - Modified Julian Date (MJD, UT1 time scale)
+///
+/// # Returns
+/// * GMST angle in radians, normalized to the interval [0, 2π).
+///
+/// # Details
+/// The GMST is computed in two steps:
+/// 1. Use a cubic polynomial (coefficients C0–C3) to get GMST at 0h UT1
+///    in seconds for the given date.
+/// 2. Add the contribution of Earth's rotation during the fractional day
+///    using the factor `RAP`, which converts solar days to sidereal days.
+///
+/// # References
+/// * IAU 1982, IERS Conventions 1996/2000.
+/// * Explanatory Supplement to the Astronomical Almanac (1992).
+pub fn gmst(tjm: f64) -> f64 {
+    // Polynomial coefficients for GMST at 0h UT1 (in seconds)
+    const C0: f64 = 24110.54841;
+    const C1: f64 = 8640184.812866;
+    const C2: f64 = 9.3104e-2;
+    const C3: f64 = -6.2e-6;
+
+    // Ratio of sidereal day to solar day
+    const RAP: f64 = 1.00273790934;
+
+    // Extract the integer MJD (0h UT1) and compute centuries since J2000.0
+    let itjm = tjm.floor();
+    let t = (itjm - T2000) / 36525.0;
+
+    // Step 1: GMST at 0h UT1 using the polynomial expression
+    let mut gmst0 = ((C3 * t + C2) * t + C1) * t + C0;
+
+    // Convert GMST from seconds to radians (86400 seconds per day)
+    gmst0 *= DPI / 86400.0;
+
+    // Step 2: Add the contribution from the fraction of the day
+    // tjm.fract() is the fraction of the current day (0 to 1)
+    // Multiplied by 2π (DPI) to convert into radians of a solar day,
+    // and then scaled by RAP to account for the faster rotation of sidereal time.
+    let h = tjm.fract() * DPI;
+    let mut gmst = gmst0 + h * RAP;
+
+    // Normalize GMST to the [0, 2π) range
+    let mut i: i64 = (gmst / DPI).floor() as i64;
+    if gmst < 0.0 {
+        i -= 1;
+    }
+    gmst -= i as f64 * DPI;
+
+    gmst
+}
+
 #[cfg(test)]
 mod time_test {
     use super::*;
@@ -130,5 +192,16 @@ mod time_test {
 
         let mjd = frac_date_to_mjd("1976 09 20.93878").unwrap();
         assert_eq!(mjd, 43041.93932611111);
+    }
+
+    #[test]
+    fn test_gmst() {
+        let tut = 57028.478514610404;
+        let res_gmst = gmst(tut);
+        assert_eq!(res_gmst, 4.851925725092499);
+
+        let tut = T2000;
+        let res_gmst = gmst(tut);
+        assert_eq!(res_gmst, 4.894961212789145);
     }
 }
