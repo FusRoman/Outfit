@@ -15,6 +15,8 @@ use crate::orb_elem::eccentricity_control;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use crate::ref_system::rotpn;
+use crate::ref_system::RefEpoch;
+use crate::ref_system::RefSystem;
 use aberth::aberth;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
@@ -650,7 +652,9 @@ impl GaussObs {
         let mut roteqec = [[0.0; 3]; 3];
 
         // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
-        rotpn(&mut roteqec, "EQUM", "J2000", 0.0, "ECLM", "J2000", 0.0);
+        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
+        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+        rotpn(&mut roteqec, &ref_sys1, &ref_sys2);
 
         // Apply the transformation to position and velocity vectors
         let matrix_elc_transform = Matrix3::from(roteqec).transpose();
