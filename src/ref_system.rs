@@ -4,7 +4,6 @@ use crate::constants::{ArcSec, Radian, VLIGHT_AU};
 
 use super::constants::{DPI, EPS, RADEG, RADSEC, T2000};
 
-// TBD: will be used later in the project
 // enum RefEpoch {
 //     J2000,
 //     EPOCH(f64),
@@ -91,7 +90,7 @@ pub fn rotpn(
     let mut epoch = epoch1.to_string();
     let mut date = if epoch == "J2000" { T2000 } else { date1 };
 
-    *rot = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]; // Initialisation de la matrice unitaire
+    *rot = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
 
     let mut nit = 0;
 
@@ -928,314 +927,425 @@ mod ref_system_test {
         assert_eq!(rnut, ref_rnut);
     }
 
-    #[test]
-    fn test_rotpn_equm() {
-        let ref_roteqec = [
-            [1.0, 0.0, 0.0],
-            [0.0, 0.9174820620691818, 0.3977771559319137],
-            [0.0, -0.3977771559319137, 0.9174820620691818],
-        ];
+    mod test_rotpn {
+        use super::*;
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
+        #[test]
+        fn test_rotpn_equm() {
+            let ref_roteqec = [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.9174820620691818, 0.3977771559319137],
+                [0.0, -0.3977771559319137, 0.9174820620691818],
+            ];
 
-        let ref_roteqec = [
-            [
-                0.9999999977217079,
-                6.19323109890795e-5,
-                2.6850942970991024e-5,
-            ],
-            [
-                -6.193306258211379e-5,
-                0.9999999976903892,
-                2.799138089948361e-5,
-            ],
-            [
-                -2.6849209338068913e-5,
-                -2.7993043796858963e-5,
-                0.9999999992477547,
-            ],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUM", "J2000", 0., "EQUT", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let ref_roteqec = [
+                [
+                    0.9999999977217079,
+                    6.19323109890795e-5,
+                    2.6850942970991024e-5,
+                ],
+                [
+                    -6.193306258211379e-5,
+                    0.9999999976903892,
+                    2.799138089948361e-5,
+                ],
+                [
+                    -2.6849209338068913e-5,
+                    -2.7993043796858963e-5,
+                    0.9999999992477547,
+                ],
+            ];
 
-    #[test]
-    fn test_rotpn_eclm() {
-        let ref_roteqec = [
-            [1.0, 0.0, 0.0],
-            [0.0, 0.9174820620691818, -0.3977771559319137],
-            [0.0, 0.3977771559319137, 0.9174820620691818],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "EQUM", "J2000", 0., "EQUT", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUM", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
+        #[test]
+        fn test_rotpn_eclm() {
+            let ref_roteqec = [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.9174820620691818, -0.3977771559319137],
+                [0.0, 0.3977771559319137, 0.9174820620691818],
+            ];
 
-        let ref_roteqec = [
-            [
-                0.9999999977217079,
-                6.750247612406132e-5,
-                -3.3881317890172014e-21,
-            ],
-            [
-                -6.193306258211379e-5,
-                0.9174931942820401,
-                -0.39775147342333544,
-            ],
-            [
-                -2.6849209338068913e-5,
-                0.3977514725171414,
-                0.9174931963723576,
-            ],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUM", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUT", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let ref_roteqec = [
+                [
+                    0.9999999977217079,
+                    6.750247612406132e-5,
+                    -3.3881317890172014e-21,
+                ],
+                [
+                    -6.193306258211379e-5,
+                    0.9174931942820401,
+                    -0.39775147342333544,
+                ],
+                [
+                    -2.6849209338068913e-5,
+                    0.3977514725171414,
+                    0.9174931963723576,
+                ],
+            ];
 
-    #[test]
-    fn test_rotpn_equt() {
-        let ref_roteqec = [
-            [
-                0.9999999977217079,
-                -6.193306258211379e-5,
-                -2.6849209338068913e-5,
-            ],
-            [
-                6.19323109890795e-5,
-                0.9999999976903892,
-                -2.7993043796858963e-5,
-            ],
-            [
-                2.6850942970991024e-5,
-                2.799138089948361e-5,
-                0.9999999992477547,
-            ],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "ECLM", "J2000", 0., "EQUT", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUT", "J2000", 0., "EQUM", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
+        #[test]
+        fn test_rotpn_equt() {
+            let ref_roteqec = [
+                [
+                    0.9999999977217079,
+                    -6.193306258211379e-5,
+                    -2.6849209338068913e-5,
+                ],
+                [
+                    6.19323109890795e-5,
+                    0.9999999976903892,
+                    -2.7993043796858963e-5,
+                ],
+                [
+                    2.6850942970991024e-5,
+                    2.799138089948361e-5,
+                    0.9999999992477547,
+                ],
+            ];
 
-        let ref_roteqec = [
-            [
-                0.9999999977217079,
-                -6.193306258211379e-5,
-                -2.6849209338068913e-5,
-            ],
-            [6.750247612406132e-5, 0.9174931942820401, 0.3977514725171414],
-            [
-                -3.3881317890172014e-21,
-                -0.39775147342333544,
-                0.9174931963723576,
-            ],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "EQUT", "J2000", 0., "EQUM", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(&mut roteqec, "EQUT", "J2000", 0., "ECLM", "J2000", 0.);
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let ref_roteqec = [
+                [
+                    0.9999999977217079,
+                    -6.193306258211379e-5,
+                    -2.6849209338068913e-5,
+                ],
+                [6.750247612406132e-5, 0.9174931942820401, 0.3977514725171414],
+                [
+                    -3.3881317890172014e-21,
+                    -0.39775147342333544,
+                    0.9174931963723576,
+                ],
+            ];
 
-    #[test]
-    fn test_rotpn_equt_of_date() {
-        let ref_roteqec = [
-            [
-                0.9999999999808916,
-                5.671879296062708e-6,
-                2.458983466038936e-6,
-            ],
-            [
-                -5.671991417020452e-6,
-                0.9999999989442864,
-                4.559885773575134e-5,
-            ],
-            [
-                -2.458724832225838e-6,
-                -4.559887168220644e-5,
-                0.9999999989573487,
-            ],
-        ];
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(&mut roteqec, "EQUT", "J2000", 0., "ECLM", "J2000", 0.);
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "EQUT",
-            "OFDATE",
-            60725.5,
-            "EQUM",
-            "OFDATE",
-            60730.5,
-        );
+        #[test]
+        fn test_rotpn_equt_of_date() {
+            let ref_roteqec = [
+                [
+                    0.9999999999808916,
+                    5.671879296062708e-6,
+                    2.458983466038936e-6,
+                ],
+                [
+                    -5.671991417020452e-6,
+                    0.9999999989442864,
+                    4.559885773575134e-5,
+                ],
+                [
+                    -2.458724832225838e-6,
+                    -4.559887168220644e-5,
+                    0.9999999989573487,
+                ],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "EQUT",
+                "OFDATE",
+                60725.5,
+                "EQUM",
+                "OFDATE",
+                60730.5,
+            );
 
-        let ref_roteqec = [
-            [
-                0.9999999999808916,
-                5.671879296062708e-6,
-                2.458983466038936e-6,
-            ],
-            [
-                -6.181974962369037e-6,
-                0.9174866172186449,
-                0.39776664916313814,
-            ],
-            [
-                4.235164736271502e-22,
-                -0.39776664917073884,
-                0.9174866172361764,
-            ],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "EQUT",
-            "OFDATE",
-            60725.5,
-            "ECLM",
-            "OFDATE",
-            60730.5,
-        );
+            let ref_roteqec = [
+                [
+                    0.9999999999808916,
+                    5.671879296062708e-6,
+                    2.458983466038936e-6,
+                ],
+                [
+                    -6.181974962369037e-6,
+                    0.9174866172186449,
+                    0.39776664916313814,
+                ],
+                [
+                    4.235164736271502e-22,
+                    -0.39776664917073884,
+                    0.9174866172361764,
+                ],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "EQUT",
+                "OFDATE",
+                60725.5,
+                "ECLM",
+                "OFDATE",
+                60730.5,
+            );
 
-    #[test]
-    fn test_rotpn_equm_of_date() {
-        let ref_roteqec = [
-            [
-                0.9999999999808916,
-                -5.671991417020452e-6,
-                -2.458724832225838e-6,
-            ],
-            [
-                5.671879296062708e-6,
-                0.9999999989442864,
-                -4.559887168220644e-5,
-            ],
-            [
-                2.458983466038936e-6,
-                4.559885773575134e-5,
-                0.9999999989573487,
-            ],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "EQUM",
-            "OFDATE",
-            60725.5,
-            "EQUT",
-            "OFDATE",
-            60730.5,
-        );
+        #[test]
+        fn test_rotpn_equm_of_date() {
+            let ref_roteqec = [
+                [
+                    0.9999999999808916,
+                    -5.671991417020452e-6,
+                    -2.458724832225838e-6,
+                ],
+                [
+                    5.671879296062708e-6,
+                    0.9999999989442864,
+                    -4.559887168220644e-5,
+                ],
+                [
+                    2.458983466038936e-6,
+                    4.559885773575134e-5,
+                    0.9999999989573487,
+                ],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "EQUM",
+                "OFDATE",
+                60725.5,
+                "EQUT",
+                "OFDATE",
+                60730.5,
+            );
 
-        let ref_roteqec = [
-            [1.0, 0.0, 0.0],
-            [0.0, 0.917504753989953, 0.39772481240907737],
-            [0.0, -0.39772481240907737, 0.917504753989953],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "EQUM",
-            "OFDATE",
-            60725.5,
-            "ECLM",
-            "OFDATE",
-            60730.5,
-        );
+            let ref_roteqec = [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.917504753989953, 0.39772481240907737],
+                [0.0, -0.39772481240907737, 0.917504753989953],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "EQUM",
+                "OFDATE",
+                60725.5,
+                "ECLM",
+                "OFDATE",
+                60730.5,
+            );
 
-    #[test]
-    fn test_rotpn_eclm_of_date() {
-        let ref_roteqec = [
-            [1.0, 0.0, 0.0],
-            [0.0, 0.917504753989953, -0.39772481240907737],
-            [0.0, 0.39772481240907737, 0.917504753989953],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "ECLM",
-            "OFDATE",
-            60725.5,
-            "EQUM",
-            "OFDATE",
-            60730.5,
-        );
+        #[test]
+        fn test_rotpn_eclm_of_date() {
+            let ref_roteqec = [
+                [1.0, 0.0, 0.0],
+                [0.0, 0.917504753989953, -0.39772481240907737],
+                [0.0, 0.39772481240907737, 0.917504753989953],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "ECLM",
+                "OFDATE",
+                60725.5,
+                "EQUM",
+                "OFDATE",
+                60730.5,
+            );
 
-        let ref_roteqec = [
-            [
-                0.9999999999808916,
-                -6.181974962369037e-6,
-                4.235164736271502e-22,
-            ],
-            [
-                5.671879296062708e-6,
-                0.9174866172186449,
-                -0.39776664917073884,
-            ],
-            [
-                2.458983466038936e-6,
-                0.39776664916313814,
-                0.9174866172361764,
-            ],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        rotpn(
-            &mut roteqec,
-            "ECLM",
-            "OFDATE",
-            60725.5,
-            "EQUT",
-            "OFDATE",
-            60730.5,
-        );
+            let ref_roteqec = [
+                [
+                    0.9999999999808916,
+                    -6.181974962369037e-6,
+                    4.235164736271502e-22,
+                ],
+                [
+                    5.671879296062708e-6,
+                    0.9174866172186449,
+                    -0.39776664917073884,
+                ],
+                [
+                    2.458983466038936e-6,
+                    0.39776664916313814,
+                    0.9174866172361764,
+                ],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
-    }
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            rotpn(
+                &mut roteqec,
+                "ECLM",
+                "OFDATE",
+                60725.5,
+                "EQUT",
+                "OFDATE",
+                60730.5,
+            );
 
-    #[test]
-    fn test_rotpn_equt_eclm_date() {
-        let ref_roteqec = [
-            [
-                0.9999932036120499,
-                0.003381495004957589,
-                0.0014690885747894438,
-            ],
-            [
-                -0.0036868307528666357,
-                0.9174941827437706,
-                0.3977321107357815,
-            ],
-            [
-                -2.9510755403679666e-6,
-                -0.3977348238749929,
-                0.917500414097138,
-            ],
-        ];
+            assert_eq!(roteqec, ref_roteqec);
+        }
 
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-        let tmjd = 57028.479297592596;
-        rotpn(&mut roteqec, "EQUT", "OFDATE", tmjd, "ECLM", "J2000", 0.);
+        #[test]
+        fn test_rotpn_equt_eclm_date() {
+            let ref_roteqec = [
+                [
+                    0.9999932036120499,
+                    0.003381495004957589,
+                    0.0014690885747894438,
+                ],
+                [
+                    -0.0036868307528666357,
+                    0.9174941827437706,
+                    0.3977321107357815,
+                ],
+                [
+                    -2.9510755403679666e-6,
+                    -0.3977348238749929,
+                    0.917500414097138,
+                ],
+            ];
 
-        assert_eq!(roteqec, ref_roteqec);
+            let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
+            let tmjd = 57028.479297592596;
+            rotpn(&mut roteqec, "EQUT", "OFDATE", tmjd, "ECLM", "J2000", 0.);
+
+            assert_eq!(roteqec, ref_roteqec);
+        }
+
+        #[test]
+        fn test_rotpn_identity_cases() {
+            let mut r = [[0.; 3]; 3];
+            // Identity in J2000 EQUM
+            rotpn(&mut r, "EQUM", "J2000", 0., "EQUM", "J2000", 0.);
+            assert_eq!(r, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+
+            // Identity in OFDATE (ECLM)
+            let mut r = [[0.; 3]; 3];
+            rotpn(&mut r, "ECLM", "OFDATE", 60000., "ECLM", "OFDATE", 60000.);
+            assert_eq!(r, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+
+            // Identity in OFDATE (EQUT)
+            let mut r = [[0.; 3]; 3];
+            rotpn(&mut r, "EQUT", "OFDATE", 60000., "EQUT", "OFDATE", 60000.);
+            assert_eq!(r, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+        }
+
+        #[test]
+        fn test_rotpn_inverse_transform() {
+            let mut r1 = [[0.; 3]; 3];
+            let mut r2 = [[0.; 3]; 3];
+            rotpn(&mut r1, "EQUM", "J2000", 0., "ECLM", "J2000", 0.);
+            rotpn(&mut r2, "ECLM", "J2000", 0., "EQUM", "J2000", 0.);
+            let prod = matmul(&r2, &r1);
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..3 {
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..3 {
+                    if i == j {
+                        assert!((prod[i][j] - 1.0).abs() < 1e-12);
+                    } else {
+                        assert!(prod[i][j].abs() < 1e-12);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn test_rotpn_large_epoch_difference() {
+            let mut r = [[0.; 3]; 3];
+            // From 2055 back to J2000 in EQUM
+            rotpn(&mut r, "EQUM", "OFDATE", 80000., "EQUM", "J2000", 0.);
+            // Just check the rotation matrix is orthonormal (basic sanity)
+            let mut rt = r;
+            trsp3(&mut rt);
+            let prod = matmul(&r, &rt);
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..3 {
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..3 {
+                    if i == j {
+                        assert!((prod[i][j] - 1.0).abs() < 1e-12);
+                    } else {
+                        assert!(prod[i][j].abs() < 1e-12);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        #[should_panic(expected = "ERROR: Unsupported starting reference system")]
+        fn test_rotpn_invalid_reference_system() {
+            let mut r = [[0.; 3]; 3];
+            // Unknown system
+            rotpn(&mut r, "FOO", "J2000", 0., "EQUM", "J2000", 0.);
+        }
+
+        #[test]
+        fn test_rotpn_round_trip_equt_equm() {
+            let mut forward = [[0.; 3]; 3];
+            let mut backward = [[0.; 3]; 3];
+            rotpn(
+                &mut forward,
+                "EQUT",
+                "OFDATE",
+                60725.5,
+                "EQUM",
+                "OFDATE",
+                60730.5,
+            );
+            rotpn(
+                &mut backward,
+                "EQUM",
+                "OFDATE",
+                60730.5,
+                "EQUT",
+                "OFDATE",
+                60725.5,
+            );
+
+            let prod = matmul(&backward, &forward);
+
+            let tol = 1e-5;
+            #[allow(clippy::needless_range_loop)]
+            for i in 0..3 {
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..3 {
+                    if i == j {
+                        assert!((prod[i][j] - 1.0).abs() < tol);
+                    } else {
+                        assert!(prod[i][j].abs() < tol);
+                    }
+                }
+            }
+        }
     }
 }
