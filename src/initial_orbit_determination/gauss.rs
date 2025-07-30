@@ -105,15 +105,15 @@ impl GaussObs {
         dec: Vector3<f64>,
         mjd_time: Vector3<f64>,
         observer: [&Observer; 3],
-    ) -> GaussObs {
-        let observer_position = helio_obs_pos(observer, &mjd_time, state);
-        GaussObs {
+    ) -> Result<GaussObs, OutfitError> {
+        let observer_position = helio_obs_pos(observer, &mjd_time, state)?;
+        Ok(GaussObs {
             idx_obs,
             ra,
             dec,
             time: mjd_time,
             observer_position,
-        }
+        })
     }
 
     /// Generate noisy variants of this `GaussObs` triplet by injecting Gaussian noise
@@ -647,11 +647,11 @@ impl GaussObs {
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
-    ) -> KeplerianElements {
+    ) -> Result<KeplerianElements, OutfitError> {
         // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2)?;
 
         // Apply the transformation to position and velocity vectors
         let matrix_elc_transform = Matrix3::from(roteqec).transpose();
@@ -671,7 +671,7 @@ impl GaussObs {
         ccek1(&mut elem, &mut type_, &ast_pos_vel);
 
         // Return orbital elements in a structured form
-        KeplerianElements {
+        Ok(KeplerianElements {
             reference_epoch,
             semi_major_axis: elem[0],
             eccentricity: elem[1],
@@ -679,7 +679,7 @@ impl GaussObs {
             ascending_node_longitude: elem[3],
             periapsis_argument: elem[4],
             mean_anomaly: elem[5],
-        }
+        })
     }
 
     /// Estimate an initial orbit using Gauss’s method from three astrometric observations.
@@ -749,7 +749,7 @@ impl GaussObs {
                 &asteroid_pos_all_time.column(1).into(),
                 &asteroid_vel,
                 reference_epoch,
-            )));
+            )?));
         };
 
         // Correction succeeded; return refined orbit
@@ -757,7 +757,7 @@ impl GaussObs {
             &corrected_pos.column(1).into(),
             &corrected_vel,
             corrected_epoch,
-        )))
+        )?))
     }
 
     /// Iteratively refine the asteroid's velocity and position at the central observation time.

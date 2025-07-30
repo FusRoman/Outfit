@@ -122,7 +122,7 @@ trait ObservationsExt {
         optimal_interval_time: f64,
         max_obs_for_triplets: usize,
         max_triplet: u32,
-    ) -> Vec<GaussObs>;
+    ) -> Result<Vec<GaussObs>, OutfitError>;
 
     /// Select the interval of observations for RMS calculation.
     ///
@@ -422,7 +422,7 @@ impl ObservationsExt for Observations {
         optimal_interval_time: f64,
         max_obs_for_triplets: usize,
         max_triplet: u32,
-    ) -> Vec<GaussObs> {
+    ) -> Result<Vec<GaussObs>, OutfitError> {
         generate_triplets(
             self,
             state,
@@ -586,14 +586,16 @@ impl ObservationIOD for Observations {
         self.apply_batch_rms_correction(error_model, params.gap_max);
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
-        let triplets = self.compute_triplets(
-            state,
-            params.dt_min,
-            params.dt_max_triplet,
-            params.optimal_interval_time,
-            params.max_obs_for_triplets,
-            params.max_triplets,
-        );
+        let triplets = self
+            .compute_triplets(
+                state,
+                params.dt_min,
+                params.dt_max_triplet,
+                params.optimal_interval_time,
+                params.max_obs_for_triplets,
+                params.max_triplets,
+            )
+            .unwrap();
 
         let mut best_rms = f64::MAX;
         let mut best_orbit = None;
@@ -680,7 +682,9 @@ mod test_obs_ext {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = traj.compute_triplets(&env_state, 0.03, 150.0, 20.0, traj_len, 10);
+        let triplets = traj
+            .compute_triplets(&env_state, 0.03, 150.0, 20.0, traj_len, 10)
+            .unwrap();
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();

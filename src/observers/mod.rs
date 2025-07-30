@@ -10,6 +10,7 @@ use crate::constants::{Degree, Kilometer, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, MJ
 use crate::constants::{DPI, ERAU};
 use crate::earth_orientation::equequ;
 use crate::outfit::Outfit;
+use crate::outfit_errors::OutfitError;
 use crate::ref_system::{rotmt, rotpn, RefEpoch, RefSystem};
 use crate::time::gmst;
 
@@ -119,7 +120,7 @@ impl Observer {
         &self,
         tmjd: &Epoch,
         ut1_provider: &Ut1Provider,
-    ) -> (Vector3<f64>, Vector3<f64>) {
+    ) -> Result<(Vector3<f64>, Vector3<f64>), OutfitError> {
         // Initialisation
         let omega = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
 
@@ -143,7 +144,7 @@ impl Observer {
         // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let rer_sys1 = RefSystem::Equt(RefEpoch::Epoch(tmjd.to_mjd_tt_days()));
         let rer_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let rot1 = rotpn(&rer_sys1, &rer_sys2);
+        let rot1 = rotpn(&rer_sys1, &rer_sys2)?;
 
         let rot1_mat = Matrix3::from(rot1).transpose();
         let rot_mat = Matrix3::from(rot).transpose();
@@ -154,7 +155,7 @@ impl Observer {
         let dx = rotmat * dxbf;
         let dv = rotmat * dvbf;
 
-        (dx, dv)
+        Ok((dx, dv))
     }
 
     /// Compute the heliocentric position of this observer in the **equatorial J2000 frame**.
@@ -189,12 +190,16 @@ impl Observer {
     /// * [`Observer::pvobs`] – Geocentric position of the observer
     /// * [`rotpn`] – Frame transformation between ecliptic and equatorial J2000
     /// * [`Outfit::get_jpl_ephem`] – Access to planetary ephemerides
-    pub fn helio_position(&self, epoch: &Epoch, state: &Outfit) -> Vector3<f64> {
+    pub fn helio_position(
+        &self,
+        epoch: &Epoch,
+        state: &Outfit,
+    ) -> Result<Vector3<f64>, OutfitError> {
         let ut1_provider = state.get_ut1_provider();
         let jpl = state.get_jpl_ephem().unwrap();
 
         // Geocentric position in ecliptic J2000
-        let obs_pos_ecl = self.pvobs(epoch, ut1_provider).0;
+        let obs_pos_ecl = self.pvobs(epoch, ut1_provider)?.0;
 
         // Earth's heliocentric position
         let earth_pos = jpl.earth_ephemeris(epoch, false).0;
@@ -202,10 +207,10 @@ impl Observer {
         // Transform observer position from ecliptic to equatorial J2000
         let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let rot = rotpn(&ref_sys1, &ref_sys2);
+        let rot = rotpn(&ref_sys1, &ref_sys2)?;
         let rot_matrix = Matrix3::from(rot).transpose();
 
-        earth_pos + rot_matrix * obs_pos_ecl
+        Ok(earth_pos + rot_matrix * obs_pos_ecl)
     }
 }
 
@@ -344,7 +349,7 @@ pub fn helio_obs_pos(
     observers: [&Observer; 3],
     mjd_tt: &Vector3<MJD>,
     state: &Outfit,
-) -> Matrix3<f64> {
+) -> Result<Matrix3<f64>, OutfitError> {
     let epochs = [
         Epoch::from_mjd_in_time_scale(mjd_tt.x, hifitime::TimeScale::TT),
         Epoch::from_mjd_in_time_scale(mjd_tt.y, hifitime::TimeScale::TT),
@@ -352,12 +357,12 @@ pub fn helio_obs_pos(
     ];
 
     let positions = [
-        observers[0].helio_position(&epochs[0], state),
-        observers[1].helio_position(&epochs[1], state),
-        observers[2].helio_position(&epochs[2], state),
+        observers[0].helio_position(&epochs[0], state)?,
+        observers[1].helio_position(&epochs[1], state)?,
+        observers[2].helio_position(&epochs[2], state)?,
     ];
 
-    Matrix3::from_columns(&positions)
+    Ok(Matrix3::from_columns(&positions))
 }
 
 #[cfg(test)]
@@ -414,7 +419,7 @@ mod observer_test {
         let pan_starrs = Observer::new(lon, lat, h, Some("Pan-STARRS 1".to_string()), None, None);
 
         let (observer_position, observer_velocity) =
-            &pan_starrs.pvobs(&epoch, state.get_ut1_provider());
+            &pan_starrs.pvobs(&epoch, state.get_ut1_provider()).unwrap();
 
         assert_eq!(
             observer_position.as_slice(),
@@ -460,7 +465,7 @@ mod observer_test {
         // Now we need a Vector3<Observer> with three identical copies
         let observers = [&pan_starrs, &pan_starrs, &pan_starrs];
 
-        let helio_pos = helio_obs_pos(observers, &tmjd, &OUTFIT_HORIZON_TEST.0);
+        let helio_pos = helio_obs_pos(observers, &tmjd, &OUTFIT_HORIZON_TEST.0).unwrap();
 
         assert_eq!(
             helio_pos.as_slice(),
