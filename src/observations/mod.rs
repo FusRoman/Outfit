@@ -141,11 +141,9 @@ impl Observation {
         let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
 
         // Construct rotation matrix from equatorial mean J2000 to ecliptic mean J2000
-        let mut roteqec = [[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]];
-
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        rotpn(&mut roteqec, &ref_sys1, &ref_sys2);
+        let roteqec = rotpn(&ref_sys1, &ref_sys2);
         let matrix_elc_transform = Matrix3::from(roteqec);
 
         // Transform Earth's position to ecliptic J2000 frame
