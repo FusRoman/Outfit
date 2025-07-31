@@ -9,7 +9,7 @@ use nalgebra::Vector3;
 
 use crate::outfit_errors::OutfitError;
 
-pub(super) mod download_jpl_file;
+pub mod download_jpl_file;
 pub mod horizon;
 pub mod naif;
 

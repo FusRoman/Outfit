@@ -109,7 +109,7 @@ impl EphemFileSource {
 /// * An error if the download fails
 /// * Ok(()) if the download is successful
 #[cfg(feature = "jpl-download")]
-async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
+pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
     let mut file = File::create(path).await?;
     println!("Downloading {url}...");
 
