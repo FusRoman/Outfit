@@ -81,6 +81,9 @@ pub enum OutfitError {
 
     #[error("Velocity correction error: {0}")]
     VelocityCorrectionError(String),
+
+    #[error("Invalid orbit: {0}")]
+    InvalidOrbit(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -98,7 +101,7 @@ impl PartialEq for OutfitError {
             (InvalidJPLEphemFileVersion(a), InvalidJPLEphemFileVersion(b)) => a == b,
             (InvalidUrl(a), InvalidUrl(b)) => a == b,
 
-            // Ces erreurs ne sont pas comparables : égalité si même variant
+            // Error variants that cannot be compared directly
             (UreqHttpError(_), UreqHttpError(_)) => true,
             (IoError(_), IoError(_)) => true,
             #[cfg(feature = "jpl-download")]
@@ -115,6 +118,9 @@ impl PartialEq for OutfitError {
             (Parsing80ColumnFileError(a), Parsing80ColumnFileError(b)) => a == b,
             (NoiseInjectionError(a), NoiseInjectionError(b)) => a == b,
             (InvalidSpkDataType(a), InvalidSpkDataType(b)) => a == b,
+            (InvalidIODParameter(a), InvalidIODParameter(b)) => a == b,
+            (InvalidRefSystem(a), InvalidRefSystem(b)) => a == b,
+            (VelocityCorrectionError(a), VelocityCorrectionError(b)) => a == b,
 
             // Variantes unitaires
             (SingularDirectionMatrix, SingularDirectionMatrix) => true,
