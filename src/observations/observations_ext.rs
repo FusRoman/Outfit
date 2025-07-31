@@ -112,7 +112,7 @@ trait ObservationsExt {
     /// # Notes
     ///
     /// This is the preferred high-level entry point when working with a set of
-    /// observations that implements [`ObservationExt`]. Use [`generate_triplets`]
+    /// observations that implements [`ObservationsExt`]. Use [`generate_triplets`]
     /// directly when you want to work with a standalone `Vec<Observation>`.
     fn compute_triplets(
         &mut self,
@@ -271,21 +271,22 @@ trait ObservationsExt {
 /// ## Typical usage
 ///
 /// ```rust,ignore
+/// let params = IODParams {
+///     n_noise_realizations: 50,
+///     noise_scale: 1.0,
+///     extf: 1.5,
+///     dtmax: 30.0,
+///     dt_min: Some(0.03),
+///     dt_max_triplet: Some(150.0),
+///     optimal_interval_time: Some(20.0),
+///     max_obs_for_triplets: Some(10),
+///     max_triplets: None,
+///     gap_max: 0.5,
+/// };
+///
 /// let (best_orbit, rms) = observations
-///     .estimate_best_orbit(
-///         &state,
-///         &error_model,
-///         &mut rng,
-///         50,        // noise realizations
-///         1.0,       // noise scaling
-///         1.5,       // extf factor
-///         30.0,      // dtmax (days)
-///         Some(0.03),
-///         Some(150.0),
-///         Some(20.0),
-///         Some(10),
-///         0.5,
-///     )?;
+///     .estimate_best_orbit(&state, &error_model, &mut rng, &params)?;
+///
 /// if let Some(orbit) = best_orbit {
 ///     println!("Best preliminary orbit RMS = {rms}");
 /// }
@@ -294,25 +295,26 @@ trait ObservationsExt {
 /// ## Algorithmic steps
 ///
 /// 1. **Batch uncertainty correction:**  
-///    Observations are first passed through [`apply_batch_rms_correction`].
+///    Observations are first passed through [`ObservationsExt::apply_batch_rms_correction`].
 ///
 /// 2. **Triplet generation:**  
-///    Valid combinations of three observations are extracted with [`compute_triplets`],
-///    optionally constrained by `dt_min`, `dt_max_triplet`, and `optimal_interval_time`.
+///    Valid combinations of three observations are extracted with [`ObservationsExt::compute_triplets`],
+///    using the configuration parameters from [`IODParams`] (e.g., `dt_min`, `dt_max_triplet`,
+///    `optimal_interval_time`, `max_obs_for_triplets`, `max_triplets`).
 ///
 /// 3. **Orbit estimation:**  
-///    For each triplet, noisy versions are generated (Monte Carlo) and processed by the
-///    Gauss method to obtain preliminary orbital elements.
+///    For each triplet, `n_noise_realizations` noisy variants are generated (Monte Carlo)
+///    and processed by the Gauss method to obtain preliminary orbital elements.
 ///
 /// 4. **Orbit evaluation:**  
-///    The preliminary orbits are tested on the full observation arc using [`rms_orbit_error`].
-///    The orbit with the smallest RMS is returned.
+///    Each preliminary orbit is propagated and compared to the full observation arc using
+///    [`rms_orbit_error`]. The orbit with the smallest RMS is returned.
 ///
 /// ## Performance considerations
 ///
-/// * Typically applied to **small arcs of tens of observations**.
-/// * The number of tested triplets can be limited with `max_triplets`.
-/// * The noise realization loop dominates runtime (Monte Carlo approach).
+/// * Typically applied to **short arcs with tens of observations**.
+/// * The number of triplets can be limited via `params.max_triplets`.
+/// * The Monte Carlo loop (`params.n_noise_realizations`) dominates runtime.
 ///
 /// ## Returns
 ///
@@ -320,38 +322,44 @@ trait ObservationsExt {
 /// * `Ok((None, f64::MAX))` – if no valid orbit could be estimated,
 /// * `Err(OutfitError)` – if an error occurs during propagation or fitting.
 ///
+/// ## Parameters
+///
+/// * [`IODParams`] – Controls the noise sampling, temporal constraints on triplets,
+///   and the maximum number of triplets to evaluate.
+///
 /// ## See also
 ///
-/// * [`compute_triplets`] – Generates candidate triplets from the observation set.
-/// * [`rms_orbit_error`] – Evaluates the quality of an orbit over the full arc.
+/// * [`ObservationsExt::compute_triplets`] – Generates candidate triplets from the observation set.
+/// * [`ObservationsExt::rms_orbit_error`] – Evaluates the quality of an orbit over the full arc.
 /// * [`GaussResult`] – Data structure holding the result of a single Gauss method run.
 /// * [`KeplerianElements`] – Orbital elements returned by successful preliminary orbit estimation.
+/// * [`IODParams`] – Groups all configuration options for IOD.
 pub trait ObservationIOD {
     /// Estimate the best-fitting preliminary orbit from a full set of astrometric observations.
     ///
     /// This method searches for the best preliminary orbit by evaluating a limited number of
-    /// triplets generated from the observation set. The process includes:
+    /// observation triplets generated from the dataset. The process includes:
     ///
     /// 1. **Error calibration**:
     ///    Observations are first preprocessed with [`apply_batch_rms_correction`] to account for
     ///    temporal clustering and observer-specific error models.
     ///
     /// 2. **Triplet generation**:
-    ///    Triplets are built using [`compute_triplets`], which:
-    ///      * Sorts the data by time,
-    ///      * Optionally downsamples the dataset to at most `max_obs_for_triplets` points
+    ///    Candidate triplets are generated using [`ObservationsExt::compute_triplets`], which:
+    ///      * Sorts observations by time,
+    ///      * Optionally downsamples the dataset to at most `params.max_obs_for_triplets` points
     ///        (uniform in time, always keeping the first and last),
-    ///      * Generates and filters all valid triplets based on `dt_min`, `dt_max_triplet`,
-    ///        and `optimal_interval_time`.
+    ///      * Filters valid triplets according to `params.dt_min`, `params.dt_max_triplet`,
+    ///        and `params.optimal_interval_time`.
     ///
     /// 3. **Monte Carlo noise sampling**:
-    ///    For each triplet, `n_noise_realizations` perturbed versions are created using
-    ///    Gaussian noise scaled by `noise_scale` times the nominal astrometric uncertainties.
+    ///    For each triplet, `params.n_noise_realizations` perturbed versions are created using
+    ///    Gaussian noise scaled by `params.noise_scale` times the nominal astrometric uncertainties.
     ///
     /// 4. **Orbit estimation and selection**:
-    ///    A preliminary orbit is computed for each (possibly perturbed) triplet with the
-    ///    Gauss method, then evaluated over the full set of observations using
-    ///    [`rms_orbit_error`]. The orbit with the smallest RMS is returned.
+    ///    For each (possibly perturbed) triplet, a preliminary orbit is computed with the Gauss method.
+    ///    The resulting orbit is evaluated over the full set of observations using [`rms_orbit_error`].
+    ///    The orbit with the smallest RMS is returned.
     ///
     /// # Arguments
     ///
@@ -361,31 +369,20 @@ pub trait ObservationIOD {
     ///   The astrometric error model (typically per-band or per-observatory).
     /// * `rng` –
     ///   A random number generator used to draw Gaussian perturbations.
-    /// * `n_noise_realizations` –
-    ///   Number of noisy triplet variants generated per original triplet.
-    /// * `noise_scale` –
-    ///   Scaling factor applied to the nominal RA/DEC uncertainties.
-    /// * `extf` –
-    ///   Extrapolation factor for time intervals when selecting the RMS computation window.
-    /// * `dtmax` –
-    ///   Maximum time interval (days) used when evaluating the RMS fit.
-    /// * `dt_min` –
-    ///   Minimum allowed span (days) between the first and last observation in a triplet.
-    /// * `dt_max_triplet` –
-    ///   Maximum allowed span (days) for a valid triplet.
-    /// * `optimal_interval_time` –
-    ///   Target time spacing (days) between observations within a triplet (for weighting).
-    /// * `max_obs_for_triplets` –
-    ///   If the dataset is larger than this value, observations are downsampled uniformly
-    ///   before triplet generation. The first and last observation are always preserved.
-    /// * `max_triplets` –
-    ///   Maximum number of triplets to consider (after filtering and sorting).
-    /// * `gap_max` –
-    ///   Maximum allowed time gap (days) within a batch when applying RMS corrections.
+    /// * `params` –
+    ///   Parameters controlling the initial orbit determination, including:
+    ///     * `n_noise_realizations`: number of noisy triplet variants generated per original triplet,
+    ///     * `noise_scale`: scaling factor for the noise,
+    ///     * `extf`: extrapolation factor for RMS evaluation,
+    ///     * `dtmax`: maximum time interval for RMS evaluation,
+    ///     * `dt_min`, `dt_max_triplet`, `optimal_interval_time`: constraints on triplet spans,
+    ///     * `max_obs_for_triplets`: maximum number of observations to keep when building triplets,
+    ///     * `max_triplets`: maximum number of triplets to process,
+    ///     * `gap_max`: maximum allowed time gap within a batch for RMS corrections.
     ///
     /// # Returns
     ///
-    /// * `Ok((Some(best_orbit), best_rms))` – Best preliminary orbit and associated RMS.
+    /// * `Ok((Some(best_orbit), best_rms))` – The best preliminary orbit found and its RMS.
     /// * `Ok((None, f64::MAX))` – No valid orbit could be estimated.
     /// * `Err(e)` – An error occurred during orbit estimation or RMS evaluation.
     ///
@@ -394,16 +391,16 @@ pub trait ObservationIOD {
     /// - RMS values are computed with [`rms_orbit_error`], which accounts for
     ///   light-time correction and ephemeris propagation.
     /// - Each triplet can produce several preliminary orbit candidates due to
-    ///   the noise realizations.
-    /// - The `max_obs_for_triplets` parameter is crucial when processing datasets
-    ///   with thousands of observations, as it prevents a cubic combinatorial explosion.
+    ///   noise realizations.
+    /// - The `max_obs_for_triplets` parameter is crucial for large datasets,
+    ///   as it avoids the combinatorial explosion of triplets.
     ///
     /// # See also
     ///
-    /// * [`compute_triplets`] – Selects triplets from the observation set.
-    /// * [`generate_noisy_realizations`] – Creates perturbed triplets with Gaussian noise.
-    /// * [`prelim_orbit`] – Computes a preliminary orbit from a single triplet.
-    /// * [`rms_orbit_error`] – Measures the goodness-of-fit of an orbit against observations.
+    /// * [`ObservationsExt::compute_triplets`] – Selects triplets from the observation set.
+    /// * [`GaussObs::generate_noisy_realizations`] – Creates perturbed triplets with Gaussian noise.
+    /// * [`GaussObs::prelim_orbit`] – Computes a preliminary orbit from a single triplet.
+    /// * [`ObservationsExt::rms_orbit_error`] – Measures the goodness-of-fit of an orbit against observations.
     fn estimate_best_orbit(
         &mut self,
         state: &Outfit,
