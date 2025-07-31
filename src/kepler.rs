@@ -214,9 +214,7 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 /// Solve the preliminary universal Kepler problem (initial guess for ψ).
 ///
 /// This function computes an initial estimate of the universal anomaly `ψ` at time `t0 + dt`,
-/// given the orbital energy parameter `alpha`, the current position/velocity, and the
-/// orbital eccentricity. This initial value is later refined by a solver of the universal
-/// Kepler equation (`solve_kepuniv` or `solve_kepuniv2`).
+/// given the orbital parameters stored in [`UniversalKeplerParams`].
 ///
 /// The method selects the appropriate branch depending on the sign of `alpha`:
 ///
@@ -228,15 +226,7 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 ///
 /// Arguments
 /// ---------
-/// * `dt` – Time interval (t - t₀) in days.
-/// * `r0` – Initial heliocentric distance of the object at epoch (AU).
-/// * `sig0` – Radial component of the velocity vector at t₀ (AU/day).
-/// * `mu` – Gravitational parameter μ = GM of the central body (AU³/day²).
-/// * `alpha` – Twice the specific orbital energy:
-///    - α < 0 for elliptical orbits,
-///    - α > 0 for hyperbolic orbits,
-///    - α = 0 for parabolic orbits (not handled here).
-/// * `e0` – Orbital eccentricity.
+/// * `params` – [`UniversalKeplerParams`] containing `dt`, `r0`, `sig0`, `mu`, `alpha`, and `e0`.
 /// * `contr` – Convergence tolerance for the Newton–Raphson iterations.
 ///
 /// Returns
@@ -256,25 +246,18 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 /// * [`prelim_elliptic`] – Computes ψ for elliptical orbits.
 /// * [`prelim_hyperbolic`] – Computes ψ for hyperbolic orbits.
 /// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
-pub fn prelim_kepuni(
-    dt: f64,
-    r0: f64,
-    sig0: f64,
-    mu: f64,
-    alpha: f64,
-    e0: f64,
-    contr: f64,
-) -> Option<f64> {
+fn prelim_kepuni(params: &UniversalKeplerParams, contr: f64) -> Option<f64> {
     const ITX: usize = 20;
 
-    if alpha < 0.0 {
-        return Some(prelim_elliptic(dt, r0, sig0, mu, alpha, e0, contr, ITX));
+    if params.alpha < 0.0 {
+        return Some(prelim_elliptic(params, contr, ITX));
     }
 
-    if alpha > 0.0 {
-        return Some(prelim_hyperbolic(dt, r0, sig0, mu, alpha, e0, contr, ITX));
+    if params.alpha > 0.0 {
+        return Some(prelim_hyperbolic(params, contr, ITX));
     }
 
+    // Parabolic (alpha == 0): not supported
     None
 }
 
@@ -285,8 +268,8 @@ pub fn prelim_kepuni(
 /// orbit. The universal anomaly is then used as a starting point for solving the
 /// universal Kepler equation.
 ///
-/// The algorithm follows these steps:
-///
+/// Algorithm
+/// ---------
 /// 1. Compute the semi-major axis `a0 = -μ / α` and mean motion `n = sqrt((-α)^3) / μ`.
 /// 2. If the eccentricity `e0` is very small, approximate `ψ` directly using a linear formula.
 /// 3. Otherwise, compute the initial eccentric anomaly `u0` from the orbital geometry and
@@ -299,12 +282,7 @@ pub fn prelim_kepuni(
 ///
 /// Arguments
 /// ---------
-/// * `dt` – Propagation time interval (days) from the reference epoch `t0`.
-/// * `r0` – Initial heliocentric distance of the body (in astronomical units, AU).
-/// * `sig0` – Radial component of the velocity at `t0`, i.e., d(r)/dt in AU/day.
-/// * `mu` – Gravitational parameter μ = GM of the central body (in AU³/day²).
-/// * `alpha` – Twice the specific orbital energy (must be negative for elliptical orbits).
-/// * `e0` – Orbital eccentricity (unitless).
+/// * `params` – [`UniversalKeplerParams`] containing `dt`, `r0`, `sig0`, `mu`, `alpha`, and `e0`.
 /// * `contr` – Convergence control threshold for the Newton solver.
 /// * `max_iter` – Maximum number of Newton–Raphson iterations.
 ///
@@ -322,31 +300,19 @@ pub fn prelim_kepuni(
 /// * [`prelim_hyperbolic`] – Equivalent procedure for hyperbolic orbits.
 /// * [`solve_kepuni`] – Refines `ψ` by solving the universal Kepler equation.
 /// * [`angle_diff`] – Computes the principal difference between two angles.
-#[allow(clippy::too_many_arguments)]
-fn prelim_elliptic(
-    dt: f64,
-    r0: f64,
-    sig0: f64,
-    mu: f64,
-    alpha: f64,
-    e0: f64,
-    contr: f64,
-    max_iter: usize,
-) -> f64 {
-    // Compute the semi-major axis (a0) and mean motion (n) from energy parameters
-    let a0 = -mu / alpha;
-    let n = (-alpha.powi(3)).sqrt() / mu;
+fn prelim_elliptic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
+    // Step 1: Compute semi-major axis (a0) and mean motion (n)
+    let a0 = -params.mu / params.alpha;
+    let n = (-params.alpha.powi(3)).sqrt() / params.mu;
 
-    // Special case: nearly circular orbit
-    // For very small eccentricities, use a simple linear approximation
-    // (avoids division by a tiny e0 and unnecessary Newton iterations)
-    if e0 < contr {
-        return n * dt / (-alpha).sqrt();
+    // Step 2: Special case: nearly circular orbit
+    if params.e0 < contr {
+        return n * params.dt / (-params.alpha).sqrt();
     }
 
-    // Compute the eccentric anomaly at epoch u0 from geometry:
+    // Step 3: Compute the eccentric anomaly at epoch u0 from geometry:
     // cos u0 = (1 - r0/a0) / e0
-    let cos_u0 = (1.0 - r0 / a0) / e0;
+    let cos_u0 = (1.0 - params.r0 / a0) / params.e0;
     let mut u0 = if cos_u0.abs() <= 1.0 {
         cos_u0.acos()
     } else if cos_u0 >= 1.0 {
@@ -355,27 +321,23 @@ fn prelim_elliptic(
         PI // limit case: object at apocenter
     };
 
-    // If the radial velocity is negative, flip the sign of u0
-    if sig0 < 0.0 {
+    // Flip the sign of u0 if radial velocity is negative
+    if params.sig0 < 0.0 {
         u0 = -u0;
     }
 
-    // Wrap u0 and its corresponding mean anomaly into [0, 2π)
+    // Normalize u0 and compute the corresponding mean anomaly ℓ0
     u0 = principal_angle(u0);
-    let ell0 = principal_angle(u0 - e0 * u0.sin());
+    let ell0 = principal_angle(u0 - params.e0 * u0.sin());
 
-    // Compute the target mean anomaly after dt
-    let target_mean_anomaly = principal_angle(ell0 + n * dt);
+    // Step 4: Target mean anomaly after dt
+    let target_mean_anomaly = principal_angle(ell0 + n * params.dt);
 
-    // Initial guess for eccentric anomaly u (starting at π for robustness)
-    let mut u = PI;
-
-    // Iteratively solve Kepler's equation:
-    //    M = u - e sin(u)
-    // with Newton-Raphson corrections
+    // Step 5: Solve Kepler's equation iteratively for u
+    let mut u = PI; // start guess
     for _ in 0..max_iter {
-        let f = u - e0 * u.sin() - target_mean_anomaly; // residual
-        let fp = 1.0 - e0 * u.cos(); // derivative d/d(u)
+        let f = u - params.e0 * u.sin() - target_mean_anomaly;
+        let fp = 1.0 - params.e0 * u.cos();
         let du = -f / fp;
         u += du;
         if du.abs() < contr * 1e3 {
@@ -383,9 +345,8 @@ fn prelim_elliptic(
         }
     }
 
-    // Convert the difference in eccentric anomalies to universal anomaly ψ
-    // using the scaling factor sqrt(-alpha)
-    angle_diff(u, u0) / (-alpha).sqrt()
+    // Step 6: Convert (u - u0) into universal anomaly ψ
+    angle_diff(u, u0) / (-params.alpha).sqrt()
 }
 
 /// Compute a preliminary estimate of the universal anomaly `ψ` for hyperbolic orbits (α > 0).
@@ -401,7 +362,7 @@ fn prelim_elliptic(
 ///    `n = sqrt(α³) / μ`.
 /// 2. Compute the initial hyperbolic eccentric anomaly `F₀` from the geometry,
 ///    using:
-///    cosh(F₀) = (1 - r₀ / a₀) / e₀.
+///    cosh(F₀) = (1 - r₀ / a₀) / e₀
 /// 3. Adjust the sign of `F₀` based on the sign of the radial velocity `sig0`.
 /// 4. Compute the mean anomaly at epoch: ℓ₀ = e₀·sinh(F₀) - F₀.
 /// 5. Propagate ℓ₀ forward by n·dt to get the target mean anomaly at t₀ + dt.
@@ -414,12 +375,7 @@ fn prelim_elliptic(
 ///
 /// Arguments
 /// ---------
-/// * `dt` – Propagation time interval (days) from the reference epoch `t0`.
-/// * `r0` – Initial heliocentric distance of the body (in AU).
-/// * `sig0` – Radial component of velocity at t₀ (AU/day).
-/// * `mu` – Gravitational parameter μ = GM of the central body (AU³/day²).
-/// * `alpha` – Twice the specific orbital energy (must be positive for hyperbolic orbits).
-/// * `e0` – Orbital eccentricity (must be > 1 for hyperbolic trajectories).
+/// * `params` – [`UniversalKeplerParams`] containing `dt`, `r0`, `sig0`, `mu`, `alpha`, and `e0`.
 /// * `contr` – Convergence control threshold for the Newton solver.
 /// * `max_iter` – Maximum number of Newton-Raphson iterations.
 ///
@@ -435,25 +391,15 @@ fn prelim_elliptic(
 /// # See also
 /// * [`prelim_elliptic`] – Equivalent routine for elliptical orbits.
 /// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
-#[allow(clippy::too_many_arguments)]
-fn prelim_hyperbolic(
-    dt: f64,
-    r0: f64,
-    sig0: f64,
-    mu: f64,
-    alpha: f64,
-    e0: f64,
-    contr: f64,
-    max_iter: usize,
-) -> f64 {
+fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
     // Step 1: Compute semi-major axis (a0) and hyperbolic mean motion n
     // For hyperbolic orbits, a0 is negative.
-    let a0 = -mu / alpha;
-    let n = alpha.powi(3).sqrt() / mu;
+    let a0 = -params.mu / params.alpha;
+    let n = params.alpha.powi(3).sqrt() / params.mu;
 
     // Step 2: Compute the initial hyperbolic anomaly F₀
     // cosh(F₀) = (1 - r0/a0) / e0
-    let coshf0 = (1.0 - r0 / a0) / e0;
+    let coshf0 = (1.0 - params.r0 / a0) / params.e0;
     let mut f0 = if coshf0 > 1.0 {
         // Compute F₀ from cosh⁻¹(x) = ln(x + sqrt(x² - 1))
         (coshf0 + (coshf0.powi(2) - 1.0).sqrt()).ln()
@@ -462,15 +408,15 @@ fn prelim_hyperbolic(
     };
 
     // Adjust the sign of F₀ based on the sign of radial velocity
-    if sig0 < 0.0 {
+    if params.sig0 < 0.0 {
         f0 = -f0;
     }
 
     // Step 3: Compute the mean anomaly at epoch
-    let ell0 = e0 * f0.sinh() - f0;
+    let ell0 = params.e0 * f0.sinh() - f0;
 
     // Propagate the mean anomaly forward by n·dt
-    let target_mean_anomaly = ell0 + n * dt;
+    let target_mean_anomaly = ell0 + n * params.dt;
 
     // Step 4: Iteratively solve the hyperbolic Kepler equation:
     //    e·sinh(F) - F = ℓ
@@ -480,8 +426,8 @@ fn prelim_hyperbolic(
     for _ in 0..max_iter {
         if f.abs() < 15.0 {
             // Newton-Raphson update
-            let func = e0 * f.sinh() - f - target_mean_anomaly;
-            let deriv = e0 * f.cosh() - 1.0;
+            let func = params.e0 * f.sinh() - f - target_mean_anomaly;
+            let deriv = params.e0 * f.cosh() - 1.0;
             let df = -func / deriv;
             let ff = f + df;
             // If the update crosses zero, dampen the step to avoid divergence
@@ -498,7 +444,7 @@ fn prelim_hyperbolic(
     }
 
     // Step 5: Convert the difference in anomalies to universal anomaly ψ
-    (f - f0) / alpha.sqrt()
+    (f - f0) / params.alpha.sqrt()
 }
 
 /// Orbital regime based on the value of `alpha`.
@@ -523,13 +469,13 @@ impl OrbitType {
 
 /// State needed to solve the universal Kepler equation.
 #[derive(Debug, Clone, Copy)]
-pub struct UniversalKeplerParams {
-    pub dt: f64,
-    pub r0: f64,
-    pub sig0: f64,
-    pub mu: f64,
-    pub alpha: f64,
-    pub e0: f64,
+struct UniversalKeplerParams {
+    dt: f64,
+    r0: f64,
+    sig0: f64,
+    mu: f64,
+    alpha: f64,
+    e0: f64,
 }
 
 impl UniversalKeplerParams {
@@ -572,7 +518,7 @@ impl UniversalKeplerParams {
 /// --------
 /// * The initial guess for `ψ` is computed using [`prelim_kepuni`].
 /// * Convergence is usually fast (few iterations).
-pub fn solve_kepuni(
+fn solve_kepuni(
     params: &UniversalKeplerParams,
     convergency: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
@@ -582,15 +528,7 @@ pub fn solve_kepuni(
     // Preliminary guess for psi
     let mut psi = match params.orbit_type() {
         OrbitType::Parabolic => return None,
-        OrbitType::Elliptic | OrbitType::Hyperbolic => prelim_kepuni(
-            params.dt,
-            params.r0,
-            params.sig0,
-            params.mu,
-            params.alpha,
-            params.e0,
-            tol,
-        )?,
+        OrbitType::Elliptic | OrbitType::Hyperbolic => prelim_kepuni(params, tol)?,
     };
 
     // Newton-Raphson refinement
@@ -802,75 +740,73 @@ mod kepler_test {
     }
 
     mod tests_prelim_kepuni {
-        use super::prelim_kepuni;
+        use super::{prelim_kepuni, UniversalKeplerParams};
 
-        const MU: f64 = 1.0; // Simplified gravitational parameter for testing
+        const MU: f64 = 1.0;
         const CONTR: f64 = 1e-12;
+
+        fn make_params(
+            dt: f64,
+            r0: f64,
+            sig0: f64,
+            mu: f64,
+            alpha: f64,
+            e0: f64,
+        ) -> UniversalKeplerParams {
+            UniversalKeplerParams {
+                dt,
+                r0,
+                sig0,
+                mu,
+                alpha,
+                e0,
+            }
+        }
 
         #[test]
         fn test_returns_none_for_alpha_zero() {
-            // Parabolic case (alpha = 0) is not supported and must return None
-            let res = prelim_kepuni(1.0, 1.0, 0.0, MU, 0.0, 0.1, CONTR);
+            let params = make_params(1.0, 1.0, 0.0, MU, 0.0, 0.1);
+            let res = prelim_kepuni(&params, CONTR);
             assert!(res.is_none());
         }
 
         #[test]
         fn test_elliptic_small_eccentricity() {
-            // Elliptic case with very small eccentricity (almost circular orbit)
-            let alpha = -1.0;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let e0 = 1e-8;
-            let dt = 0.5;
-
-            let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
+            let params = make_params(0.5, 1.0, 0.1, MU, -1.0, 1e-8);
+            let result = prelim_kepuni(&params, CONTR);
             assert!(result.is_some());
-            let psi0 = result.unwrap();
-            assert!(psi0.is_finite());
+            assert!(result.unwrap().is_finite());
         }
 
         #[test]
         fn test_elliptic_high_eccentricity() {
-            // Elliptic case with high eccentricity
-            let alpha = -1.0;
-            let r0 = 0.5;
-            let sig0 = 0.2;
-            let e0 = 0.8;
-            let dt = 0.1;
-
-            let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
+            let params = make_params(0.1, 0.5, 0.2, MU, -1.0, 0.8);
+            let result = prelim_kepuni(&params, CONTR);
             assert!(result.is_some());
-            let psi0 = result.unwrap();
-            assert!(psi0.is_finite());
+            assert!(result.unwrap().is_finite());
         }
 
         #[test]
         fn test_hyperbolic_case() {
-            // Hyperbolic orbit (alpha > 0)
-            let alpha = 1.0;
-            let r0 = 2.0;
-            let sig0 = -0.1;
-            let e0 = 1.5;
-            let dt = 0.3;
-
-            let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
+            let params = make_params(0.3, 2.0, -0.1, MU, 1.0, 1.5);
+            let result = prelim_kepuni(&params, CONTR);
             assert!(result.is_some());
-            let psi0 = result.unwrap();
-            assert!(psi0.is_finite());
+            assert!(result.unwrap().is_finite());
         }
 
         #[test]
         fn test_negative_sig0_changes_direction() {
-            // For an elliptic orbit, a negative sig0 should affect psi
             let alpha = -1.0;
             let r0 = 1.0;
             let e0 = 0.5;
             let dt = 0.25;
 
-            let psi_pos = prelim_kepuni(dt, r0, 0.1, MU, alpha, e0, CONTR).unwrap();
-            let psi_neg = prelim_kepuni(dt, r0, -0.1, MU, alpha, e0, CONTR).unwrap();
+            let params_pos = make_params(dt, r0, 0.1, MU, alpha, e0);
+            let params_neg = make_params(dt, r0, -0.1, MU, alpha, e0);
 
-            // Weaker invariant: psi must differ significantly between positive and negative sig0
+            let psi_pos = prelim_kepuni(&params_pos, CONTR).unwrap();
+            let psi_neg = prelim_kepuni(&params_neg, CONTR).unwrap();
+
             assert!(
                 (psi_pos - psi_neg).abs() > 1e-8,
                 "psi did not change significantly when changing sig0 sign: {psi_pos} vs {psi_neg}"
@@ -879,30 +815,16 @@ mod kepler_test {
 
         #[test]
         fn test_stability_long_dt() {
-            // The function should converge even for a long propagation time (large dt)
-            let alpha = -1.0;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let e0 = 0.5;
-            let dt = 50.0;
-
-            let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
+            let params = make_params(50.0, 1.0, 0.1, MU, -1.0, 0.5);
+            let result = prelim_kepuni(&params, CONTR);
             assert!(result.is_some());
-            let psi0 = result.unwrap();
-            assert!(psi0.is_finite());
+            assert!(result.unwrap().is_finite());
         }
 
         #[test]
         fn test_edge_cosine_limits() {
-            // Elliptic case where cos(u0) is slightly out of [-1, 1]
-            // due to round-off, this tests that fallback logic is correct
-            let alpha = -1.0;
-            let r0 = 2.0; // chosen to push cosu0 outside [-1, 1]
-            let sig0 = 0.1;
-            let e0 = 0.1;
-            let dt = 0.25;
-
-            let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
+            let params = make_params(0.25, 2.0, 0.1, MU, -1.0, 0.1);
+            let result = prelim_kepuni(&params, CONTR);
             assert!(result.is_some());
         }
 
@@ -918,68 +840,66 @@ mod kepler_test {
             let alpha = -1.642_158_377_771_140_7E-4;
             let e0 = 0.283_599_599_137_344_5;
 
-            let psi = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
-
+            let params = UniversalKeplerParams {
+                dt,
+                r0,
+                sig0,
+                mu,
+                alpha,
+                e0,
+            };
+            let psi = prelim_kepuni(&params, contr).unwrap();
             assert_eq!(psi, -15.327414893041848);
 
-            let alpha = 1.642_158_377_771_140_7E-4;
-            let psi = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
-
+            let params2 = UniversalKeplerParams {
+                alpha: 1.642_158_377_771_140_7E-4,
+                ..params
+            };
+            let psi = prelim_kepuni(&params2, contr).unwrap();
             assert_eq!(psi, -73.1875935362658);
 
-            let res_prelim = prelim_kepuni(dt, r0, sig0, mu, 0., e0, contr);
-            assert!(res_prelim.is_none());
+            let params3 = UniversalKeplerParams {
+                alpha: 0.0,
+                ..params
+            };
+            assert!(prelim_kepuni(&params3, contr).is_none());
         }
 
         mod kepuni_prop_tests {
-            use super::prelim_kepuni;
+            use super::{prelim_kepuni, UniversalKeplerParams};
             use proptest::prelude::*;
 
-            // Generate reasonable parameters for the prelim_kepuni function
-            // to ensure it behaves well under various conditions.
-            fn arb_params() -> impl Strategy<Value = (f64, f64, f64, f64, f64, f64, f64)> {
+            fn arb_params() -> impl Strategy<Value = UniversalKeplerParams> {
                 (
-                    // dt : propagation time
                     -10.0..10.0f64,
-                    // r0 : initial distance (avoid zero)
                     0.1..5.0f64,
-                    // sig0 : radial velocity component
                     -2.0..2.0f64,
-                    // mu : gravitational parameter, always positive
                     0.5..2.0f64,
-                    // alpha : 2 * energy, can be negative (elliptic) or positive (hyperbolic)
                     prop_oneof![(-5.0..-0.01f64), (0.01..5.0f64)],
-                    // e0 : eccentricity (>= 0)
                     0.0..3.0f64,
-                    // contr : convergence control
-                    1e-14..1e-8f64,
                 )
+                    .prop_map(|(dt, r0, sig0, mu, alpha, e0)| {
+                        UniversalKeplerParams {
+                            dt,
+                            r0,
+                            sig0,
+                            mu,
+                            alpha,
+                            e0,
+                        }
+                    })
             }
 
             proptest! {
-                // Property-based test:
-                // For any physically reasonable set of parameters, prelim_kepuni should:
-                // - not panic,
-                // - return Some (alpha != 0),
-                // - produce finite results,
-                // - preserve alpha value.
                 #[test]
-                fn prop_prelim_kepuni_behaves_well(
-                    (dt, r0, sig0, mu, alpha, e0, contr) in arb_params()
-                ) {
-                    let result = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr);
-
+                fn prop_prelim_kepuni_behaves_well(params in arb_params(), contr in 1e-14..1e-8f64) {
+                    let result = prelim_kepuni(&params, contr);
                     prop_assert!(result.is_some());
-                    let psi0 = result.unwrap();
-
-                    // Results should be finite
-                    prop_assert!(psi0.is_finite());
+                    prop_assert!(result.unwrap().is_finite());
                 }
             }
 
             proptest! {
-                // Special property: when alpha is very close to zero, the function may return None
-                // and must never panic.
                 #[test]
                 fn prop_prelim_kepuni_alpha_zero(
                     dt in -10.0..10.0f64,
@@ -989,9 +909,8 @@ mod kepler_test {
                     e0 in 0.0..3.0f64,
                     contr in 1e-14..1e-8f64
                 ) {
-                    let alpha = 0.0;
-                    let result = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr);
-                    // Just ensure it does not panic and either returns None or Some finite
+                    let params = UniversalKeplerParams { dt, r0, sig0, mu, alpha: 0.0, e0 };
+                    let result = prelim_kepuni(&params, contr);
                     if let Some(psi0) = result {
                         prop_assert!(psi0.is_finite());
                     }
@@ -999,34 +918,25 @@ mod kepler_test {
             }
 
             proptest! {
-                /// Property: changing the sign of sig0 should influence psi.
-                ///
-                /// For an elliptic orbit, the initial radial velocity (sig0)
-                /// affects the phase. Two runs with opposite sig0 signs should
-                /// give a significantly different value of psi.
                 #[test]
-                fn prop_sig0_influences_psi((dt, r0, _, mu, alpha, e0, _) in arb_params()) {
+                fn prop_sig0_influences_psi(params in arb_params()) {
                     let contr = 1e-12;
+                    prop_assume!(params.dt.abs() > 1e-6);
+                    prop_assume!(params.e0 > 1e-6);
+                    prop_assume!(params.r0 > 1e-6);
 
-                    // Filter out degenerate cases
-                    prop_assume!(dt.abs() > 1e-6);      // no propagation
-                    prop_assume!(e0 > 1e-6);            // avoid purely circular
-                    prop_assume!(r0 > 1e-6);
+                    let mut params_pos = params;
+                    params_pos.sig0 = 0.1;
+                    let mut params_neg = params;
+                    params_neg.sig0 = -0.1;
 
-                    // Compute psi for sig0 > 0 and sig0 < 0
-                    let res_pos = prelim_kepuni(dt, r0,  0.1, mu, alpha, e0, contr);
-                    let res_neg = prelim_kepuni(dt, r0, -0.1, mu, alpha, e0, contr);
+                    let res_pos = prelim_kepuni(&params_pos, contr);
+                    let res_neg = prelim_kepuni(&params_neg, contr);
 
-                    // Skip cases where the solver failed
                     prop_assume!(res_pos.is_some() && res_neg.is_some());
 
-                    let psi_pos = res_pos.unwrap();
-                    let psi_neg = res_neg.unwrap();
-
-                    // Instead of asserting a strict difference, we record it
-                    // If the difference is negligible, it's acceptable: not all inputs are sensitive to sig0
-                    let diff = (psi_pos - psi_neg).abs();
-                    prop_assert!(diff >= 0.0, "psi should be computable"); // basically always true
+                    let diff = (res_pos.unwrap() - res_neg.unwrap()).abs();
+                    prop_assert!(diff >= 0.0);
                 }
             }
         }
