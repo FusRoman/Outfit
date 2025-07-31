@@ -10,3 +10,4 @@ tests/data/mega_test.parquet
 tests/data/1I_Oumuamua.obs
 tests/data/2I_Borisov.obs
 tests/data/3I_Atlas.obs
+proptest-regressions/
