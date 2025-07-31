@@ -971,31 +971,191 @@ mod kepler_test {
         }
     }
 
-    #[test]
-    fn test_solve_kepuni() {
-        let dt = -20.765849999996135;
-        let r0 = 1.3803870211345761;
-        let sig0 = 3.701_354_484_003_874_8E-3;
-        let mu = 2.959_122_082_855_911_5E-4;
-        let alpha = -1.642_158_377_771_140_7E-4;
-        let e0 = 0.283_599_599_137_344_5;
+    mod tests_solve_kepuni {
+        use approx::assert_relative_eq;
 
-        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+        use super::solve_kepuni;
 
-        assert_eq!(psi, -15.327414893041839);
-        assert_eq!(s0, 0.9807723505583343);
-        assert_eq!(s1, -15.229051668919967);
-        assert_eq!(s2, 117.0876676813769);
-        assert_eq!(s3, -598.9874390519309);
+        const MU: f64 = 1.0;
+        const CONTR: f64 = 1e-12;
 
-        let alpha = 1.642_158_377_771_140_7E-4;
-        let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+        #[test]
+        fn test_solve_kepuni_returns_none_for_alpha_zero() {
+            // Parabolic case (alpha = 0) is not supported
+            let res = solve_kepuni(1.0, 1.0, 0.1, MU, 0.0, 0.1, Some(CONTR));
+            assert!(res.is_none());
+        }
 
-        assert_eq!(psi, -15.1324122746124);
-        assert_eq!(s0, 1.0188608766146905);
-        assert_eq!(s1, -15.227430038021337);
-        assert_eq!(s2, 114.854187452308);
-        assert_eq!(s3, -578.615100072754);
+        #[test]
+        fn test_solve_kepuni_elliptical_nominal() {
+            // Elliptical orbit
+            let dt = 0.1;
+            let r0 = 1.0;
+            let sig0 = 0.1;
+            let alpha = -1.0;
+            let e0 = 0.5;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            assert!(
+                res.is_some(),
+                "solve_kepuni should converge for elliptical orbit"
+            );
+            let (psi, s0, s1, s2, s3) = res.unwrap();
+
+            assert!(psi.is_finite());
+            assert!(s0.is_finite());
+            assert!(s1.is_finite());
+            assert!(s2.is_finite());
+            assert!(s3.is_finite());
+        }
+
+        #[test]
+        fn test_solve_kepuni_hyperbolic_nominal() {
+            // Hyperbolic orbit
+            let dt = 0.1;
+            let r0 = 2.0;
+            let sig0 = -0.1;
+            let alpha = 1.0;
+            let e0 = 1.5;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            assert!(
+                res.is_some(),
+                "solve_kepuni should converge for hyperbolic orbit"
+            );
+            let (psi, s0, s1, s2, s3) = res.unwrap();
+
+            assert!(psi.is_finite());
+            assert!(s0.is_finite());
+            assert!(s1.is_finite());
+            assert!(s2.is_finite());
+            assert!(s3.is_finite());
+        }
+
+        #[test]
+        fn test_solve_kepuni_large_dt_still_converges() {
+            // Large time interval: test stability
+            let dt = 10.0;
+            let r0 = 1.0;
+            let sig0 = 0.1;
+            let alpha = -1.0;
+            let e0 = 0.5;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            assert!(res.is_some(), "solve_kepuni should converge for long dt");
+        }
+
+        #[test]
+        fn test_solve_kepuni_no_convergency_param_uses_default() {
+            // Without providing convergency (None)
+            let dt = 0.5;
+            let r0 = 1.0;
+            let sig0 = 0.2;
+            let alpha = -1.0;
+            let e0 = 0.3;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, None);
+            assert!(
+                res.is_some(),
+                "solve_kepuni should converge even with default tolerance"
+            );
+        }
+
+        #[test]
+        fn test_solve_kepuni_real_value() {
+            let dt = -20.765849999996135;
+            let r0 = 1.3803870211345761;
+            let sig0 = 3.701_354_484_003_874_8E-3;
+            let mu = 2.959_122_082_855_911_5E-4;
+            let alpha = -1.642_158_377_771_140_7E-4;
+            let e0 = 0.283_599_599_137_344_5;
+
+            let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+
+            assert_eq!(psi, -15.327414893041839);
+            assert_eq!(s0, 0.9807723505583343);
+            assert_eq!(s1, -15.229051668919967);
+            assert_eq!(s2, 117.0876676813769);
+            assert_eq!(s3, -598.9874390519309);
+
+            let alpha = 1.642_158_377_771_140_7E-4;
+            let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+
+            assert_eq!(psi, -15.1324122746124);
+            assert_eq!(s0, 1.0188608766146905);
+            assert_eq!(s1, -15.227430038021337);
+            assert_eq!(s2, 114.854187452308);
+            assert_eq!(s3, -578.615100072754);
+        }
+
+        #[test]
+        fn test_solve_kepuni_invariant_residual_elliptical() {
+            // Verify that the result satisfies the universal Kepler equation (residual close to 0)
+            let dt = 0.1;
+            let r0 = 1.0;
+            let sig0 = 0.1;
+            let alpha = -1.0;
+            let e0 = 0.5;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
+                .expect("Expected convergence for elliptical orbit");
+            let (_, _, s1, s2, s3) = res;
+
+            // Universal Kepler equation: r0*s1 + sig0*s2 + mu*s3 - dt ≈ 0
+            let residual = r0 * s1 + sig0 * s2 + MU * s3 - dt;
+            assert_relative_eq!(residual, 0.0, epsilon = 1e-12);
+        }
+
+        #[test]
+        fn test_solve_kepuni_invariant_residual_hyperbolic() {
+            // Same invariant for a hyperbolic orbit
+            let dt = 0.1;
+            let r0 = 2.0;
+            let sig0 = -0.1;
+            let alpha = 1.0;
+            let e0 = 1.5;
+
+            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
+                .expect("Expected convergence for hyperbolic orbit");
+            let (_, _, s1, s2, s3) = res;
+
+            let residual = r0 * s1 + sig0 * s2 + MU * s3 - dt;
+            assert_relative_eq!(residual, 0.0, max_relative = 1e-10);
+        }
+
+        #[test]
+        fn test_solve_kepuni_known_values_elliptical() {
+            // This test uses known conditions and checks that psi is close to an expected value
+            let dt = 0.5;
+            let r0 = 1.0;
+            let sig0 = 0.2;
+            let alpha = -1.0;
+            let e0 = 0.3;
+
+            let (psi, _, _, _, _) = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
+                .expect("Expected convergence");
+
+            // Reference value obtained from a stable previous run
+            let expected_psi = 0.47761843287737277; // approximate reference
+            assert_relative_eq!(psi, expected_psi, epsilon = 1e-15);
+        }
+
+        #[test]
+        fn test_solve_kepuni_known_values_hyperbolic() {
+            // Same for a hyperbolic case
+            let dt = 0.3;
+            let r0 = 2.0;
+            let sig0 = -0.1;
+            let alpha = 1.0;
+            let e0 = 1.5;
+
+            let (psi, _, _, _, _) = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
+                .expect("Expected convergence");
+
+            // Reference value obtained from a stable previous run
+            let expected_psi = 0.14972146123530983; // approximate reference
+            assert_relative_eq!(psi, expected_psi, epsilon = 1e-15);
+        }
     }
 
     #[test]
