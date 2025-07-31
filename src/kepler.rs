@@ -5,6 +5,85 @@ use core::fmt;
 use nalgebra::Vector3;
 use std::f64::consts::PI;
 
+/// Classifies the orbital regime based on the sign of the energy parameter `alpha`.
+///
+/// The parameter `alpha` is defined as:
+///
+/// ```text
+/// alpha = 2 * specific_orbital_energy = 2 * (v²/2 - μ/r)
+/// ```
+///
+/// Depending on its value:
+/// - **Elliptic** (`alpha < 0`) – Closed orbit, bounded motion.
+/// - **Parabolic** (`alpha = 0`) – Escape trajectory with zero excess velocity (marginally unbound).
+/// - **Hyperbolic** (`alpha > 0`) – Open orbit, unbounded motion.
+///
+/// This classification is used to select the correct branch when solving the
+/// universal Kepler equation and related initial approximations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OrbitType {
+    /// Bound, closed orbit (alpha < 0)
+    Elliptic,
+    /// Open, unbound orbit (alpha > 0)
+    Hyperbolic,
+    /// Parabolic trajectory (alpha = 0)
+    Parabolic,
+}
+
+impl OrbitType {
+    /// Determine the [`OrbitType`] from a given value of `alpha`.
+    ///
+    /// # Arguments
+    /// * `alpha` – Twice the specific orbital energy.
+    ///
+    /// # Returns
+    /// * `OrbitType::Elliptic` if `alpha < 0`
+    /// * `OrbitType::Hyperbolic` if `alpha > 0`
+    /// * `OrbitType::Parabolic` if `alpha == 0`
+    pub fn from_alpha(alpha: f64) -> Self {
+        if alpha < 0.0 {
+            OrbitType::Elliptic
+        } else if alpha > 0.0 {
+            OrbitType::Hyperbolic
+        } else {
+            OrbitType::Parabolic
+        }
+    }
+}
+
+/// Parameters required to solve the universal Kepler equation.
+///
+/// This struct bundles together the state and constants needed to propagate an
+/// orbit using the universal variable formulation:
+///
+/// * `dt`: Propagation time interval Δt = t - t₀ (in days).
+/// * `r0`: Heliocentric distance at the reference epoch t₀ (in AU).
+/// * `sig0`: Radial velocity component at t₀ (in AU/day).
+/// * `mu`: Standard gravitational parameter μ = GM (in AU³/day²).
+/// * `alpha`: Twice the specific orbital energy (2E).
+/// * `e0`: Orbital eccentricity (unitless).
+///
+/// The associated method [`orbit_type`](UniversalKeplerParams::orbit_type)
+/// classifies the orbit into elliptical, parabolic, or hyperbolic regimes
+/// based on `alpha`.
+#[derive(Debug, Clone, Copy)]
+pub struct UniversalKeplerParams {
+    pub dt: f64,
+    pub r0: f64,
+    pub sig0: f64,
+    pub mu: f64,
+    pub alpha: f64,
+    pub e0: f64,
+}
+
+impl UniversalKeplerParams {
+    /// Returns the [`OrbitType`] (elliptic, parabolic, or hyperbolic)
+    /// corresponding to the value of `alpha`.
+    pub fn orbit_type(&self) -> OrbitType {
+        OrbitType::from_alpha(self.alpha)
+    }
+}
+
 /// Computes the Stumpff-like auxiliary functions (s0, s1, s2, s3) used in
 /// universal variable formulations of two-body orbital motion.
 ///
@@ -440,43 +519,6 @@ fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: usize
 
     // Step 5: Convert the difference in anomalies to universal anomaly ψ
     (f - f0) / params.alpha.sqrt()
-}
-
-/// Orbital regime based on the value of `alpha`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum OrbitType {
-    Elliptic,   // alpha < 0
-    Hyperbolic, // alpha > 0
-    Parabolic,  // alpha = 0
-}
-
-impl OrbitType {
-    pub fn from_alpha(alpha: f64) -> Self {
-        if alpha < 0.0 {
-            OrbitType::Elliptic
-        } else if alpha > 0.0 {
-            OrbitType::Hyperbolic
-        } else {
-            OrbitType::Parabolic
-        }
-    }
-}
-
-/// State needed to solve the universal Kepler equation.
-#[derive(Debug, Clone, Copy)]
-struct UniversalKeplerParams {
-    dt: f64,
-    r0: f64,
-    sig0: f64,
-    mu: f64,
-    alpha: f64,
-    e0: f64,
-}
-
-impl UniversalKeplerParams {
-    pub fn orbit_type(&self) -> OrbitType {
-        OrbitType::from_alpha(self.alpha)
-    }
 }
 
 /// Solve the universal Kepler equation using Newton's method.
