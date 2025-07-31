@@ -1,3 +1,62 @@
+//! # Parsing and conversion of astronomical coordinates
+//!
+//! This module provides utility functions for:
+//!
+//! - **Parsing textual Right Ascension (RA) and Declination (DEC)** from sexagesimal strings
+//!   (formats like `HH MM SS.SS` or `±DD MM SS.SS`),
+//! - **Estimating the positional accuracy** based on the number of decimals
+//!   provided in the input strings,
+//! - **Converting 3D Cartesian position vectors to equatorial coordinates (RA, DEC)**.
+//!
+//! ## Overview
+//!
+//! These functions are used to transform raw observational data (often stored
+//! in MPC-style text files) into numerical coordinates that can be consumed
+//! by orbit determination algorithms.
+//!
+//! ### Provided features
+//!
+//! * [`parse_ra_to_deg`] – Parse a sexagesimal RA string into degrees and accuracy in arcseconds.
+//! * [`parse_dec_to_deg`] – Parse a sexagesimal DEC string into degrees and accuracy in arcseconds.
+//! * [`cartesian_to_radec`] – Convert a 3D Cartesian position vector to right ascension and declination (in radians).
+//!
+//! ### Accuracy estimation
+//!
+//! Both parsing functions compute a **measurement accuracy** in arcseconds
+//! directly from the number of digits present after the decimal point in
+//! the seconds field. This is useful when weighting observations in the
+//! orbit determination process.
+//!
+//! ### Units
+//!
+//! - RA is returned in **degrees** (0° ≤ RA < 360°).
+//! - DEC is returned in **degrees** (−90° ≤ DEC ≤ +90°).
+//! - Accuracy is returned in **arcseconds**.
+//! - Cartesian inputs for [`cartesian_to_radec`] can be in any length unit,
+//!   but the result angles are in **radians** and the norm is returned
+//!   in the same unit as the input.
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use outfit::conversion::{parse_ra_to_deg, parse_dec_to_deg, cartesian_to_radec};
+//! use nalgebra::Vector3;
+//!
+//! // Parse RA and DEC strings
+//! let (ra_deg, ra_acc) = parse_ra_to_deg("10 12 33.44").unwrap();
+//! let (dec_deg, dec_acc) = parse_dec_to_deg("-20 33 10.5").unwrap();
+//! println!("RA = {ra_deg} deg ± {ra_acc} arcsec");
+//! println!("DEC = {dec_deg} deg ± {dec_acc} arcsec");
+//!
+//! // Convert Cartesian vector to RA/DEC (radians)
+//! let pos = Vector3::new(1.0, 1.0, 0.5);
+//! let (alpha, delta, rho) = cartesian_to_radec(pos);
+//! println!("α = {alpha} rad, δ = {delta} rad, distance = {rho}");
+//! ```
+//!
+//! These functions are typically called when reading observations from
+//! MPC 80-column formatted files or other astrometric data sources.
+
 use nalgebra::Vector3;
 
 use crate::constants::{ArcSec, Degree, DPI};

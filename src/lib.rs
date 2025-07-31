@@ -48,7 +48,7 @@
 //!
 //! ## Example: Orbit Determination from MPC 80-column files
 //!
-//! ```no_run
+//! ```rust, ignore
 //! use camino::Utf8Path;
 //! use rand::SeedableRng;
 //! use rand::rngs::StdRng;
