@@ -1,60 +1,90 @@
-# Outfit - An Orbit Solver Package for Sun-Orbiting Bodies
+# Outfit
 
-Outfit is a Rust package designed to estimate the Keplerian orbital parameters for bodies orbiting around the Sun using the Gauss method.
+Outfit is a Rust library for managing, analyzing, and determining the orbits of celestial objects from astrometric observations. It provides efficient tools to read, manipulate, and process observations from various formats (80-column MPC, ADES XML, Parquet), perform initial orbit determination (Gauss method), manage observers, and interface with JPL ephemerides.
 
-## Features
+## Main Features
 
-- **Gauss Method**: Implements the Gauss method to estimate orbital elements.
-- **Keplerian Elements**: Outputs the six Keplerian orbital elements.
-- **Asynchronous Requests**: Utilizes asynchronous requests for data fetching.
-
-## Inputs
-
-The inputs required are:
-- **Right Ascension (RA)**: In degrees.
-- **Declination (DEC)**: In degrees.
-- **Observation Time**: In Modified Julian Date (MJD).
-
-## Outputs
-
-The output consists of the following Keplerian orbital elements:
-- **Semi-Major Axis**: The longest diameter of the elliptical orbit.
-- **Eccentricity**: The deviation of the orbit from a perfect circle.
-- **Inclination**: The tilt of the orbit's plane with respect to the reference plane.
-- **Longitude of the Ascending Node**: The angle from the reference direction to the ascending node.
-- **Argument of Periapsis**: The angle from the ascending node to the periapsis.
-- **Mean Anomaly**: The fraction of the orbital period that has elapsed since the last periapsis.
+- **Observation reading**:
+  - 80-column MPC files
+  - ADES (XML) files
+  - Parquet files (batch observations)
+- **Observer management**: creation, identification by MPC code, handling coordinates and altitudes
+- **Initial orbit determination**:
+  - Gauss method on observation triplets
+  - Calculations in different reference systems
+- **Error handling and uncertainty models**
+- **JPL ephemerides interface (HORIZON, NAIF)**
+- **Batch processing and benchmarks**
+- **Modular and extensible**
 
 ## Installation
 
-To include Outfit in your project, add the following to your `Cargo.toml`:
+Add Outfit to your Rust project via Cargo:
 
 ```toml
 [dependencies]
-outfit = "0.1.0"
+outfit = "1.0.0"
 ```
 
+Enable the `jpl-download` feature for automatic ephemeris download:
 
-### Usage
-Here is a basic example of how to use Outfit:
-
-```rust
-use outfit::gauss::GaussObs;
-use nalgebra::Vector3;
-
-#[tokio::main]
-async fn main() {
-    let ra = Vector3::new(1.6893715963476696, 1.6898894500811472, 1.7527345385664372);
-    let dec = Vector3::new(1.0824680373855251, 0.94358050479462163, 0.82737624078999861);
-    let time = Vector3::new(57028.479297592596, 57049.245147592592, 57063.977117592593);
-    let gauss_obs = GaussObs::new(ra, dec, time, 203.744090000, 20.707233557, 3067.694).await;
-    let orbit = gauss_obs.prelim_orbit().unwrap();
-    println!("{:?}", orbit);
-}
+```toml
+[dependencies]
+outfit = { version = "1.0.0", features = ["jpl-download"] }
 ```
 
-### License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Tests and Benchmarks
 
-### Acknowledgements
-Special thanks to the developers and contributors of the dependencies used in this project. Additional special thanks to the developers of the OrbFit software, which directly inspired the Outfit package. Link of the original OrbFit software: [OrbFit](http://adams.dm.unipi.it/orbfit/)
+- Run tests:
+  ```bash
+  cargo test
+  ```
+- Run benchmarks:
+  ```bash
+  cargo bench
+  ```
+
+## Main Dependencies
+
+- [nalgebra] for linear algebra
+- [parquet] for Parquet file reading
+- [quick-xml] for ADES parsing
+- [criterion] for benchmarks
+
+## Roadmap
+
+Planned and upcoming features for Outfit include:
+
+### v2.0
+- **Full least squares orbit fitting**  
+  Add a complete least squares optimization for orbit fitting, allowing robust adjustment of orbital elements to all available observations.
+- **Support for hyperbolic and parabolic orbits (e ≥ 1)**  
+  Enable orbit determination and propagation for interstellar objects and other bodies with e ≥ 1. ([#29](https://github.com/FusRoman/Outfit/issues/29))
+- **ANISE support for JPL ephemeris loading**  
+  Reduce codebase complexity and add support for loading JPL ephemerides via ANISE/SPICE. ([#28](https://github.com/FusRoman/Outfit/issues/28))
+- **RMS estimation for all file formats**  
+  Extend RMS (root mean square) error estimation to all supported observation file formats. ([#22](https://github.com/FusRoman/Outfit/issues/22))
+- **Radar observation support**  
+  Add the ability to ingest and process radar observations for orbit determination. ([#13](https://github.com/FusRoman/Outfit/issues/13))
+
+### v3.0
+- **Vaisala method for initial orbit determination**  
+  Implement the Vaisala method as an alternative approach for initial orbit determination.
+
+For more details and the latest updates, see the [GitHub issues page](https://github.com/FusRoman/Outfit/issues).
+
+## License
+
+This project is licensed under the CeCILL-C Free Software License Agreement. See the `LICENSE` file for more information.
+
+## Author
+
+Developed by FusRoman.
+
+## Acknowledgements
+
+Special thanks to the developers of [OrbFit](https://adams.dm.unipi.it/orbfit/) for their outstanding work and for providing much of the inspiration and reference algorithms for this project.
+
+---
+
+For any questions or contributions, feel free to open an issue or pull request on the GitHub repository.
