@@ -449,7 +449,6 @@ mod test_observations {
 
     use super::*;
 
-    #[cfg(test)]
     #[cfg(feature = "jpl-download")]
     mod tests_compute_apparent_position {
         use super::*;
@@ -870,37 +869,295 @@ mod test_observations {
         );
     }
 
-    #[test]
     #[cfg(feature = "jpl-download")]
-    fn test_ephem_error() {
+    mod tests_ephemeris_error {
+        use super::*;
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        use approx::assert_relative_eq;
 
-        let obs = Observation {
-            observer: 0,
-            ra: 1.7899347771316527,
-            error_ra: 1.770_024_520_608_546E-6,
-            dec: 0.778_996_538_107_973_6,
-            error_dec: 1.259_582_891_829_317_7E-6,
-            time: 57070.262067592594,
-        };
+        fn haleakala_observer() -> Observer {
+            Observer::new(
+                203.744083,
+                20.706944,
+                3.05,
+                Some("Haleakala".to_string()),
+                None,
+                None,
+            )
+        }
 
-        let observer = OUTFIT_HORIZON_TEST
-            .0
-            .get_observer_from_mpc_code(&"F51".to_string());
+        fn simple_equinoctial(epoch: f64) -> EquinoctialElements {
+            EquinoctialElements {
+                reference_epoch: epoch,
+                semi_major_axis: 1.0,
+                eccentricity_sin_lon: 0.0,
+                eccentricity_cos_lon: 0.0,
+                tan_half_incl_sin_node: 0.0,
+                tan_half_incl_cos_node: 0.0,
+                mean_longitude: 0.0,
+            }
+        }
 
-        let equinoctial_element = EquinoctialElements {
-            reference_epoch: 57_049.242_334_573_75,
-            semi_major_axis: 1.8017360713154256,
-            eccentricity_sin_lon: 0.269_373_680_909_227_2,
-            eccentricity_cos_lon: 8.856_415_260_013_56E-2,
-            tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
-            tan_half_incl_cos_node: 0.10168201109730375,
-            mean_longitude: 1.6936970079414786,
-        };
+        #[test]
+        fn test_ephem_error() {
+            let obs = Observation {
+                observer: 0,
+                ra: 1.7899347771316527,
+                error_ra: 1.770_024_520_608_546E-6,
+                dec: 0.778_996_538_107_973_6,
+                error_dec: 1.259_582_891_829_317_7E-6,
+                time: 57070.262067592594,
+            };
 
-        let rms_error =
-            obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element, &observer);
-        assert_eq!(rms_error.unwrap(), 75.00445641224026);
+            let observer = OUTFIT_HORIZON_TEST
+                .0
+                .get_observer_from_mpc_code(&"F51".to_string());
+
+            let equinoctial_element = EquinoctialElements {
+                reference_epoch: 57_049.242_334_573_75,
+                semi_major_axis: 1.8017360713154256,
+                eccentricity_sin_lon: 0.269_373_680_909_227_2,
+                eccentricity_cos_lon: 8.856_415_260_013_56E-2,
+                tan_half_incl_sin_node: 8.089_970_166_396_302E-4,
+                tan_half_incl_cos_node: 0.10168201109730375,
+                mean_longitude: 1.6936970079414786,
+            };
+
+            let rms_error =
+                obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element, &observer);
+            assert_eq!(rms_error.unwrap(), 75.00445641224026);
+        }
+
+        /// When the observed RA/DEC exactly match the propagated RA/DEC,
+        /// the ephemeris_error must be zero.
+        #[test]
+        fn test_zero_error_when_positions_match() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0;
+            let equinoctial = simple_equinoctial(t_obs);
+
+            // Compute the propagated position
+            let obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 1e-6,
+                dec: 0.0,
+                error_dec: 1e-6,
+                time: t_obs,
+            };
+            let (alpha, delta) = obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+
+            // New observation with exact same RA/DEC
+            let obs_match = Observation {
+                observer: 0,
+                ra: alpha,
+                error_ra: 1e-6,
+                dec: delta,
+                error_dec: 1e-6,
+                time: t_obs,
+            };
+
+            let error = obs_match
+                .ephemeris_error(state, &equinoctial, &observer)
+                .unwrap();
+            assert_relative_eq!(error, 0.0, epsilon = 1e-14);
+        }
+
+        /// Error grows if RA is off by a known amount
+        #[test]
+        fn test_error_increases_with_offset() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0;
+            let equinoctial = simple_equinoctial(t_obs);
+
+            let base_obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 1e-3,
+                dec: 0.0,
+                error_dec: 1e-3,
+                time: t_obs,
+            };
+            let (alpha, delta) = base_obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+
+            // Same dec, but RA offset by 1 milliradian
+            let obs_offset = Observation {
+                observer: 0,
+                ra: alpha + 1e-3,
+                error_ra: 1e-3,
+                dec: delta,
+                error_dec: 1e-3,
+                time: t_obs,
+            };
+
+            let err = obs_offset
+                .ephemeris_error(state, &equinoctial, &observer)
+                .unwrap();
+            assert!(err > 0.0);
+        }
+
+        /// Check that wrapping of RA (close to 2π) does not affect the error
+        #[test]
+        fn test_ra_wrapping_invariance() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0;
+            let equinoctial = simple_equinoctial(t_obs);
+
+            let base_obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 1e-6,
+                dec: 0.0,
+                error_dec: 1e-6,
+                time: t_obs,
+            };
+            let (alpha, delta) = base_obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+
+            // Same position but RA shifted by ±2π
+            let obs_wrapped = Observation {
+                observer: 0,
+                ra: alpha + std::f64::consts::TAU,
+                error_ra: 1e-6,
+                dec: delta,
+                error_dec: 1e-6,
+                time: t_obs,
+            };
+
+            let err1 = obs_wrapped
+                .ephemeris_error(state, &equinoctial, &observer)
+                .unwrap();
+            assert_relative_eq!(err1, 0.0, epsilon = 1e-12);
+        }
+
+        /// When RA/DEC uncertainties are very large, error is small even with a mismatch.
+        #[test]
+        fn test_large_uncertainty_downweights_error() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0;
+            let equinoctial = simple_equinoctial(t_obs);
+
+            let base_obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 1.0,
+                dec: 0.0,
+                error_dec: 1.0,
+                time: t_obs,
+            };
+            let (alpha, delta) = base_obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+
+            let obs_large_uncertainty = Observation {
+                observer: 0,
+                ra: alpha + 0.1,
+                error_ra: 10.0,
+                dec: delta + 0.1,
+                error_dec: 10.0,
+                time: t_obs,
+            };
+
+            let err = obs_large_uncertainty
+                .ephemeris_error(state, &equinoctial, &observer)
+                .unwrap();
+            assert!(
+                err < 1.0,
+                "Large uncertainties should reduce the error contribution"
+            );
+        }
+
+        mod proptests_ephemeris_error {
+            use super::*;
+            use proptest::prelude::*;
+
+            fn arb_observer() -> impl Strategy<Value = Observer> {
+                (-180.0..180.0, -90.0..90.0, 0.0..5.0)
+                    .prop_map(|(lon, lat, elev)| Observer::new(lon, lat, elev, None, None, None))
+            }
+
+            fn arb_elliptical_equinoctial() -> impl Strategy<Value = EquinoctialElements> {
+                (
+                    58000.0..62000.0,
+                    0.5..20.0,
+                    -0.8..0.8,
+                    -0.8..0.8,
+                    -0.8..0.8,
+                    -0.8..0.8,
+                    0.0..std::f64::consts::TAU,
+                )
+                    .prop_map(|(epoch, a, h, k, p, q, l)| EquinoctialElements {
+                        reference_epoch: epoch,
+                        semi_major_axis: a,
+                        eccentricity_sin_lon: h,
+                        eccentricity_cos_lon: k,
+                        tan_half_incl_sin_node: p,
+                        tan_half_incl_cos_node: q,
+                        mean_longitude: l,
+                    })
+                    .prop_filter("Bound orbits only", |e: &EquinoctialElements| {
+                        e.eccentricity() < 1.0
+                    })
+            }
+
+            proptest! {
+                /// Property: error is always non-negative and finite for valid inputs
+                #[test]
+                fn proptest_error_is_non_negative(
+                    equinoctial in arb_elliptical_equinoctial(),
+                    observer in arb_observer(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.0,
+                        error_ra: 1e-3,
+                        dec: 0.0,
+                        error_dec: 1e-3,
+                        time: obs_time,
+                    };
+
+                    let result = obs.ephemeris_error(state, &equinoctial, &observer);
+                    if let Ok(val) = result {
+                        prop_assert!(val.is_finite());
+                        prop_assert!(val >= 0.0);
+                    }
+                }
+
+                /// Property: If uncertainties are huge, the error must be small
+                #[test]
+                fn proptest_error_downweights_large_uncertainties(
+                    equinoctial in arb_elliptical_equinoctial(),
+                    observer in arb_observer(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.5,
+                        error_ra: 100.0,
+                        dec: 0.5,
+                        error_dec: 100.0,
+                        time: obs_time,
+                    };
+
+                    let result = obs.ephemeris_error(state, &equinoctial, &observer);
+                    if let Ok(val) = result {
+                        prop_assert!(val < 1.0);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
