@@ -241,16 +241,14 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 ///
 /// Returns
 /// --------
-/// * `Some((psi, alpha))` – Tuple containing:
-///   - `psi`: initial guess for the universal anomaly at time `t0 + dt`,
-///   - `alpha`: the same `alpha` value passed as input (for convenience).
+/// * `Some(psi)` – Initial guess for the universal anomaly at time `t0 + dt`.
 /// * `None` – If `alpha = 0` (parabolic orbit).
 ///
 /// Remarks
 /// --------
 /// * This function does not iterate to full convergence; it only provides a starting
 ///   value for `ψ`. It is typically used before calling a solver such as
-///   [`solve_kepuniv2`] to refine the result.
+///   [`solve_kepuni`] to refine the result.
 /// * The hyperbolic and elliptical branches use up to 20 Newton–Raphson iterations.
 /// * The parabolic case must be treated by a separate routine.
 ///
@@ -266,24 +264,17 @@ pub fn prelim_kepuni(
     alpha: f64,
     e0: f64,
     contr: f64,
-) -> Option<(f64, f64)> {
-    // Maximum number of Newton–Raphson iterations
+) -> Option<f64> {
     const ITX: usize = 20;
 
-    // Elliptical case: alpha < 0
     if alpha < 0.0 {
-        let psi0 = prelim_elliptic(dt, r0, sig0, mu, alpha, e0, contr, ITX);
-        return Some((psi0, alpha));
+        return Some(prelim_elliptic(dt, r0, sig0, mu, alpha, e0, contr, ITX));
     }
 
-    // Hyperbolic case: alpha > 0
     if alpha > 0.0 {
-        let psi0 = prelim_hyperbolic(dt, r0, sig0, mu, alpha, e0, contr, ITX);
-        return Some((psi0, alpha));
+        return Some(prelim_hyperbolic(dt, r0, sig0, mu, alpha, e0, contr, ITX));
     }
 
-    // Parabolic case: alpha == 0
-    // Not supported: return None so that the caller can handle it explicitly.
     None
 }
 
@@ -510,44 +501,128 @@ fn prelim_hyperbolic(
     (f - f0) / alpha.sqrt()
 }
 
-/// Résout l'équation universelle de Kepler en utilisant une méthode de Newton.
-/// Gère les cas elliptiques (`alpha < 0`) et hyperboliques (`alpha > 0`).
-fn solve_kepuni(
-    dt: f64,
-    r0: f64,
-    sig0: f64,
-    mu: f64,
-    alpha: f64,
-    e0: f64,
+/// Orbital regime based on the value of `alpha`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OrbitType {
+    Elliptic,   // alpha < 0
+    Hyperbolic, // alpha > 0
+    Parabolic,  // alpha = 0
+}
+
+impl OrbitType {
+    pub fn from_alpha(alpha: f64) -> Self {
+        if alpha < 0.0 {
+            OrbitType::Elliptic
+        } else if alpha > 0.0 {
+            OrbitType::Hyperbolic
+        } else {
+            OrbitType::Parabolic
+        }
+    }
+}
+
+/// State needed to solve the universal Kepler equation.
+#[derive(Debug, Clone, Copy)]
+pub struct UniversalKeplerParams {
+    pub dt: f64,
+    pub r0: f64,
+    pub sig0: f64,
+    pub mu: f64,
+    pub alpha: f64,
+    pub e0: f64,
+}
+
+impl UniversalKeplerParams {
+    pub fn orbit_type(&self) -> OrbitType {
+        OrbitType::from_alpha(self.alpha)
+    }
+}
+
+/// Solve the universal Kepler equation using Newton's method.
+///
+/// This solver refines an initial guess for the universal anomaly `ψ` using
+/// Newton–Raphson iterations until the equation
+///
+/// ```text
+/// r0 * s1 + sig0 * s2 + mu * s3 = dt
+/// ```
+///
+/// is satisfied. The method handles both:
+/// * Elliptical orbits (alpha < 0)
+/// * Hyperbolic orbits (alpha > 0)
+///
+/// Arguments
+/// ---------
+/// * `dt` – Propagation interval Δt (days)
+/// * `r0` – Distance at epoch (AU)
+/// * `sig0` – Radial velocity component (AU/day)
+/// * `mu` – Gravitational parameter GM (AU³/day²)
+/// * `alpha` – Twice the specific orbital energy:
+///   * < 0 elliptical,
+///   * > 0 hyperbolic.
+/// * `e0` – Eccentricity of the orbit
+/// * `convergency` – Optional convergence tolerance (defaults to 100×ε)
+///
+/// Returns
+/// --------
+/// * `Some((psi, s0, s1, s2, s3))` if the solver converged
+/// * `None` if the solver failed to converge or `alpha = 0`.
+///
+/// Remarks
+/// --------
+/// * The initial guess for `ψ` is computed using [`prelim_kepuni`].
+/// * Convergence is usually fast (few iterations).
+pub fn solve_kepuni(
+    params: &UniversalKeplerParams,
     convergency: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
-    const JMAX: usize = 100;
-    let contr = convergency.unwrap_or(100.0 * f64::EPSILON);
+    const MAX_ITER: usize = 100;
+    let tol = convergency.unwrap_or(100.0 * f64::EPSILON);
 
-    let (mut psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr)?;
+    // Preliminary guess for psi
+    let mut psi = match params.orbit_type() {
+        OrbitType::Parabolic => return None,
+        OrbitType::Elliptic | OrbitType::Hyperbolic => prelim_kepuni(
+            params.dt,
+            params.r0,
+            params.sig0,
+            params.mu,
+            params.alpha,
+            params.e0,
+            tol,
+        )?,
+    };
 
-    // Méthode de Newton pour résoudre l'équation universelle de Kepler
-    for _ in 0..JMAX {
-        let (s0, s1, s2, s3) = s_funct(psi, alpha);
+    // Newton-Raphson refinement
+    for _ in 0..MAX_ITER {
+        let (s0, s1, s2, s3) = s_funct(psi, params.alpha);
 
-        let fun = r0 * s1 + sig0 * s2 + mu * s3 - dt;
-        let funp = r0 * s0 + sig0 * s1 + mu * s2;
+        // Universal Kepler function and derivative
+        let f = params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt;
+        let fp = params.r0 * s0 + params.sig0 * s1 + params.mu * s2;
+        let dpsi = -f / fp;
 
-        let dpsi = -fun / funp;
-
+        // Convergence safeguard
         if s3.abs() > 1e-2 / f64::EPSILON {
-            return None; // Problème de convergence
+            return None;
         }
 
-        let psi1 = psi + dpsi;
-        psi = if psi1 * psi < 0.0 { psi / 2.0 } else { psi1 };
+        // Update psi (dampen sign change)
+        let new_psi = psi + dpsi;
+        psi = if new_psi * psi < 0.0 {
+            psi / 2.0
+        } else {
+            new_psi
+        };
 
-        if dpsi.abs() < contr || dpsi.abs() < contr * 10.0 * psi.abs() {
+        // Convergence condition
+        let small_step = dpsi.abs() < tol || dpsi.abs() < tol * 10.0 * psi.abs();
+        if small_step {
             return Some((psi, s0, s1, s2, s3));
         }
     }
 
-    None // Convergence non atteinte
+    None
 }
 
 /// VelocityCorrectionError Error is used in case the velocity correction cannot be ended.
@@ -582,7 +657,15 @@ pub fn velocity_correction(
     let eps = 1e3 * f64::EPSILON;
     let alpha = 2. * energy;
 
-    let Some((_, _, _, s2, s3)) = solve_kepuni(dt, r2, sig0, mu, alpha, ecc, Some(eps)) else {
+    let params = UniversalKeplerParams {
+        dt,
+        r0: r2,
+        sig0,
+        mu,
+        alpha,
+        e0: ecc,
+    };
+    let Some((_, _, _, s2, s3)) = solve_kepuni(&params, Some(eps)) else {
         return Err(VelocityCorrectionError);
     };
 
@@ -720,7 +803,6 @@ mod kepler_test {
 
     mod tests_prelim_kepuni {
         use super::prelim_kepuni;
-        use approx::assert_relative_eq;
 
         const MU: f64 = 1.0; // Simplified gravitational parameter for testing
         const CONTR: f64 = 1e-12;
@@ -743,8 +825,7 @@ mod kepler_test {
 
             let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
             assert!(result.is_some());
-            let (psi0, alpha_back) = result.unwrap();
-            assert_relative_eq!(alpha_back, alpha);
+            let psi0 = result.unwrap();
             assert!(psi0.is_finite());
         }
 
@@ -759,7 +840,7 @@ mod kepler_test {
 
             let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
             assert!(result.is_some());
-            let (psi0, _) = result.unwrap();
+            let psi0 = result.unwrap();
             assert!(psi0.is_finite());
         }
 
@@ -774,21 +855,8 @@ mod kepler_test {
 
             let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
             assert!(result.is_some());
-            let (psi0, _) = result.unwrap();
+            let psi0 = result.unwrap();
             assert!(psi0.is_finite());
-        }
-
-        #[test]
-        fn test_invariant_alpha_unchanged() {
-            // The output alpha value must be identical to the input alpha
-            let alpha = -0.5;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let e0 = 0.5;
-            let dt = 0.25;
-
-            let (_, alpha_out) = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR).unwrap();
-            assert_relative_eq!(alpha_out, alpha);
         }
 
         #[test]
@@ -799,8 +867,8 @@ mod kepler_test {
             let e0 = 0.5;
             let dt = 0.25;
 
-            let (psi_pos, _) = prelim_kepuni(dt, r0, 0.1, MU, alpha, e0, CONTR).unwrap();
-            let (psi_neg, _) = prelim_kepuni(dt, r0, -0.1, MU, alpha, e0, CONTR).unwrap();
+            let psi_pos = prelim_kepuni(dt, r0, 0.1, MU, alpha, e0, CONTR).unwrap();
+            let psi_neg = prelim_kepuni(dt, r0, -0.1, MU, alpha, e0, CONTR).unwrap();
 
             // Weaker invariant: psi must differ significantly between positive and negative sig0
             assert!(
@@ -820,7 +888,7 @@ mod kepler_test {
 
             let result = prelim_kepuni(dt, r0, sig0, MU, alpha, e0, CONTR);
             assert!(result.is_some());
-            let (psi0, _) = result.unwrap();
+            let psi0 = result.unwrap();
             assert!(psi0.is_finite());
         }
 
@@ -850,16 +918,14 @@ mod kepler_test {
             let alpha = -1.642_158_377_771_140_7E-4;
             let e0 = 0.283_599_599_137_344_5;
 
-            let (psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
+            let psi = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
 
             assert_eq!(psi, -15.327414893041848);
-            assert_eq!(alpha, -0.00016421583777711407);
 
             let alpha = 1.642_158_377_771_140_7E-4;
-            let (psi, alpha) = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
+            let psi = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr).unwrap();
 
             assert_eq!(psi, -73.1875935362658);
-            assert_eq!(alpha, 0.00016421583777711407);
 
             let res_prelim = prelim_kepuni(dt, r0, sig0, mu, 0., e0, contr);
             assert!(res_prelim.is_none());
@@ -867,7 +933,6 @@ mod kepler_test {
 
         mod kepuni_prop_tests {
             use super::prelim_kepuni;
-            use approx::assert_relative_eq;
             use proptest::prelude::*;
 
             // Generate reasonable parameters for the prelim_kepuni function
@@ -905,10 +970,7 @@ mod kepler_test {
                     let result = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr);
 
                     prop_assert!(result.is_some());
-                    let (psi0, alpha_back) = result.unwrap();
-
-                    // Alpha is preserved
-                    assert_relative_eq!(alpha_back, alpha, epsilon = 1e-12);
+                    let psi0 = result.unwrap();
 
                     // Results should be finite
                     prop_assert!(psi0.is_finite());
@@ -930,9 +992,8 @@ mod kepler_test {
                     let alpha = 0.0;
                     let result = prelim_kepuni(dt, r0, sig0, mu, alpha, e0, contr);
                     // Just ensure it does not panic and either returns None or Some finite
-                    if let Some((psi0, alpha_back)) = result {
+                    if let Some(psi0) = result {
                         prop_assert!(psi0.is_finite());
-                        assert_relative_eq!(alpha_back, alpha);
                     }
                 }
             }
@@ -959,8 +1020,8 @@ mod kepler_test {
                     // Skip cases where the solver failed
                     prop_assume!(res_pos.is_some() && res_neg.is_some());
 
-                    let (psi_pos, _) = res_pos.unwrap();
-                    let (psi_neg, _) = res_neg.unwrap();
+                    let psi_pos = res_pos.unwrap();
+                    let psi_neg = res_neg.unwrap();
 
                     // Instead of asserting a strict difference, we record it
                     // If the difference is negligible, it's acceptable: not all inputs are sensitive to sig0
@@ -973,29 +1034,42 @@ mod kepler_test {
 
     mod tests_solve_kepuni {
         use approx::assert_relative_eq;
+        use proptest::prelude::*;
 
-        use super::solve_kepuni;
+        use super::{solve_kepuni, UniversalKeplerParams};
 
         const MU: f64 = 1.0;
         const CONTR: f64 = 1e-12;
 
+        fn make_params(
+            dt: f64,
+            r0: f64,
+            sig0: f64,
+            mu: f64,
+            alpha: f64,
+            e0: f64,
+        ) -> UniversalKeplerParams {
+            UniversalKeplerParams {
+                dt,
+                r0,
+                sig0,
+                mu,
+                alpha,
+                e0,
+            }
+        }
+
         #[test]
         fn test_solve_kepuni_returns_none_for_alpha_zero() {
-            // Parabolic case (alpha = 0) is not supported
-            let res = solve_kepuni(1.0, 1.0, 0.1, MU, 0.0, 0.1, Some(CONTR));
+            let params = make_params(1.0, 1.0, 0.1, MU, 0.0, 0.1);
+            let res = solve_kepuni(&params, Some(CONTR));
             assert!(res.is_none());
         }
 
         #[test]
         fn test_solve_kepuni_elliptical_nominal() {
-            // Elliptical orbit
-            let dt = 0.1;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let alpha = -1.0;
-            let e0 = 0.5;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            let params = make_params(0.1, 1.0, 0.1, MU, -1.0, 0.5);
+            let res = solve_kepuni(&params, Some(CONTR));
             assert!(
                 res.is_some(),
                 "solve_kepuni should converge for elliptical orbit"
@@ -1011,14 +1085,8 @@ mod kepler_test {
 
         #[test]
         fn test_solve_kepuni_hyperbolic_nominal() {
-            // Hyperbolic orbit
-            let dt = 0.1;
-            let r0 = 2.0;
-            let sig0 = -0.1;
-            let alpha = 1.0;
-            let e0 = 1.5;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            let params = make_params(0.1, 2.0, -0.1, MU, 1.0, 1.5);
+            let res = solve_kepuni(&params, Some(CONTR));
             assert!(
                 res.is_some(),
                 "solve_kepuni should converge for hyperbolic orbit"
@@ -1034,27 +1102,15 @@ mod kepler_test {
 
         #[test]
         fn test_solve_kepuni_large_dt_still_converges() {
-            // Large time interval: test stability
-            let dt = 10.0;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let alpha = -1.0;
-            let e0 = 0.5;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR));
+            let params = make_params(10.0, 1.0, 0.1, MU, -1.0, 0.5);
+            let res = solve_kepuni(&params, Some(CONTR));
             assert!(res.is_some(), "solve_kepuni should converge for long dt");
         }
 
         #[test]
         fn test_solve_kepuni_no_convergency_param_uses_default() {
-            // Without providing convergency (None)
-            let dt = 0.5;
-            let r0 = 1.0;
-            let sig0 = 0.2;
-            let alpha = -1.0;
-            let e0 = 0.3;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, None);
+            let params = make_params(0.5, 1.0, 0.2, MU, -1.0, 0.3);
+            let res = solve_kepuni(&params, None);
             assert!(
                 res.is_some(),
                 "solve_kepuni should converge even with default tolerance"
@@ -1063,14 +1119,16 @@ mod kepler_test {
 
         #[test]
         fn test_solve_kepuni_real_value() {
-            let dt = -20.765849999996135;
-            let r0 = 1.3803870211345761;
-            let sig0 = 3.701_354_484_003_874_8E-3;
-            let mu = 2.959_122_082_855_911_5E-4;
-            let alpha = -1.642_158_377_771_140_7E-4;
-            let e0 = 0.283_599_599_137_344_5;
+            let params = make_params(
+                -20.765849999996135,
+                1.3803870211345761,
+                3.701_354_484_003_874_8E-3,
+                2.959_122_082_855_911_5E-4,
+                -1.642_158_377_771_140_7E-4,
+                0.283_599_599_137_344_5,
+            );
 
-            let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+            let (psi, s0, s1, s2, s3) = solve_kepuni(&params, None).unwrap();
 
             assert_eq!(psi, -15.327414893041839);
             assert_eq!(s0, 0.9807723505583343);
@@ -1078,8 +1136,11 @@ mod kepler_test {
             assert_eq!(s2, 117.0876676813769);
             assert_eq!(s3, -598.9874390519309);
 
-            let alpha = 1.642_158_377_771_140_7E-4;
-            let (psi, s0, s1, s2, s3) = solve_kepuni(dt, r0, sig0, mu, alpha, e0, None).unwrap();
+            let params2 = UniversalKeplerParams {
+                alpha: 1.642_158_377_771_140_7E-4,
+                ..params
+            };
+            let (psi, s0, s1, s2, s3) = solve_kepuni(&params2, None).unwrap();
 
             assert_eq!(psi, -15.1324122746124);
             assert_eq!(s0, 1.0188608766146905);
@@ -1090,98 +1151,62 @@ mod kepler_test {
 
         #[test]
         fn test_solve_kepuni_invariant_residual_elliptical() {
-            // Verify that the result satisfies the universal Kepler equation (residual close to 0)
-            let dt = 0.1;
-            let r0 = 1.0;
-            let sig0 = 0.1;
-            let alpha = -1.0;
-            let e0 = 0.5;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
-                .expect("Expected convergence for elliptical orbit");
+            let params = make_params(0.1, 1.0, 0.1, MU, -1.0, 0.5);
+            let res = solve_kepuni(&params, Some(CONTR)).expect("Expected convergence");
             let (_, _, s1, s2, s3) = res;
 
-            // Universal Kepler equation: r0*s1 + sig0*s2 + mu*s3 - dt ≈ 0
-            let residual = r0 * s1 + sig0 * s2 + MU * s3 - dt;
+            let residual = params.r0 * s1 + params.sig0 * s2 + MU * s3 - params.dt;
             assert_relative_eq!(residual, 0.0, epsilon = 1e-12);
         }
 
         #[test]
         fn test_solve_kepuni_invariant_residual_hyperbolic() {
-            // Same invariant for a hyperbolic orbit
-            let dt = 0.1;
-            let r0 = 2.0;
-            let sig0 = -0.1;
-            let alpha = 1.0;
-            let e0 = 1.5;
-
-            let res = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
-                .expect("Expected convergence for hyperbolic orbit");
+            let params = make_params(0.1, 2.0, -0.1, MU, 1.0, 1.5);
+            let res = solve_kepuni(&params, Some(CONTR)).expect("Expected convergence");
             let (_, _, s1, s2, s3) = res;
 
-            let residual = r0 * s1 + sig0 * s2 + MU * s3 - dt;
+            let residual = params.r0 * s1 + params.sig0 * s2 + MU * s3 - params.dt;
             assert_relative_eq!(residual, 0.0, max_relative = 1e-10);
         }
 
         #[test]
         fn test_solve_kepuni_known_values_elliptical() {
-            // This test uses known conditions and checks that psi is close to an expected value
-            let dt = 0.5;
-            let r0 = 1.0;
-            let sig0 = 0.2;
-            let alpha = -1.0;
-            let e0 = 0.3;
+            let params = make_params(0.5, 1.0, 0.2, MU, -1.0, 0.3);
+            let (psi, _, _, _, _) =
+                solve_kepuni(&params, Some(CONTR)).expect("Expected convergence");
 
-            let (psi, _, _, _, _) = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
-                .expect("Expected convergence");
-
-            // Reference value obtained from a stable previous run
-            let expected_psi = 0.47761843287737277; // approximate reference
+            let expected_psi = 0.47761843287737277;
             assert_relative_eq!(psi, expected_psi, epsilon = 1e-15);
         }
 
         #[test]
         fn test_solve_kepuni_known_values_hyperbolic() {
-            // Same for a hyperbolic case
-            let dt = 0.3;
-            let r0 = 2.0;
-            let sig0 = -0.1;
-            let alpha = 1.0;
-            let e0 = 1.5;
+            let params = make_params(0.3, 2.0, -0.1, MU, 1.0, 1.5);
+            let (psi, _, _, _, _) =
+                solve_kepuni(&params, Some(CONTR)).expect("Expected convergence");
 
-            let (psi, _, _, _, _) = solve_kepuni(dt, r0, sig0, MU, alpha, e0, Some(CONTR))
-                .expect("Expected convergence");
-
-            // Reference value obtained from a stable previous run
-            let expected_psi = 0.14972146123530983; // approximate reference
+            let expected_psi = 0.14972146123530983;
             assert_relative_eq!(psi, expected_psi, epsilon = 1e-15);
         }
 
-        use proptest::prelude::*;
-
         fn arb_common_params() -> impl Strategy<Value = (f64, f64, f64, f64, f64)> {
             (
-                // dt : intervalle de temps, évite 0
                 prop_oneof![-5.0..-0.1, 0.1..5.0],
-                // r0 : distance > 0.1
                 0.1..3.0f64,
-                // sig0 : vitesse radiale modérée
                 -0.5..0.5f64,
-                // mu : paramètre gravitationnel
                 0.5..2.0f64,
-                // e0 : excentricité
                 0.01..2.0f64,
             )
         }
 
         proptest! {
-            /// Property test: elliptical branch (alpha < 0)
             #[test]
             fn prop_solve_kepuni_elliptical(
                 (dt, r0, sig0, mu, e0) in arb_common_params(),
-                alpha in -5.0..-0.1f64 // strictly negative alpha
+                alpha in -5.0..-0.1f64
             ) {
-                let res = solve_kepuni(dt, r0, sig0, mu, alpha, e0, Some(1e-12));
+                let params = make_params(dt, r0, sig0, mu, alpha, e0);
+                let res = solve_kepuni(&params, Some(1e-12));
 
                 if let Some((psi, s0, s1, s2, s3)) = res {
                     prop_assert!(psi.is_finite());
@@ -1190,8 +1215,7 @@ mod kepler_test {
                     prop_assert!(s2.is_finite());
                     prop_assert!(s3.is_finite());
 
-                    // Vérification de l'équation universelle
-                    let residual = r0 * s1 + sig0 * s2 + mu * s3 - dt;
+                    let residual = params.r0 * s1 + params.sig0 * s2 + mu * s3 - params.dt;
                     prop_assert!(residual.abs() < 1e-8,
                         "Residual too large for elliptical case: {}", residual);
                 }
@@ -1199,13 +1223,13 @@ mod kepler_test {
         }
 
         proptest! {
-            /// Property test: hyperbolic branch (alpha > 0)
             #[test]
             fn prop_solve_kepuni_hyperbolic(
                 (dt, r0, sig0, mu, e0) in arb_common_params(),
-                alpha in 0.1..5.0f64 // strictly positive alpha
+                alpha in 0.1..5.0f64
             ) {
-                let res = solve_kepuni(dt, r0, sig0, mu, alpha, e0, Some(1e-12));
+                let params = make_params(dt, r0, sig0, mu, alpha, e0);
+                let res = solve_kepuni(&params, Some(1e-12));
 
                 if let Some((psi, s0, s1, s2, s3)) = res {
                     prop_assert!(psi.is_finite());
@@ -1214,7 +1238,7 @@ mod kepler_test {
                     prop_assert!(s2.is_finite());
                     prop_assert!(s3.is_finite());
 
-                    let residual = r0 * s1 + sig0 * s2 + mu * s3 - dt;
+                    let residual = params.r0 * s1 + params.sig0 * s2 + mu * s3 - params.dt;
                     prop_assert!(residual.abs() < 1e-8,
                         "Residual too large for hyperbolic case: {}", residual);
                 }
