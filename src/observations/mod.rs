@@ -117,6 +117,15 @@ impl Observation {
     ///    Converts the corrected line-of-sight vector into apparent right ascension (RA)
     ///    and declination (DEC).
     ///
+    /// # Arguments
+    ///
+    /// * `state` – Global application state providing JPL ephemerides, UT1 provider,
+    ///   and reference frame utilities.
+    /// * `equinoctial_element` – The equinoctial orbital elements of the target body,
+    ///   used to propagate its position at the observation time.
+    /// * `observer` – The observer's geodetic location on Earth, which determines
+    ///   the topocentric viewpoint.
+    ///
     /// # Returns
     ///
     /// * `(alpha, delta)` – A tuple containing the **apparent right ascension** and
