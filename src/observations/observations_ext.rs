@@ -586,16 +586,14 @@ impl ObservationIOD for Observations {
         self.apply_batch_rms_correction(error_model, params.gap_max);
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
-        let triplets = self
-            .compute_triplets(
-                state,
-                params.dt_min,
-                params.dt_max_triplet,
-                params.optimal_interval_time,
-                params.max_obs_for_triplets,
-                params.max_triplets,
-            )
-            .unwrap();
+        let triplets = self.compute_triplets(
+            state,
+            params.dt_min,
+            params.dt_max_triplet,
+            params.optimal_interval_time,
+            params.max_obs_for_triplets,
+            params.max_triplets,
+        )?;
 
         let mut best_rms = f64::MAX;
         let mut best_orbit = None;

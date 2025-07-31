@@ -86,6 +86,104 @@ impl Observation {
         env_state.get_observer_from_uint16(self.observer)
     }
 
+    /// Compute the apparent equatorial coordinates (RA, DEC) of a solar system body
+    /// as seen by a specific observer at the observation time.
+    ///
+    /// # Overview
+    ///
+    /// This function determines where an object (described by its equinoctial orbital elements)
+    /// will appear on the sky at the time of the current observation.
+    ///
+    /// The computation involves:
+    ///
+    /// 1. **Orbit propagation**:
+    ///    Propagates the object's position and velocity from its reference epoch to the
+    ///    observation time using a two-body model.
+    ///
+    /// 2. **Reference frame handling**:
+    ///    Retrieves Earth's barycentric position from a JPL ephemeris,
+    ///    and builds a rotation matrix to express positions in the *ecliptic mean J2000* frame.
+    ///
+    /// 3. **Observer position**:
+    ///    Computes the geocentric position of the observer, adds Earth’s heliocentric position
+    ///    to obtain the full heliocentric position of the observer, and transforms it into the
+    ///    same frame.
+    ///
+    /// 4. **Light-time and aberration corrections**:
+    ///    Forms the vector from the observer to the object and applies a simple aberration
+    ///    correction using the relative velocity of the object.
+    ///
+    /// 5. **Conversion to equatorial coordinates**:
+    ///    Converts the corrected line-of-sight vector into apparent right ascension (RA)
+    ///    and declination (DEC).
+    ///
+    /// # Returns
+    ///
+    /// * `(alpha, delta)` – A tuple containing the **apparent right ascension** and
+    ///   **declination**, in **radians**.
+    ///
+    /// # Units
+    ///
+    /// * Positions: astronomical units (AU)
+    /// * Velocities: AU/day
+    /// * Angles: radians
+    /// * Time: Modified Julian Date (MJD)
+    ///
+    /// # Errors
+    ///
+    /// Returns an `OutfitError` if:
+    /// - Propagation of the orbit fails,
+    /// - JPL ephemeris data is unavailable,
+    /// - Reference frame transformation fails.
+    ///
+    /// # See also
+    ///
+    /// * [`solve_two_body_problem`] – Orbit propagation.
+    /// * [`pvobs`] – Computes observer geocentric position including Earth rotation.
+    /// * [`correct_aberration`] – Corrects apparent direction due to observer motion.
+    /// * [`cartesian_to_radec`] – Converts a Cartesian vector to (RA, DEC).
+    pub fn compute_apparent_position(
+        &self,
+        state: &Outfit,
+        equinoctial_element: &EquinoctialElements,
+        observer: &Observer,
+    ) -> Result<(f64, f64), OutfitError> {
+        // 1. Propagate asteroid position/velocity in ecliptic J2000
+        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
+            0.,
+            self.time - equinoctial_element.reference_epoch,
+            false,
+        )?;
+
+        // 2. Observation time in TT
+        let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
+
+        // 3. Earth's barycentric position in ecliptic J2000
+        let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
+
+        // 4. Build rotation from equatorial mean J2000 to ecliptic mean J2000
+        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
+        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
+        let matrix_elc_transform = Matrix3::from(rotpn(&ref_sys1, &ref_sys2)?);
+
+        let earth_pos_eclj2000 = matrix_elc_transform.transpose() * earth_position;
+        let cart_pos_ast_eclj2000 = matrix_elc_transform * cart_pos_ast;
+        let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
+
+        // 5. Observer heliocentric position
+        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider())?;
+        let xobs = geo_obs_pos + earth_pos_eclj2000;
+        let obs_on_earth = matrix_elc_transform * xobs;
+
+        // 6. Relative position and aberration correction
+        let relative_position = cart_pos_ast_eclj2000 - obs_on_earth;
+        let corrected_pos = correct_aberration(relative_position, cart_pos_vel_eclj2000);
+
+        // 7. Convert to RA/DEC
+        let (alpha, delta, _) = cartesian_to_radec(corrected_pos);
+        Ok((alpha, delta))
+    }
+
     /// Compute the normalized squared astrometric residuals (RA/DEC) between an observed position and a propagated ephemeris.
     ///
     /// This function compares the actual observed position (stored in `self`) to the expected astrometric position
@@ -126,68 +224,21 @@ impl Observation {
         equinoctial_element: &EquinoctialElements,
         observer: &Observer,
     ) -> Result<f64, OutfitError> {
-        // Propagate heliocentric position and velocity of the asteroid using a two-body model.
-        // Output is in the ecliptic mean J2000 reference frame.
-        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
-            0.,
-            self.time - equinoctial_element.reference_epoch,
-            false,
-        )?;
+        let (alpha, delta) =
+            self.compute_apparent_position(state, equinoctial_element, observer)?;
 
-        // Convert observation time to TT (Terrestrial Time) for ephemeris consistency
-        let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
+        // ΔRA with wrapping to [-π, π]
+        let mut diff_alpha = (self.ra - alpha) % DPI;
+        if diff_alpha > PI {
+            diff_alpha -= DPI;
+        }
 
-        // Get Earth's heliocentric position (barycentric if true is set) at observation epoch
-        let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
-
-        // Construct rotation matrix from equatorial mean J2000 to ecliptic mean J2000
-        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
-        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2)?;
-        let matrix_elc_transform = Matrix3::from(roteqec);
-
-        // Transform Earth's position to ecliptic J2000 frame
-        let earth_pos_eclj2000 = matrix_elc_transform.transpose() * earth_position;
-
-        // Transform asteroid's propagated position and velocity into ecliptic J2000 frame
-        let cart_pos_ast_eclj2000 = matrix_elc_transform * cart_pos_ast;
-        let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
-
-        // Compute the observer's geocentric position (accounts for Earth rotation, nutation, etc.)
-        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider())?;
-
-        // Observer's heliocentric position = Earth position + observer's geocentric offset
-        let xobs = geo_obs_pos + earth_pos_eclj2000;
-
-        // Transform observer's position to ecliptic J2000 frame
-        let obs_on_earth = matrix_elc_transform * xobs;
-
-        // Compute the vector from observer to asteroid in heliocentric frame
-        let relative_position = cart_pos_ast_eclj2000 - obs_on_earth;
-
-        // Apply aberration correction due to observer motion (velocity of asteroid required)
-        let corrected_pos = correct_aberration(relative_position, cart_pos_vel_eclj2000);
-
-        // Convert corrected position to equatorial coordinates (RA, DEC)
-        let (alpha, delta, _) = cartesian_to_radec(corrected_pos);
-
-        // Compute difference in right ascension (with wrapping modulo 2π)
-        let diff_alpha = (self.ra - alpha) % DPI;
-        let diff_alpha = if diff_alpha > PI {
-            diff_alpha - DPI
-        } else {
-            diff_alpha
-        };
-
-        // Compute difference in declination
         let diff_delta = self.dec - delta;
 
-        // Normalize residuals by astrometric uncertainties.
-        // RA is scaled by cos(DEC) to account for spherical projection
+        // Weighted RMS
         let rms_ra = (self.dec.cos() * (diff_alpha / self.error_ra)).powi(2);
         let rms_dec = (diff_delta / self.error_dec).powi(2);
 
-        // Return the total normalized squared residuals (RA² + DEC²)
         Ok(rms_ra + rms_dec)
     }
 }
@@ -390,6 +441,149 @@ pub(crate) fn observation_from_batch(
 mod test_observations {
 
     use super::*;
+
+    #[cfg(test)]
+    #[cfg(feature = "jpl-download")]
+    mod tests_compute_apparent_position {
+        use super::*;
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        use approx::assert_relative_eq;
+
+        /// Helper: construct a standard observer at Haleakalā Observatory.
+        fn haleakala_observer() -> Observer {
+            Observer::new(
+                203.744083, // longitude in degrees east
+                20.706944,  // latitude in degrees
+                3.05,       // elevation in km
+                Some("Haleakala".to_string()),
+                None,
+                None,
+            )
+        }
+
+        /// Helper: simple circular equinoctial elements for a 1 AU, zero inclination orbit.
+        fn simple_circular_elements(epoch: f64) -> EquinoctialElements {
+            EquinoctialElements {
+                reference_epoch: epoch,
+                semi_major_axis: 1.0,
+                eccentricity_sin_lon: 0.0,
+                eccentricity_cos_lon: 0.0,
+                tan_half_incl_sin_node: 0.0,
+                tan_half_incl_cos_node: 0.0,
+                mean_longitude: 0.0,
+            }
+        }
+
+        #[test]
+        fn test_compute_apparent_position_nominal() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0; // MJD
+            let equinoctial = simple_circular_elements(t_obs);
+
+            let obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 0.0,
+                dec: 0.0,
+                error_dec: 0.0,
+                time: t_obs,
+            };
+
+            let (ra, dec) = obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .expect("Computation should succeed");
+
+            assert!(ra.is_finite());
+            assert!(dec.is_finite());
+            assert!((0.0..2.0 * std::f64::consts::PI).contains(&ra));
+            assert!((-std::f64::consts::FRAC_PI_2..std::f64::consts::FRAC_PI_2).contains(&dec));
+        }
+
+        #[test]
+        fn test_compute_apparent_position_same_epoch() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_epoch = 60000.0;
+            let equinoctial = simple_circular_elements(t_epoch);
+
+            let obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 0.0,
+                dec: 0.0,
+                error_dec: 0.0,
+                time: t_epoch,
+            };
+
+            let (ra1, dec1) = obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+            let (ra2, dec2) = obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .unwrap();
+
+            // The same input should always produce the same result
+            assert_relative_eq!(ra1, ra2, epsilon = 1e-14);
+            assert_relative_eq!(dec1, dec2, epsilon = 1e-14);
+        }
+
+        #[test]
+        fn test_apparent_position_for_distant_object() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+            let t_obs = 59000.0;
+            let mut equinoctial = simple_circular_elements(t_obs);
+
+            // Objet très éloigné
+            equinoctial.semi_major_axis = 100.0;
+
+            let obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 0.0,
+                dec: 0.0,
+                error_dec: 0.0,
+                time: t_obs,
+            };
+
+            let (ra, dec) = obs
+                .compute_apparent_position(state, &equinoctial, &observer)
+                .expect("Should compute apparent position for distant object");
+
+            assert!(ra.is_finite());
+            assert!(dec.is_finite());
+        }
+
+        #[test]
+        fn test_compute_apparent_position_propagation_failure() {
+            let state = &OUTFIT_HORIZON_TEST.0;
+            let observer = haleakala_observer();
+
+            // Invalid orbital elements to force failure in solve_two_body_problem
+            let equinoctial = EquinoctialElements {
+                reference_epoch: 59000.0,
+                semi_major_axis: -1.0, // Physically invalid
+                eccentricity_sin_lon: 0.0,
+                eccentricity_cos_lon: 0.0,
+                tan_half_incl_sin_node: 0.0,
+                tan_half_incl_cos_node: 0.0,
+                mean_longitude: 0.0,
+            };
+
+            let obs = Observation {
+                observer: 0,
+                ra: 0.0,
+                error_ra: 0.0,
+                dec: 0.0,
+                error_dec: 0.0,
+                time: 59000.0,
+            };
+
+            let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+            assert!(result.is_err(), "Invalid elements should trigger an error");
+        }
+    }
 
     #[test]
     fn test_new_observation() {
