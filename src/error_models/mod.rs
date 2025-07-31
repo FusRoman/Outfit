@@ -1,3 +1,78 @@
+//! # Astrometric error models
+//!
+//! This module provides tools to **handle observation error models** used in orbit
+//! determination. Error models define the astrometric biases and RMS values
+//! associated with each observatory and star catalog, as recommended in the literature
+//! (e.g., FCCT14, CBM10, VFCC17).
+//!
+//! ## Public API
+//!
+//! ### [`crate::error_models::ErrorModel`]
+//! Enumeration of the supported astrometric error models:
+//!
+//! - `ErrorModel::FCCT14` – Farnocchia, Chesley, Chamberlin & Tholen (2014)
+//! - `ErrorModel::CBM10` – Chesley, Baer & Monet (2010)
+//! - `ErrorModel::VFCC17` – Vereš, Farnocchia, Chesley & Chamberlin (2017)
+//!
+//! You can create an [`crate::error_models::ErrorModel`] from a string with:
+//!
+//! ```rust, ignore
+//! use outfit::error_models::ErrorModel;
+//! let model: ErrorModel = "FCCT14".parse().unwrap();
+//! ```
+//!
+//! ### [`crate::error_models::ErrorModelData`]
+//!
+//! ```text
+//! type ErrorModelData = HashMap<(MpcCode, CatalogCode), (f32, f32)>
+//! ```
+//!
+//! This map associates an observatory (MPC code) and a star catalog code
+//! with a pair `(bias_RMS, declination_RMS)`.
+//!
+//! The contents are loaded from reference files distributed with the crate.
+//!
+//! ### `ErrorModel::read_error_model_file`
+//!
+//! ```rust, ignore
+//! use outfit::error_models::ErrorModel;
+//!
+//! let error_map = ErrorModel::FCCT14.read_error_model_file().unwrap();
+//! println!("{} entries", error_map.len());
+//! ```
+//!
+//! This function reads the internal rules for the chosen model
+//! and returns a [`crate::error_models::ErrorModelData`] structure ready to be queried.
+//!
+//! ### [`crate::error_models::get_bias_rms`]
+//!
+//! ```rust
+//! use outfit::error_models::{ErrorModel, get_bias_rms};
+//!
+//! let data = ErrorModel::FCCT14.read_error_model_file().unwrap();
+//! if let Some((bias_ra, bias_dec)) = get_bias_rms(&data, "699".to_string(), "c".to_string()) {
+//!     println!("Bias for MPC 699: RA = {bias_ra}, Dec = {bias_dec}");
+//! }
+//! ```
+//!
+//! This function looks up the `(RMS in RA, RMS in Dec)` for a given observatory
+//! and star catalog code. If no exact match is found, the function falls back to
+//! generic values (e.g. `ALL:c`).
+//!
+//! ## Typical usage
+//!
+//! 1. Choose an error model (e.g. `ErrorModel::FCCT14`).
+//! 2. Load its table using [`read_error_model_file`](crate::error_models::ErrorModel::read_error_model_file).
+//! 3. Use [`crate::error_models::get_bias_rms`] to obtain astrometric uncertainties for weighting residuals.
+//!
+//! ## References
+//!
+//! - Farnocchia, D., Chesley, S. R., Chamberlin, A. B., & Tholen, D. J. (2014)
+//! - Chesley, S. R., Baer, J., & Monet, D. G. (2010)
+//! - Vereš, P., Farnocchia, D., Chesley, S. R., & Chamberlin, A. B. (2017)
+//!
+//! These tables are essential for **realistic orbit determination** since they
+//! ensure that observations are weighted according to their expected precision.
 mod vfcc17;
 
 use std::{collections::HashMap, str::FromStr};
@@ -108,7 +183,36 @@ where
 }
 
 impl ErrorModel {
-    pub(crate) fn read_error_model_file(&self) -> Result<ErrorModelData, OutfitError> {
+    /// Load the internal RMS/bias table for this astrometric error model.
+    ///
+    /// This function parses the reference file corresponding to the selected
+    /// [`ErrorModel`] variant (FCCT14, CBM10, or VFCC17) and returns a
+    /// [`ErrorModelData`] map containing the weighting coefficients
+    /// (RMS in right ascension and declination).
+    ///
+    /// # Returns
+    ///
+    /// A [`Result`] containing:
+    /// * `Ok(ErrorModelData)` – A hash map where each key is a pair `(MpcCode, CatalogCode)`
+    ///   and the value is a tuple `(rms_ra, rms_dec)` in arcseconds.
+    /// * `Err(OutfitError)` – If the reference file could not be parsed.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use outfit::error_models::ErrorModel;
+    ///
+    /// // Load FCCT14 error model data
+    /// let data = ErrorModel::FCCT14.read_error_model_file().unwrap();
+    ///
+    /// println!("Number of entries: {}", data.len());
+    ///
+    /// // Use the map later with `get_bias_rms`
+    /// ```
+    ///
+    /// # See also
+    /// * [`get_bias_rms`] – Look up the bias and RMS values for a given station/catalog.
+    pub fn read_error_model_file(&self) -> Result<ErrorModelData, OutfitError> {
         let error_map: ErrorModelData = match self {
             ErrorModel::FCCT14 => parse_full_file(FCCT14_RULES, parse_full_line)?,
             ErrorModel::CBM10 => parse_full_file(CBM10_RULES, parse_full_line)?,
@@ -137,7 +241,49 @@ impl FromStr for ErrorModel {
     }
 }
 
-pub(crate) fn get_bias_rms(
+/// Retrieve the astrometric bias and RMS values for a given observatory (MPC code)
+/// and star catalog code from a preloaded [`ErrorModelData`] table.
+///
+/// This function searches for a matching entry in the following priority order:
+///
+/// 1. **Exact match**: `(mpc_code, catalog_code)`
+/// 2. **Generic catalog fallback for the same observatory**:
+///    * `(mpc_code, "e")` – generic `e` entry (elliptical)
+//     * `(mpc_code, "c")` – generic `c` entry (catalog-specific default)
+/// 3. **Global fallback** (for any observatory):
+///    * `("ALL", catalog_code)`
+///    * `("ALL", "e")`
+///    * `("ALL", "c")`
+///
+/// The returned pair `(rms_ra, rms_dec)` corresponds to the weighting factors
+/// (typically in arcseconds) used for astrometric residuals.
+///
+/// # Arguments
+///
+/// * `error_model` – The [`ErrorModelData`] hash map produced by
+///   [`ErrorModel::read_error_model_file`](crate::error_models::ErrorModel::read_error_model_file).
+/// * `mpc_code` – The Minor Planet Center observatory code.
+/// * `catalog_code` – The star catalog identifier (single letter or string).
+///
+/// # Returns
+///
+/// * `Some((rms_ra, rms_dec))` – If a match is found in the table.
+/// * `None` – If no matching entry exists (very rare).
+///
+/// # Example
+///
+/// ```rust, ignore
+/// use outfit::error_models::{ErrorModel, get_bias_rms};
+///
+/// // Load error model data
+/// let table = ErrorModel::FCCT14.read_error_model_file().unwrap();
+///
+/// // Query bias/RMS for observatory 699 (Catalina) with catalog code "c"
+/// if let Some((rms_ra, rms_dec)) = get_bias_rms(&table, "699".to_string(), "c".to_string()) {
+///     println!("699 / c -> RMS: RA = {rms_ra}, Dec = {rms_dec}");
+/// }
+/// ```
+pub fn get_bias_rms(
     error_model: &ErrorModelData,
     mpc_code: MpcCode,
     catalog_code: CatalogCode,
