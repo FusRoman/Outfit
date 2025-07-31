@@ -39,7 +39,7 @@ use crate::{
 ///
 /// # See also
 /// * [`rotmt`] – constructs rotation matrices using this obliquity
-/// * [`rotpn`] – applies obliquity rotation when transforming between ecliptic and equatorial frames
+/// * [`rotpn`](crate::ref_system::rotpn) – applies obliquity rotation when transforming between ecliptic and equatorial frames
 pub fn obleq(tjm: f64) -> Radian {
     // Obliquity coefficients
     let ob0 = ((23.0 * 3600.0 + 26.0 * 60.0) + 21.448) * RADSEC;
@@ -67,8 +67,8 @@ pub fn obleq(tjm: f64) -> Radian {
 /// Returns
 /// --------
 /// * A tuple `(Δψ, Δε)`:
-///     - `Δψ`: nutation in longitude [arcseconds]
-///     - `Δε`: nutation in obliquity [arcseconds]
+///     - `Δψ`: nutation in longitude \[arcseconds\]
+///     - `Δε`: nutation in obliquity \[arcseconds\]
 ///
 /// Description
 /// -----------
@@ -95,7 +95,7 @@ pub fn obleq(tjm: f64) -> Radian {
 ///
 /// # See also
 /// * [`rnut80`] – uses these angles to build the nutation rotation matrix
-/// * [`rotpn`] – applies nutation when transforming between Equt and Equm systems
+/// * [`rotpn`](crate::ref_system::rotpn) – applies nutation when transforming between Equt and Equm systems
 pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
     // Compute the fundamental lunar and solar arguments (in radians)
     let t1 = (tjm - T2000) / 36525.0;
@@ -383,7 +383,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
 /// * [`nutn80`] – returns the nutation angles Δψ, Δε in arcseconds
 /// * [`obleq`] – computes the mean obliquity ε (radians)
 /// * [`rotmt`] – builds the individual axis rotation matrices
-/// * [`rotpn`] – uses `rnut80` to transform between Equm and Equt systems
+/// * [`rotpn`](crate::ref_system::rotpn) – uses `rnut80` to transform between Equm and Equt systems
 pub fn rnut80(tjm: f64) -> Matrix3<f64> {
     // Mean obliquity of the ecliptic at date (ε)
     let epsm = obleq(tjm);
@@ -485,7 +485,7 @@ pub fn equequ(tjm: f64) -> f64 {
 ///
 /// # See also
 /// * [`rotmt`] – constructs the rotation matrices used here
-/// * [`rotpn`] – uses `prec` when converting between epochs `"OFDATE"` and `"J2000"`
+/// * [`rotpn`](crate::ref_system::rotpn) – uses `prec` when converting between epochs `"OFDATE"` and `"J2000"`
 pub fn prec(tjm: f64) -> Matrix3<f64> {
     // Precession polynomial coefficients (in radians)
     let zed = 0.6406161 * RADEG;

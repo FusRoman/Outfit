@@ -147,8 +147,8 @@ impl Observation {
     ///
     /// # See also
     ///
-    /// * [`solve_two_body_problem`] – Orbit propagation.
-    /// * [`pvobs`] – Computes observer geocentric position including Earth rotation.
+    /// * [`EquinoctialElements::solve_two_body_problem`] – Orbit propagation.
+    /// * [`Observer::pvobs`] – Computes observer geocentric position including Earth rotation.
     /// * [`correct_aberration`] – Corrects apparent direction due to observer motion.
     /// * [`cartesian_to_radec`] – Converts a Cartesian vector to (RA, DEC).
     pub fn compute_apparent_position(
@@ -230,10 +230,10 @@ impl Observation {
     /// Returns an `OutfitError` if ephemeris data or propagation fails (e.g. missing JPL ephemeris).
     ///
     /// # See also
-    /// * [`pvobs`] – Computes geocentric position of the observer including Earth rotation and nutation.
+    /// * [`Observer::pvobs`] – Computes geocentric position of the observer including Earth rotation and nutation.
     /// * [`correct_aberration`] – Applies aberration correction to the apparent direction of the body.
     /// * [`cartesian_to_radec`] – Converts 3D Cartesian vectors into equatorial coordinates (RA/DEC).
-    /// * [`solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
+    /// * [`EquinoctialElements::solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
     pub fn ephemeris_error(
         &self,
         state: &Outfit,

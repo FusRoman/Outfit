@@ -259,7 +259,7 @@ trait ObservationsExt {
 /// ## Purpose
 ///
 /// The main goal of this trait is to automate the process of:
-/// 1. Building candidate triplets of observations (see [`compute_triplets`]),
+/// 1. Building candidate triplets of observations (see [`compute_triplets`](ObservationsExt::compute_triplets)),
 /// 2. Estimating a preliminary orbit for each triplet using the Gauss method,
 /// 3. Perturbing triplets with Gaussian noise to simulate observational uncertainties,
 /// 4. Selecting the orbit that minimizes the root-mean-square (RMS) of astrometric residuals
@@ -308,7 +308,7 @@ trait ObservationsExt {
 ///
 /// 4. **Orbit evaluation:**  
 ///    Each preliminary orbit is propagated and compared to the full observation arc using
-///    [`rms_orbit_error`]. The orbit with the smallest RMS is returned.
+///    [`ObservationsExt::rms_orbit_error`]. The orbit with the smallest RMS is returned.
 ///
 /// ## Performance considerations
 ///
@@ -341,7 +341,7 @@ pub trait ObservationIOD {
     /// observation triplets generated from the dataset. The process includes:
     ///
     /// 1. **Error calibration**:
-    ///    Observations are first preprocessed with [`apply_batch_rms_correction`] to account for
+    ///    Observations are first preprocessed with [`ObservationsExt::apply_batch_rms_correction`] to account for
     ///    temporal clustering and observer-specific error models.
     ///
     /// 2. **Triplet generation**:
@@ -358,7 +358,7 @@ pub trait ObservationIOD {
     ///
     /// 4. **Orbit estimation and selection**:
     ///    For each (possibly perturbed) triplet, a preliminary orbit is computed with the Gauss method.
-    ///    The resulting orbit is evaluated over the full set of observations using [`rms_orbit_error`].
+    ///    The resulting orbit is evaluated over the full set of observations using [`ObservationsExt::rms_orbit_error`].
     ///    The orbit with the smallest RMS is returned.
     ///
     /// # Arguments
@@ -388,7 +388,7 @@ pub trait ObservationIOD {
     ///
     /// # Notes
     ///
-    /// - RMS values are computed with [`rms_orbit_error`], which accounts for
+    /// - RMS values are computed with [`ObservationsExt::rms_orbit_error`], which accounts for
     ///   light-time correction and ephemeris propagation.
     /// - Each triplet can produce several preliminary orbit candidates due to
     ///   noise realizations.

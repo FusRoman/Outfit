@@ -22,10 +22,10 @@ use std::ops::Deref;
 /// * Both variants wrap a [`KeplerianElements`] object, which contains the classical orbital parameters.
 /// * This type implements [`Deref`] to `KeplerianElements`, allowing direct access to orbital fields
 ///   using dot notation (e.g., `result.mean_anomaly`). While idiomatic in Rust, this behavior may be
-///   surprising in some contexts. Use [`get_orbit`] if you prefer to make the access explicit.
+///   surprising in some contexts. Use [`GaussResult::get_orbit`] if you prefer to make the access explicit.
 ///
 /// # See also
-/// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – Struct representing the orbital elements.
+/// * [`KeplerianElements`] – Struct representing the orbital elements.
 /// * [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit) – Main entry point that returns a `GaussResult`.
 /// * [`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html) – trait allowing ergonomic field access.
 #[derive(PartialEq, Clone, Debug)]
@@ -82,7 +82,7 @@ impl GaussResult {
 
     /// Borrow the inner [`KeplerianElements`] struct immutably.
     ///
-    /// This is equivalent to [`get_orbit`], and provided for naming consistency
+    /// This is equivalent to [`GaussResult::get_orbit`], and provided for naming consistency
     /// when used in generic contexts or with other enums that implement `as_inner`.
     ///
     /// Returns
