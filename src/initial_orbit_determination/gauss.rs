@@ -29,9 +29,9 @@ use rand_distr::{Distribution, Normal};
 /// Fields
 /// -------
 /// * `idx_obs`: indices of the three observations in the full dataset (typically used for traceability).
-/// * `ra`: right ascensions [radians] of the three observations, in the ICRS frame.
-/// * `dec`: declinations [radians] of the three observations, in the ICRS frame.
-/// * `time`: observation times [MJD TT], i.e., Modified Julian Dates in Terrestrial Time scale.
+/// * `ra`: right ascensions \[radians\] of the three observations, in the ICRS frame.
+/// * `dec`: declinations \[radians\] of the three observations, in the ICRS frame.
+/// * `time`: observation times \[MJD TT\], i.e., Modified Julian Dates in Terrestrial Time scale.
 /// * `observer_position`: 3×3 matrix of the observer’s heliocentric position vectors at each observation time,
 ///   with:
 ///   - columns = observation epochs,
@@ -47,7 +47,7 @@ use rand_distr::{Distribution, Normal};
 /// * [`GaussObs::with_observer_position`] – constructor that computes this struct from RA/DEC/times
 /// * [`helio_obs_pos`] – computes heliocentric observer positions
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) struct GaussObs {
+pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
     pub(crate) ra: Vector3<Radian>,
     pub(crate) dec: Vector3<Radian>,
@@ -77,8 +77,8 @@ impl GaussObs {
     /// ---------
     /// * `state`: reference to the [`Outfit`] context, providing access to JPL ephemerides and Earth orientation.
     /// * `idx_obs`: index triplet identifying the observation triplet used for initial orbit determination.
-    /// * `ra`: vector of right ascension values [radians] corresponding to the three observations.
-    /// * `dec`: vector of declination values [radians] corresponding to the three observations.
+    /// * `ra`: vector of right ascension values \[radians\] corresponding to the three observations.
+    /// * `dec`: vector of declination values \[radians\] corresponding to the three observations.
     /// * `mjd_time`: observation times in Modified Julian Date (TT scale).
     /// * `observer`: reference to the [`Observer`] corresponding to the observing site.
     ///
@@ -282,8 +282,8 @@ impl GaussObs {
     /// * This method implements the initialization described in classic orbit determination literature.
     ///
     /// # See also
-    /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant used for time normalization.
-    fn gauss_prelim(&self) -> GaussPrelimResult {
+    /// * [`GAUSS_GRAV`] – Gaussian gravitational constant used for time normalization.
+    pub fn gauss_prelim(&self) -> GaussPrelimResult {
         let tau1 = GAUSS_GRAV * (self.time[0] - self.time[1]);
         let tau3 = GAUSS_GRAV * (self.time[2] - self.time[1]);
         let tau13 = tau3 - tau1;
@@ -451,7 +451,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::accept_root`] – filters valid roots using this method.
-    /// * [`VLIGHT_AU`](crate::constants::VLIGHT_AU) – speed of light in AU/day.
+    /// * [`VLIGHT_AU`] – speed of light in AU/day.
     fn position_vector_and_reference_epoch(
         &self,
         unit_matrix: &Matrix3<f64>,
@@ -502,7 +502,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::position_vector_and_reference_epoch`] – computes `ast_pos_vector` used as input here.
-    /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant.
+    /// * [`GAUSS_GRAV`] – Gaussian gravitational constant.
     fn gibbs_correction(
         &self,
         ast_pos_vector: &Matrix3<f64>,
@@ -641,7 +641,7 @@ impl GaussObs {
     /// # See also
     /// * [`rotpn`] – computes the rotation matrix between celestial reference frames.
     /// * [`ccek1`] – converts position and velocity vectors to orbital elements.
-    /// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – definition of the orbital elements struct.
+    /// * [`KeplerianElements`] – definition of the orbital elements struct.
     fn compute_orbit_from_state(
         &self,
         &asteroid_position: &Vector3<f64>,

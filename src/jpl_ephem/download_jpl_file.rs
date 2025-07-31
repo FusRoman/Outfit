@@ -151,8 +151,8 @@ impl EphemFilePath {
     /// On windows, the cache directory is C:\Users\<username>\AppData\Local\outfit_cache\jpl_ephem
     ///
     /// The full path after jpl_ephem should be:
-    /// * jpl_horizon/<filename> for JPL Horizon files
-    /// * naif/<filename> for NAIF files
+    /// * `jpl_horizon/<filename>` for JPL Horizon files
+    /// * `naif/<filename>` for NAIF files
     ///
     /// If the file does not exist and the feature 'jpl-download' is activated,
     /// the file will be downloaded from the JPL website.

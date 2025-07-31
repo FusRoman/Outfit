@@ -157,7 +157,7 @@ fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
     Ok((input, [ipt_13, ipt_14]))
 }
 
-/// Read the IPT[13] and IPT[14] elements from the file
+/// Read the IPT\[13\] and IPT\[14\] elements from the file
 ///
 /// Arguments
 /// ---------
@@ -167,7 +167,7 @@ fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
 ///
 /// Returns
 /// -------
-/// * IPT[13] and IPT[14] elements
+/// * IPT\[13\] and IPT\[14\] elements
 fn read_ipt_13_14(
     file: &mut BufReader<File>,
     ncon: u32,

@@ -7,13 +7,29 @@ use crate::{
 
 use super::constants::{EPS, T2000};
 
+/// Represents the reference epoch associated with a celestial reference frame.
+///
+/// The epoch defines the time at which the frame (mean equator, true equator,
+/// ecliptic, etc.) is valid. It influences the precession and nutation corrections
+/// used to transform coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RefEpoch {
+    /// Standard J2000 epoch, corresponding to MJD 51544.5 (TT).
     J2000,
+
+    /// A custom epoch, expressed as a Modified Julian Date (TT).
+    ///
+    /// For example, `RefEpoch::Epoch(60000.0)` corresponds to
+    /// MJD = 60000.0 (TT), which can be used for "of-date" transformations.
     Epoch(f64),
 }
 
 impl RefEpoch {
+    /// Return the epoch as a Modified Julian Date (TT).
+    ///
+    /// # Returns
+    /// * For [`RefEpoch::J2000`]: returns the constant [`T2000`].
+    /// * For [`RefEpoch::Epoch(d)`]: returns the stored `d`.
     pub fn date(&self) -> f64 {
         match *self {
             RefEpoch::J2000 => T2000,
@@ -22,20 +38,33 @@ impl RefEpoch {
     }
 }
 
+/// Represents a celestial reference system, including both
+/// the **coordinate basis** (equatorial/ecliptic) and the **epoch**.
+///
+/// # Variants
+///
+/// * `Equm(RefEpoch)` – **Equatorial mean**:
+///   Based on the mean equator and equinox (precession only).
+///
+/// * `Equt(RefEpoch)` – **Equatorial true**:
+///   Based on the true equator and equinox (precession + nutation).
+///
+/// * `Eclm(RefEpoch)` – **Ecliptic mean**:
+///   Based on the mean ecliptic and mean equinox (precession + obliquity).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RefSystem {
-    // Equatorial Mean, equatorial coordinates based on equator and mean equinox
-    // at a given epoch (J2000 for instance)
-    // (corrected for precession but not for nutation)
+    /// Equatorial mean (precession only, no nutation)
     Equm(RefEpoch),
-    // Equatorial True (same as Equm but corrected for precession and nutation)
+
+    /// Equatorial true (precession + nutation)
     Equt(RefEpoch),
-    // Ecliptic mean, ecliptic coordinates based on ecliptic and mean equinox
-    // at a given epoch (J2000 for instance)
+
+    /// Ecliptic mean (precession + obliquity)
     Eclm(RefEpoch),
 }
 
 impl RefSystem {
+    /// Returns the [`RefEpoch`] associated with this reference system.
     pub fn epoch(&self) -> RefEpoch {
         match *self {
             RefSystem::Equm(e) => e,
@@ -44,10 +73,17 @@ impl RefSystem {
         }
     }
 
-    /// Compare only the variant (Equm/Equt/Eclm) and ignores the epoch value.
+    /// Compare only the type of system (Equm/Equt/Eclm) while ignoring the epoch.
     ///
-    /// Returns `true` if both `RefSystem` values are of the same variant,
-    /// regardless of the inner `RefEpoch`.
+    /// # Returns
+    /// `true` if `self` and `other` are of the same variant, regardless of epoch.
+    ///
+    /// # Example
+    ///
+    /// ```rust, ignore
+    /// assert!(RefSystem::Equm(RefEpoch::J2000)
+    ///     .variant_eq(&RefSystem::Equm(RefEpoch::Epoch(60000.0))));
+    /// ```
     pub fn variant_eq(&self, other: &RefSystem) -> bool {
         matches!(
             (self, other),
@@ -57,6 +93,53 @@ impl RefSystem {
         )
     }
 
+    /// Convert the current reference system to an **equatorial mean (Equm)** system
+    /// at a specified target epoch.
+    ///
+    /// This function is typically the **first step** in a reference frame transformation.
+    /// It normalizes the current frame so that:
+    ///
+    /// * The reference plane becomes **equatorial** (removing ecliptic obliquity if needed).
+    /// * Nutation effects are removed (if the current frame is true equator/equinox).
+    /// * The epoch is converted to the requested target epoch (if necessary) using precession.
+    ///
+    /// After this transformation, the result is always an `Equm` system, ready for
+    /// further transformations (e.g., conversion to another system with `transform_to_target_system`).
+    ///
+    /// # Behavior
+    ///
+    /// Depending on the **current epoch** and **frame type**, the following actions are performed:
+    ///
+    /// ### If the current epoch is `J2000`
+    /// - `Eclm(J2000)` → `Equm(J2000)` using an obliquity rotation.
+    /// - `Equt(J2000)` → `Equm(J2000)` using the **inverse** nutation matrix.
+    /// - `Equm(J2000)` → `Equm(target_epoch)` using a **precession** matrix.
+    ///
+    /// ### If the current epoch is a custom epoch `Epoch(d)`
+    /// - `Eclm(d)` → `Equm(d)` using an obliquity rotation.
+    /// - `Equt(d)` → `Equm(d)` using the **inverse** nutation matrix.
+    /// - `Equm(d)` → `Equm(J2000)` using the **transpose** of the precession matrix.
+    ///
+    /// Note that when the starting epoch is not J2000, this function may bring
+    /// the frame **back to J2000** before applying other transformations.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(next_ref, rot)` where:
+    /// * `next_ref` – The new reference system, always `RefSystem::Equm`.
+    /// * `rot` – The 3×3 rotation matrix to convert a vector from the original frame to `next_ref`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Err(OutfitError)` if the conversion request is redundant, for example
+    /// `Equm(J2000)` to `Equm(J2000)`.
+    ///
+    /// # See also
+    ///
+    /// * [`RefSystem::transform_to_target_system`] – For changing between Equm/Equt/Eclm once the epochs match.
+    /// * [`prec`] – Precession matrix (IAU 1976).
+    /// * [`rnut80`] – Nutation model (IAU 1980).
+    /// * [`obleq`] – Mean obliquity of the ecliptic.
     fn transform_to_equm_date(
         &self,
         target_epoch: RefEpoch,
@@ -85,6 +168,29 @@ impl RefSystem {
         }
     }
 
+    /// Apply a **system-type transformation** (nutation or obliquity) without changing the epoch.
+    ///
+    /// This function converts between the three reference system variants
+    /// (`Equm`, `Equt`, `Eclm`) at a fixed epoch. Depending on the current system:
+    ///
+    /// * `Equt(e)` → `Equm(e)`: removes nutation (applies the inverse nutation matrix).
+    /// * `Eclm(e)` → `Equm(e)`: removes obliquity (rotates back from ecliptic to equatorial).
+    /// * `Equm(e)` → `Equt(e)`: applies nutation.
+    /// * `Equm(e)` → `Eclm(e)`: applies obliquity rotation.
+    ///
+    /// This function **does not** handle precession or epoch changes; it only
+    /// switches between system types at the same epoch.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(next_ref, rot)` where:
+    /// * `next_ref` – The resulting reference system after applying the transformation.
+    /// * `rot` – A 3×3 rotation matrix that converts coordinates from `self` to `next_ref`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Err(OutfitError)` if no transformation is needed
+    /// (e.g. Equm → Equm).
     fn transform_to_target_system(
         &self,
         target_system: RefSystem,
@@ -103,55 +209,70 @@ impl RefSystem {
     }
 }
 
-/// Compute the rotation matrix between two celestial reference systems and epochs.
+/// Compute the 3×3 rotation matrix between two celestial reference systems and epochs.
 ///
-/// This function builds a composite rotation matrix that transforms coordinates
-/// from a source reference system and epoch to a target system and epoch. The supported
-/// systems are:
-/// - `"Equm"`: equatorial mean (precession only)
-/// - `"Equt"`: equatorial true (precession + nutation)
-/// - `"Eclm"`: ecliptic mean (precession + obliquity)
+/// This function builds a composite rotation matrix that transforms a vector from a **source**
+/// reference system (with its epoch) to a **destination** reference system (with its epoch).
 ///
-/// Epochs can be either:
-/// - `"J2000"`: standard epoch (fixed at MJD 51544.5)
-/// - `"OFDATE"`: user-specified epoch (e.g., time of observation)
+/// The supported reference system variants are:
+/// - [`RefSystem::Equm`] – Equatorial mean (precession only),
+/// - [`RefSystem::Equt`] – Equatorial true (precession + nutation),
+/// - [`RefSystem::Eclm`] – Ecliptic mean (precession + obliquity).
 ///
-/// If the two systems differ in reference frame and/or epoch, the rotation is assembled
-/// by chaining a sequence of elementary transformations: obliquity rotation, nutation,
-/// and/or precession, passing if necessary through the equatorial mean J2000 frame.
+/// Supported epochs:
+/// - [`RefEpoch::J2000`] – Standard J2000 epoch (fixed at MJD 51544.5),
+/// - [`RefEpoch::Epoch`] – Epoch tied to a specific date (e.g. time of observation).
 ///
-/// Arguments
-/// ---------
-/// * `rot`: mutable 3×3 array to store the resulting rotation matrix.
-/// * `rsys1`: name of the source reference system (`"Equm"`, `"Equt"`, `"Eclm"`).
-/// * `epoch1`: epoch of the source system (`"J2000"` or `"OFDATE"`).
-/// * `date1`: time of the source system in MJD TT (only used if `epoch1 == "OFDATE"`).
-/// * `rsys2`: name of the target reference system.
-/// * `epoch2`: epoch of the target system.
-/// * `date2`: time of the target system in MJD TT (only used if `epoch2 == "OFDATE"`).
+/// ## Transformation procedure
 ///
-/// Output
-/// -------
-/// * `rot`: the rotation matrix such that `x₂ = rot · x₁`, where `x₁` is a vector
-///   in the source system and `x₂` the same vector expressed in the target system.
+/// If the two frames differ by epoch and/or system, the resulting rotation matrix is constructed
+/// as a product of simpler transformations:
 ///
-/// Remarks
-/// -------
-/// * The rotation is built iteratively, updating the internal state until the final system/epoch is reached.
-/// * Each step composes the transformation matrix `rot` from right to left.
-/// * Precession uses the IAU 1976 model (`prec`), nutation uses IAU 1980 (`rnut80`), and obliquity from `obleq`.
-/// * The transformation path may pass through `"Equm", "J2000"` as an intermediate canonical frame.
+/// 1. **Epoch alignment** – Applies precession to match the epoch of the destination frame.
+/// 2. **System alignment** – Applies nutation and/or obliquity rotation to convert between
+///    equatorial/ecliptic and mean/true frames.
 ///
-/// Panics
-/// -------
-/// * If an unsupported reference system or epoch is passed.
-/// * If more than 20 transformation steps are required (safety cap).
+/// Internally, transformations may pass through the canonical frame
+/// **Equatorial Mean J2000** as an intermediate step.
+///
+/// The resulting rotation satisfies:
+///
+/// ```text
+/// x_dst = R · x_src
+/// ```
+///
+/// where `x_src` are coordinates in the source frame, and `x_dst` in the destination frame.
+///
+/// # Arguments
+///
+/// * `src` – The source reference frame, including its epoch.
+/// * `dst` – The destination reference frame, including its epoch.
+///
+/// # Returns
+///
+/// A [`Matrix3<f64>`] that rotates vectors from `src` to `dst`.
+///
+/// # Algorithm details
+///
+/// * Precession model: IAU 1976 (`prec`)
+/// * Nutation model: IAU 1980 (`rnut80`)
+/// * Mean obliquity: [`obleq`] (in radians)
+///
+/// The algorithm proceeds iteratively, modifying an internal reference frame (`current`) until
+/// it matches the target frame. The cumulative product of all stepwise rotations is returned.
+///
+/// # Errors
+///
+/// Returns an [`OutfitError`] if:
+/// * An unsupported reference system or epoch is encountered,
+/// * The transformation does not converge within 20 iterations (safety cap).
 ///
 /// # See also
+///
 /// * [`prec`] – IAU 1976 precession matrix
 /// * [`rnut80`] – IAU 1980 nutation model
-/// * [`rotmt`] – rotation matrix around X/Y/Z axes
-/// * [`obleq`] – mean obliquity of the ecliptic (in radians)
+/// * [`rotmt`] – Rotation around a principal axis
+/// * [`obleq`] – Mean obliquity of the ecliptic
 pub fn rotpn(src: &RefSystem, dst: &RefSystem) -> Result<Matrix3<f64>, OutfitError> {
     let mut current = *src;
     let mut rotation = Matrix3::identity();

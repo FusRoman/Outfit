@@ -98,8 +98,8 @@ impl Observer {
     /// Returns
     /// --------
     /// * `(dx, dv)` – Tuple of:
-    ///     - `dx`: observer geocentric position vector in ecliptic mean J2000 frame [AU].
-    ///     - `dv`: observer velocity vector due to Earth's rotation, in the same frame [AU/day].
+    ///     - `dx`: observer geocentric position vector in ecliptic mean J2000 frame \[AU\].
+    ///     - `dv`: observer velocity vector due to Earth's rotation, in the same frame \[AU/day\].
     ///
     /// Remarks
     /// -------

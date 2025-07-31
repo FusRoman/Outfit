@@ -267,8 +267,8 @@ impl Observation {
 ///
 /// Arguments
 /// ---------
-/// * `xrel`: relative position vector from observer to object [AU].
-/// * `vrel`: velocity of the observer relative to the barycenter [AU/day].
+/// * `xrel`: relative position vector from observer to object \[AU\].
+/// * `vrel`: velocity of the observer relative to the barycenter \[AU/day\].
 ///
 /// Returns
 /// --------
@@ -288,7 +288,7 @@ impl Observation {
 /// * This function does **not** normalize the output.
 /// * Suitable for use in astrometric modeling or when computing apparent direction
 ///   of celestial objects as seen from a moving observer.
-fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
+pub fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
     let norm_vector = xrel.norm();
     let dt = norm_vector / VLIGHT_AU;
     xrel - dt * vrel
