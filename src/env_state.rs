@@ -1,3 +1,59 @@
+//! # Outfit environment state
+//!
+//! This module defines [`crate::env_state::OutfitEnv`], the **shared environment object** used across
+//! the `Outfit` library. It provides access to:
+//!
+//! - A persistent **HTTP client** (for downloading ephemerides, observatory lists, etc.).
+//! - A **UT1 provider** from [hifitime](https://docs.rs/hifitime) to handle Earth rotation
+//!   parameters from JPL.
+//!
+//! This object is designed to be **cheaply cloneable** and passed to algorithms
+//! that require access to external data sources or Earth orientation models.
+//!
+//! ## Overview
+//!
+//! The main responsibilities of `OutfitEnv` are:
+//!
+//! 1. Manage a global [`ureq::Agent`] HTTP client with sensible default settings.
+//! 2. Download and initialize an [`hifitime::ut1::Ut1Provider`] from JPL’s `latest_eop2.long` file
+//!    (Earth orientation parameters) at startup.
+//! 3. Provide simple utilities for performing HTTP GET requests.
+//!
+//! ## Structure
+//!
+//! ```text
+//! OutfitEnv
+//! ├── http_client  (ureq::Agent)
+//! └── ut1_provider (hifitime::Ut1Provider)
+//! ```
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use outfit::env_state::OutfitEnv;
+//!
+//! // Create a new environment (downloads UT1 data from JPL)
+//! let env = OutfitEnv::new();
+//!
+//! // Access the UT1 provider
+//! let ut1 = &env.ut1_provider;
+//!
+//! // Make a GET request using the built-in HTTP client
+//! let response = env.get_from_url("https://ssd.jpl.nasa.gov/api/horizons.api");
+//! println!("Response: {}", &response[..100.min(response.len())]);
+//! ```
+//!
+//! ## Notes
+//!
+//! - The [`crate::env_state::OutfitEnv`] struct is meant to be reused and shared between different
+//!   parts of the crate to avoid redundant downloads and HTTP session creation.
+//! - The UT1 provider is initialized once at startup; if fresh data is needed,
+//!   the library must be restarted or the provider re-downloaded manually.
+//!
+//! ## See also
+//!
+//! - [`hifitime::ut1::Ut1Provider`] – Manages Earth orientation and UT1 corrections.
+//! - [`ureq::Agent`] – Minimal HTTP client used internally.
 use hifitime::ut1::Ut1Provider;
 use std::convert::TryFrom;
 use std::{fmt::Debug, time::Duration};

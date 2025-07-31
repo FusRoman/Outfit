@@ -1,3 +1,78 @@
+//! # Earth orientation models (precession, nutation, obliquity)
+//!
+//! This module implements the classical IAU 1976/1980 models used in OrbFit for
+//! computing the orientation of the Earth's rotation axis and equator.
+//! These models are necessary to transform between different celestial
+//! reference frames (ecliptic/equatorial, J2000/equinox-of-date).
+//!
+//! ## Provided functionality
+//!
+//! - **Mean obliquity** of the ecliptic ([`crate::earth_orientation::obleq`])  
+//!   Computes the angle between Earth's equator and ecliptic plane
+//!   using the IAU 1976 polynomial.
+//!
+//! - **Nutation in longitude and obliquity** ([`crate::earth_orientation::nutn80`])  
+//!   Implements the IAU 1980 (Wahr) nutation model, returning Δψ and Δε
+//!   as a function of time.
+//!
+//! - **Nutation rotation matrix** ([`crate::earth_orientation::rnut80`])  
+//!   Builds the 3×3 rotation matrix to transform between the mean equator
+//!   of date (Equm) and the true equator of date (Equt).
+//!
+//! - **Precession matrix** ([`crate::earth_orientation::prec`])  
+//!   Computes the 3×3 precession rotation matrix from J2000 to the mean equator
+//!   and equinox of a given date, using the IAU 1976 model.
+//!
+//! - **Equation of the equinoxes** ([`crate::earth_orientation::equequ`])  
+//!   Returns the nutation correction term (Δψ cos ε) in radians, used in sidereal time.
+//!
+//! ## Reference frames
+//!
+//! These functions are essential to:
+//! - Convert vectors between **J2000** and **date-dependent** equatorial frames,
+//! - Apply **nutation corrections** (true vs mean equator),
+//! - Compute accurate RA/DEC apparent positions for solar system bodies.
+//!
+//! ## Models used
+//!
+//! * Precession: IAU 1976
+//! * Nutation: IAU 1980 (Wahr)
+//! * Obliquity: IAU 1976 polynomial
+//!
+//! These are the same conventions used in the original OrbFit software.
+//!
+//! ## Units
+//!
+//! - Angles returned by [`crate::earth_orientation::nutn80`] are in **arcseconds** (as per IAU).
+//! - All other angles are in **radians**.
+//! - Rotation matrices are 3×3 `nalgebra::Matrix3<f64>`.
+//!
+//! ## Example
+//!
+//! ```rust, ignore
+//! use outfit::earth_orientation::{obleq, nutn80, rnut80, prec, equequ};
+//! use outfit::constants::T2000;
+//!
+//! // Compute mean obliquity at J2000
+//! let eps = obleq(T2000);
+//!
+//! // Nutation angles (arcseconds)
+//! let (dpsi, deps) = nutn80(T2000);
+//!
+//! // Rotation matrix for nutation
+//! let r_nut = rnut80(T2000);
+//!
+//! // Precession matrix from J2000 to a given epoch
+//! let r_prec = prec(60000.0);
+//!
+//! // Equation of equinoxes in radians
+//! let eqeq = equequ(60000.0);
+//! ```
+//!
+//! ## See also
+//!
+//! - [`crate::ref_system`] for frame transformations that use these models.
+//! - **Theory of Orbit Determination** by Milani & Gronchi (2010).
 use nalgebra::Matrix3;
 
 use crate::{

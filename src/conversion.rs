@@ -16,9 +16,9 @@
 //!
 //! ### Provided features
 //!
-//! * [`parse_ra_to_deg`] – Parse a sexagesimal RA string into degrees and accuracy in arcseconds.
-//! * [`parse_dec_to_deg`] – Parse a sexagesimal DEC string into degrees and accuracy in arcseconds.
-//! * [`cartesian_to_radec`] – Convert a 3D Cartesian position vector to right ascension and declination (in radians).
+//! * [`parse_ra_to_deg`](crate::conversion::parse_ra_to_deg) – Parse a sexagesimal RA string into degrees and accuracy in arcseconds.
+//! * [`parse_dec_to_deg`](crate::conversion::parse_dec_to_deg) – Parse a sexagesimal DEC string into degrees and accuracy in arcseconds.
+//! * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Convert a 3D Cartesian position vector to right ascension and declination (in radians).
 //!
 //! ### Accuracy estimation
 //!
@@ -32,7 +32,7 @@
 //! - RA is returned in **degrees** (0° ≤ RA < 360°).
 //! - DEC is returned in **degrees** (−90° ≤ DEC ≤ +90°).
 //! - Accuracy is returned in **arcseconds**.
-//! - Cartesian inputs for [`cartesian_to_radec`] can be in any length unit,
+//! - Cartesian inputs for [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) can be in any length unit,
 //!   but the result angles are in **radians** and the norm is returned
 //!   in the same unit as the input.
 //!

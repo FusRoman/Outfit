@@ -1,3 +1,96 @@
+//! # Equinoctial orbital elements
+//!
+//! This module defines the [`crate::equinoctial_element::EquinoctialElements`] struct and its associated methods,
+//! providing a **non-singular representation of orbital elements**.  
+//! Equinoctial elements are particularly well suited for orbit determination and propagation
+//! because they remain regular for small eccentricities and inclinations, unlike classical Keplerian elements.
+//!
+//! ## What are equinoctial elements?
+//!
+//! The six equinoctial elements are:
+//!
+//! 1. **a** – Semi-major axis (AU)
+//! 2. **h** = e · sin(ω + Ω)
+//! 3. **k** = e · cos(ω + Ω)
+//! 4. **p** = tan(i / 2) · sin Ω
+//! 5. **q** = tan(i / 2) · cos Ω
+//! 6. **λ** = Mean longitude = Ω + ω + M
+//!
+//! where:
+//! - `e` is the eccentricity,
+//! - `i` is the inclination,
+//! - `Ω` is the longitude of ascending node,
+//! - `ω` is the argument of periapsis,
+//! - `M` is the mean anomaly.
+//!
+//! These elements are **well-behaved even for nearly circular and equatorial orbits**.
+//!
+//! ## Provided functionality
+//!
+//! - **Conversion** between [`crate::equinoctial_element::EquinoctialElements`] and [`crate::keplerian_element::KeplerianElements`].
+//! - **Propagation** of two-body orbits:
+//!   * Solve the generalized Kepler equation
+//!   * Compute inertial Cartesian position and velocity from equinoctial elements
+//! - **Variational derivatives**:
+//!   * Compute the Jacobian matrices of position and velocity with respect to the six elements
+//!   * Useful for orbit fitting and uncertainty propagation
+//!
+//! ## Key methods
+//!
+//! - [`crate::equinoctial_element::EquinoctialElements::solve_kepler_equation`]  
+//!   Solve the generalized Kepler equation in equinoctial form.
+//!
+//! - [`crate::equinoctial_element::EquinoctialElements::solve_two_body_problem`]  
+//!   Propagate an orbit from `t0` to `t1` using the two-body approximation,
+//!   returning position, velocity, and optionally Jacobians.
+//!
+//! - [`crate::equinoctial_element::EquinoctialElements::compute_cartesian_position_and_velocity`]  
+//!   Compute position/velocity vectors from the equinoctial elements at a given epoch.
+//!
+//! - [`crate::equinoctial_element::EquinoctialElements::compute_w_vector`]  
+//!   Compute the **w** basis vector of the equinoctial frame (normal to the orbital plane).
+//!
+//! ## Units
+//!
+//! - Lengths: **AU**
+//! - Velocities: **AU/day**
+//! - Angles: **radians**
+//! - Time: **days** (usually Modified Julian Date, TDB/TT)
+//!
+//! ## Advantages of equinoctial elements
+//!
+//! * Avoid singularities when `e → 0` or `i → 0`
+//! * Smooth derivatives, ideal for gradient-based fitting
+//! * Directly compatible with least-squares adjustment and orbit uncertainty analysis
+//!
+//! ## Example
+//!
+//! ```rust, ignore
+//! use outfit::equinoctial_element::EquinoctialElements;
+//! use outfit::keplerian_element::KeplerianElements;
+//!
+//! // Define equinoctial elements
+//! let equ = EquinoctialElements {
+//!     reference_epoch: 59000.0,
+//!     semi_major_axis: 1.2,
+//!     eccentricity_sin_lon: 0.02,
+//!     eccentricity_cos_lon: 0.03,
+//!     tan_half_incl_sin_node: 0.001,
+//!     tan_half_incl_cos_node: 0.05,
+//!     mean_longitude: 1.0,
+//! };
+//!
+//! // Propagate 10 days ahead using the two-body model
+//! let (pos, vel, _) = equ.solve_two_body_problem(59000.0, 59010.0, false).unwrap();
+//!
+//! // Convert to classical Keplerian elements
+//! let kep: KeplerianElements = equ.into();
+//! ```
+//!
+//! ## See also
+//!
+//! - [`KeplerianElements`](crate::keplerian_element::KeplerianElements)
+//! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
 use core::f64;
 use std::f64::consts::PI;
 
@@ -186,7 +279,7 @@ impl EquinoctialElements {
     /// Returns
     /// --------
     /// * `Vector3<f64>` – The **w** vector of the equinoctial frame, normalized.
-    fn compute_w_vector(&self, inv_u: f64) -> Vector3<f64> {
+    pub fn compute_w_vector(&self, inv_u: f64) -> Vector3<f64> {
         Vector3::new(
             2. * self.tan_half_incl_sin_node * inv_u,
             -2. * self.tan_half_incl_cos_node * inv_u,
