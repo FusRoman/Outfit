@@ -1,7 +1,8 @@
+use crate::outfit_errors::OutfitError;
+
 use super::constants::DPI;
 use super::constants::GAUSS_GRAV;
 use super::orb_elem::eccentricity_control;
-use core::fmt;
 use nalgebra::Vector3;
 use std::f64::consts::PI;
 
@@ -600,19 +601,42 @@ fn solve_kepuni(
     None
 }
 
-/// VelocityCorrectionError Error is used in case the velocity correction cannot be ended.
-#[derive(Debug, Clone)]
-pub struct VelocityCorrectionError;
-
-impl fmt::Display for VelocityCorrectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "The eccentricity control detected that the asteroid as no angular momentum"
-        )
-    }
-}
-
+/// Apply velocity correction using Lagrange f–g coefficients.
+///
+/// This function refines the velocity vector `v2` of an orbiting body at a given epoch,
+/// using the positions `x1` and `x2`, the time interval `dt`, and the two-body
+/// universal variable formulation. It proceeds as follows:
+///
+/// 1. Compute the orbital energy and eccentricity from `x2`, `v2` using [`eccentricity_control`].
+/// 2. Build the [`UniversalKeplerParams`] and solve the universal Kepler equation via [`solve_kepuni`].
+/// 3. Compute the Lagrange coefficients:
+///    - `f = 1 - μ * s2 / |x2|`
+///    - `g = dt - μ * s3`
+/// 4. Return the corrected velocity:
+///    - `v2_corrected = (x1 - f * x2) / g`
+///
+/// # Arguments
+///
+/// * `x1` – Position vector of the body at epoch t₁ (in AU).
+/// * `x2` – Position vector of the body at epoch t₂ (in AU).
+/// * `v2` – Velocity vector at epoch t₂ (in AU/day).
+/// * `dt` – Time difference between epochs t₁ and t₂ (in days).
+/// * `peri_max` – Maximum acceptable perihelion distance for eccentricity control.
+/// * `ecc_max` – Maximum acceptable eccentricity for eccentricity control.
+///
+/// # Returns
+///
+/// On success, returns a tuple `(v2_corrected, f, g)`:
+/// * `v2_corrected` – Corrected velocity vector at t₂ (AU/day),
+/// * `f`, `g` – Lagrange coefficients.
+///
+/// Returns `Err(VelocityCorrectionError)` if:
+/// * `eccentricity_control` rejects the orbit,
+/// * or `solve_kepuni` fails to converge.
+///
+/// # See also
+/// * [`eccentricity_control`] – Computes eccentricity and energy.
+/// * [`solve_kepuni`] – Solves the universal Kepler equation.
 pub fn velocity_correction(
     x1: &Vector3<f64>,
     x2: &Vector3<f64>,
@@ -620,38 +644,43 @@ pub fn velocity_correction(
     dt: f64,
     peri_max: f64,
     ecc_max: f64,
-) -> Result<(Vector3<f64>, f64, f64), VelocityCorrectionError> {
+) -> Result<(Vector3<f64>, f64, f64), OutfitError> {
+    // Precompute constants
     let mu = GAUSS_GRAV.powi(2);
-    let sig0 = x2.dot(v2);
     let r2 = x2.norm();
+    let sig0 = x2.dot(v2);
 
-    let Some((_, ecc, _, energy)) = eccentricity_control(x2, v2, peri_max, ecc_max) else {
-        return Err(VelocityCorrectionError);
-    };
+    // Step 1: Get orbital parameters (eccentricity, energy)
+    let (_, ecc, _, energy) = eccentricity_control(x2, v2, peri_max, ecc_max).ok_or(
+        OutfitError::VelocityCorrectionError(
+            "The eccentricity control detected that the asteroid as no angular momentum".into(),
+        ),
+    )?;
 
-    let eps = 1e3 * f64::EPSILON;
-    let alpha = 2. * energy;
-
+    // Step 2: Prepare parameters for universal Kepler solver
     let params = UniversalKeplerParams {
         dt,
         r0: r2,
         sig0,
         mu,
-        alpha,
+        alpha: 2.0 * energy,
         e0: ecc,
     };
-    let Some((_, _, _, s2, s3)) = solve_kepuni(&params, Some(eps)) else {
-        return Err(VelocityCorrectionError);
-    };
 
-    // Calcul des coefficients f et g de Lagrange
+    // Solve universal Kepler equation for s2, s3
+    let eps = 1e3 * f64::EPSILON;
+    let (_, _, _, s2, s3) = solve_kepuni(&params, Some(eps)).ok_or(
+        OutfitError::VelocityCorrectionError("Failed to solve universal Kepler equation".into()),
+    )?;
+
+    // Step 3: Compute Lagrange f and g coefficients
     let f = 1.0 - (mu * s2) / r2;
     let g = dt - (mu * s3);
 
-    // Calcul de la vitesse améliorée
-    let v2 = (x1 - f * x2) / g;
+    // Step 4: Compute corrected velocity
+    let v2_corrected = (x1 - f * x2) / g;
 
-    Ok((v2, f, g))
+    Ok((v2_corrected, f, g))
 }
 
 #[cfg(test)]
