@@ -152,44 +152,38 @@ impl RefSystem {
 /// * [`rnut80`] – IAU 1980 nutation model
 /// * [`rotmt`] – rotation matrix around X/Y/Z axes
 /// * [`obleq`] – mean obliquity of the ecliptic (in radians)
-pub fn rotpn(ref_sys1: &RefSystem, ref_sys2: &RefSystem) -> Result<Matrix3<f64>, OutfitError> {
-    let mut rsys = *ref_sys1;
+pub fn rotpn(src: &RefSystem, dst: &RefSystem) -> Result<Matrix3<f64>, OutfitError> {
+    let mut current = *src;
+    let mut rotation = Matrix3::identity();
 
-    let mut rot = Matrix3::identity();
-
-    let mut nit = 0;
-
-    loop {
-        let epdif = if rsys.epoch() == ref_sys2.epoch() {
-            if rsys.epoch() == RefEpoch::J2000 {
-                false
-            } else {
-                (rsys.epoch().date() - ref_sys2.epoch().date()).abs() > EPS
-            }
-        } else {
-            true
+    for _ in 0..20 {
+        let epochs_equal = match (current.epoch(), dst.epoch()) {
+            (RefEpoch::J2000, RefEpoch::J2000) => true,
+            (e1, e2) => (e1.date() - e2.date()).abs() <= EPS,
         };
 
-        if epdif {
-            let (new_ref, rot_mat) = rsys.transform_to_equm_date(ref_sys2.epoch())?;
-
-            rot *= rot_mat;
-            rsys = new_ref;
-        } else {
-            if rsys.variant_eq(ref_sys2) {
-                return Ok(rot);
-            }
-
-            let (new_ref, rot_mat) = rsys.transform_to_target_system(*ref_sys2)?;
-            rot *= rot_mat;
-            rsys = new_ref;
+        if !epochs_equal {
+            // Step 1: adjust the epoch
+            let (next_ref, step_rot) = current.transform_to_equm_date(dst.epoch())?;
+            rotation *= step_rot;
+            current = next_ref;
+            continue;
         }
 
-        nit += 1;
-        if nit > 20 {
-            panic!("ERROR: Internal error (08)");
+        // Epochs are now aligned, check if reference systems match
+        if current.variant_eq(dst) {
+            return Ok(rotation);
         }
+
+        // Step 2: align the reference system (nutation / obliquity)
+        let (next_ref, step_rot) = current.transform_to_target_system(*dst)?;
+        rotation *= step_rot;
+        current = next_ref;
     }
+
+    Err(OutfitError::InvalidRefSystem(
+        "Transformation did not converge in 20 iterations".into(),
+    ))
 }
 
 /// Construct a right-handed 3×3 rotation matrix around one of the principal axes (X, Y, or Z).
