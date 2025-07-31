@@ -115,6 +115,32 @@ impl EquinoctialElements {
         Ok(find_root_newton_raphson(x0, &f, &df, &mut tol)?)
     }
 
+    /// Compute the **w** basis vector of the equinoctial reference frame.
+    ///
+    /// In the equinoctial orbital elements formalism, the three orthonormal
+    /// basis vectors (**f**, **g**, **w**) define the orientation of the orbital
+    /// plane in inertial space:
+    ///
+    /// * **f**: points roughly toward the pericenter,
+    /// * **g**: 90° ahead of f in the plane,
+    /// * **w**: normal to the orbital plane.
+    ///
+    /// This method computes the third vector **w**, which is orthogonal to both
+    /// **f** and **g**, using the equinoctial parameters:
+    /// - `tan_half_incl_sin_node` = tan(i/2) * sin(Ω)
+    /// - `tan_half_incl_cos_node` = tan(i/2) * cos(Ω)
+    ///
+    /// The resulting vector ensures that {f, g, w} forms a right-handed
+    /// orthonormal basis.
+    ///
+    /// Arguments
+    /// ---------
+    /// * `inv_u` – Reciprocal of `u`, where `u = 1 + p² + q²`, used to normalize
+    ///   the equinoctial basis vectors.
+    ///
+    /// Returns
+    /// --------
+    /// * `Vector3<f64>` – The **w** vector of the equinoctial frame, normalized.
     fn compute_w_vector(&self, inv_u: f64) -> Vector3<f64> {
         Vector3::new(
             2. * self.tan_half_incl_sin_node * inv_u,
@@ -544,7 +570,7 @@ impl EquinoctialElements {
     /// * [`EquinoctialElements::compute_cartesian_position_and_velocity`] – projects equinoctial elements to 3D
     /// * [`EquinoctialElements::solve_kepler_equation`] – solves the generalized Kepler equation
     /// * [`principal_angle`] – normalizes an angle to [0, 2π)
-    pub(crate) fn solve_two_body_problem(
+    pub fn solve_two_body_problem(
         &self,
         t0: f64,
         t1: f64,
