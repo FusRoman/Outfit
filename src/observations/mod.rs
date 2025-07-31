@@ -148,6 +148,13 @@ impl Observation {
         equinoctial_element: &EquinoctialElements,
         observer: &Observer,
     ) -> Result<(f64, f64), OutfitError> {
+        // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
+        if equinoctial_element.eccentricity() >= 1.0 {
+            return Err(OutfitError::InvalidOrbit(
+                "Eccentricity >= 1 is not yet supported".to_string(),
+            ));
+        }
+
         // 1. Propagate asteroid position/velocity in ecliptic J2000
         let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
             0.,
@@ -582,6 +589,247 @@ mod test_observations {
 
             let result = obs.compute_apparent_position(state, &equinoctial, &observer);
             assert!(result.is_err(), "Invalid elements should trigger an error");
+        }
+
+        mod proptests_apparent_position {
+            use super::*;
+            use proptest::prelude::*;
+
+            /// Strategy: generates random but reasonable equinoctial elements
+            /// for property-based tests.
+            fn arb_equinoctial_elements() -> impl Strategy<Value = EquinoctialElements> {
+                (
+                    58000.0..62000.0,                  // reference_epoch (MJD)
+                    0.5..30.0,                         // semi-major axis (AU)
+                    -0.5..0.5,                         // h = e * sin(Ω+ω)
+                    -0.5..0.5,                         // k = e * cos(Ω+ω)
+                    -0.5..0.5,                         // p = tan(i/2)*sin Ω
+                    -0.5..0.5,                         // q = tan(i/2)*cos Ω
+                    0.0..(2.0 * std::f64::consts::PI), // mean longitude (rad)
+                )
+                    .prop_map(|(epoch, a, h, k, p, q, lambda)| {
+                        EquinoctialElements {
+                            reference_epoch: epoch,
+                            semi_major_axis: a,
+                            eccentricity_sin_lon: h,
+                            eccentricity_cos_lon: k,
+                            tan_half_incl_sin_node: p,
+                            tan_half_incl_cos_node: q,
+                            mean_longitude: lambda,
+                        }
+                    })
+            }
+
+            /// Strategy: generates random observer locations on Earth.
+            /// - longitude in [-180, 180] degrees
+            /// - latitude in [-90, 90] degrees
+            /// - elevation from 0 to 5 km
+            fn arb_observer() -> impl Strategy<Value = Observer> {
+                (-180.0..180.0, -90.0..90.0, 0.0..5.0)
+                    .prop_map(|(lon, lat, elev)| Observer::new(lon, lat, elev, None, None, None))
+            }
+
+            /// Strategy: generates equinoctial elements with a wide range,
+            /// including extreme eccentricities and inclinations.
+            fn arb_extreme_equinoctial_elements() -> impl Strategy<Value = EquinoctialElements> {
+                (
+                    58000.0..62000.0,
+                    0.1..50.0,
+                    -0.99..0.99,
+                    -0.99..0.99,
+                    -1.0..1.0,
+                    -1.0..1.0,
+                    0.0..(2.0 * std::f64::consts::PI),
+                )
+                    .prop_map(|(epoch, a, h, k, p, q, lambda)| EquinoctialElements {
+                        reference_epoch: epoch,
+                        semi_major_axis: a,
+                        eccentricity_sin_lon: h,
+                        eccentricity_cos_lon: k,
+                        tan_half_incl_sin_node: p,
+                        tan_half_incl_cos_node: q,
+                        mean_longitude: lambda,
+                    })
+                    // Filter out cases where eccentricity >= 1
+                    .prop_filter(
+                        "Only bound (elliptical) orbits are supported",
+                        |elem: &EquinoctialElements| {
+                            let e = (elem.eccentricity_sin_lon.powi(2)
+                                + elem.eccentricity_cos_lon.powi(2))
+                            .sqrt();
+                            e < 0.99
+                        },
+                    )
+            }
+
+            /// Returns a fixed observer located at Haleakalā Observatory.
+            fn fixed_observer() -> Observer {
+                Observer::new(
+                    203.744083,
+                    20.706944,
+                    3.05,
+                    Some("Haleakala".to_string()),
+                    None,
+                    None,
+                )
+            }
+
+            proptest! {
+                /// Property test: RA and DEC are always finite and in the expected ranges.
+                #[test]
+                fn proptest_ra_dec_are_finite_and_in_range(
+                    equinoctial in arb_equinoctial_elements(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let observer = fixed_observer();
+
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.0,
+                        error_ra: 0.0,
+                        dec: 0.0,
+                        error_dec: 0.0,
+                        time: obs_time,
+                    };
+
+                    let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+
+                    if let Ok((ra, dec)) = result {
+                        // Invariant: returned values must be finite
+                        prop_assert!(ra.is_finite());
+                        prop_assert!(dec.is_finite());
+
+                        // RA must be in [0, 2π), DEC must be in [-π/2, π/2]
+                        prop_assert!((0.0..2.0 * std::f64::consts::PI).contains(&ra));
+                        prop_assert!((-std::f64::consts::FRAC_PI_2..std::f64::consts::FRAC_PI_2).contains(&dec));
+                    }
+                }
+
+                /// Property test: Calling the function twice with the same inputs must produce exactly
+                /// the same output (determinism).
+                #[test]
+                fn proptest_repeatability(
+                    equinoctial in arb_equinoctial_elements(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let observer = fixed_observer();
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.0,
+                        error_ra: 0.0,
+                        dec: 0.0,
+                        error_dec: 0.0,
+                        time: obs_time,
+                    };
+
+                    let r1 = obs.compute_apparent_position(state, &equinoctial, &observer);
+                    let r2 = obs.compute_apparent_position(state, &equinoctial, &observer);
+
+                    // Invariant: repeated computation with the same input should be identical
+                    prop_assert_eq!(r1, r2);
+                }
+
+                /// Property test: A very small change in observation time (1e-3 days ≈ 1.4 min)
+                /// should not cause huge jumps in the resulting RA/DEC.
+                #[test]
+                fn proptest_small_time_change_has_small_effect(
+                    equinoctial in arb_equinoctial_elements(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let observer = fixed_observer();
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.0,
+                        error_ra: 0.0,
+                        dec: 0.0,
+                        error_dec: 0.0,
+                        time: obs_time,
+                    };
+
+                    let obs_eps = Observation {
+                        time: obs_time + 1e-3, // shift by 1.4 minutes
+                        ..obs.clone()
+                    };
+
+                    let r1 = obs.compute_apparent_position(state, &equinoctial, &observer);
+                    let r2 = obs_eps.compute_apparent_position(state, &equinoctial, &observer);
+
+                    if let (Ok((ra1, dec1)), Ok((ra2, dec2))) = (r1, r2) {
+                        let dra = (ra1 - ra2).abs();
+                        let ddec = (dec1 - dec2).abs();
+
+                        // Invariant: no catastrophic jumps (> 1 radian) for a small time shift
+                        prop_assert!(dra < 1.0);
+                        prop_assert!(ddec < 1.0);
+                    }
+                }
+            }
+
+            proptest! {
+                /// Property: RA/DEC remain finite and in valid ranges for extreme orbits and random observers.
+                #[test]
+                fn proptest_ra_dec_valid_for_extreme_orbits_and_observers(
+                    equinoctial in arb_extreme_equinoctial_elements(),
+                    observer in arb_observer(),
+                    obs_time in 58000.0f64..62000.0
+                ) {
+                    let state = &OUTFIT_HORIZON_TEST.0;
+
+                    let obs = Observation {
+                        observer: 0,
+                        ra: 0.0,
+                        error_ra: 0.0,
+                        dec: 0.0,
+                        error_dec: 0.0,
+                        time: obs_time,
+                    };
+
+                    let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+
+                    if let Ok((ra, dec)) = result {
+                        // Values must be finite
+                        prop_assert!(ra.is_finite());
+                        prop_assert!(dec.is_finite());
+                        // Angles must be within their valid intervals
+                        prop_assert!((0.0..2.0 * std::f64::consts::PI).contains(&ra));
+                        prop_assert!((-std::f64::consts::FRAC_PI_2..std::f64::consts::FRAC_PI_2).contains(&dec));
+                    }
+                }
+            }
+
+            #[test]
+            fn test_hyperbolic_orbit_returns_error() {
+                let state = &OUTFIT_HORIZON_TEST.0;
+                let observer = Observer::new(0.0, 0.0, 0.0, None, None, None);
+
+                let equinoctial = EquinoctialElements {
+                    reference_epoch: 59000.0,
+                    semi_major_axis: 1.0,
+                    eccentricity_sin_lon: 0.8,
+                    eccentricity_cos_lon: 0.8, // e ≈ 1.13 > 1
+                    tan_half_incl_sin_node: 0.0,
+                    tan_half_incl_cos_node: 0.0,
+                    mean_longitude: 0.0,
+                };
+
+                let obs = Observation {
+                    observer: 0,
+                    ra: 0.0,
+                    error_ra: 0.0,
+                    dec: 0.0,
+                    error_dec: 0.0,
+                    time: 59000.0,
+                };
+
+                let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+                assert!(
+                    result.is_err(),
+                    "Hyperbolic or parabolic orbits should currently return an error"
+                );
+            }
         }
     }
 

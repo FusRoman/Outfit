@@ -35,6 +35,51 @@ pub struct EquinoctialElements {
 }
 
 impl EquinoctialElements {
+    /// Compute the squared orbital eccentricity from the equinoctial parameters `h` and `k`.
+    ///
+    /// # Details
+    ///
+    /// In the equinoctial element formulation:
+    ///
+    /// * `h = e * sin(Ω + ω)`
+    /// * `k = e * cos(Ω + ω)`
+    ///
+    /// where `e` is the eccentricity, `Ω` the longitude of ascending node,
+    /// and `ω` the argument of periapsis.
+    ///
+    /// The squared eccentricity is simply:
+    ///
+    /// ```text
+    /// e² = h² + k²
+    /// ```
+    ///
+    /// # Returns
+    /// * The value of `e²` (dimensionless).
+    pub fn squared_eccentricity(&self) -> f64 {
+        self.eccentricity_sin_lon.powi(2) + self.eccentricity_cos_lon.powi(2)
+    }
+
+    /// Compute the orbital eccentricity from the equinoctial parameters `h` and `k`.
+    ///
+    /// # Details
+    ///
+    /// The eccentricity `e` is obtained from:
+    ///
+    /// ```text
+    /// e = sqrt(h² + k²)
+    /// ```
+    ///
+    /// See also [`squared_eccentricity`] for the squared value.
+    ///
+    /// # Returns
+    /// * The eccentricity `e` (dimensionless).
+    ///
+    /// # See also
+    /// * [`squared_eccentricity`] – Returns `e²` directly.
+    pub fn eccentricity(&self) -> f64 {
+        self.squared_eccentricity().sqrt()
+    }
+
     /// Create a new instance of `EquinoctialElements` from Keplerian elements.
     ///
     /// Arguments
@@ -589,8 +634,7 @@ impl EquinoctialElements {
         // 2. Compute squared eccentricity = h² + k²
         //    Used to detect circular orbits (avoid division by zero)
         // ---------------------------------------------------------------------
-        let eccentricity_pow2 =
-            self.eccentricity_sin_lon.powi(2) + self.eccentricity_cos_lon.powi(2);
+        let eccentricity_pow2 = self.squared_eccentricity();
         let epsilon = f64::EPSILON * 1e2; // threshold for near-circular orbit
 
         // ---------------------------------------------------------------------
