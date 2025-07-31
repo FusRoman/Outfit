@@ -1156,6 +1156,70 @@ mod kepler_test {
             let expected_psi = 0.14972146123530983; // approximate reference
             assert_relative_eq!(psi, expected_psi, epsilon = 1e-15);
         }
+
+        use proptest::prelude::*;
+
+        fn arb_common_params() -> impl Strategy<Value = (f64, f64, f64, f64, f64)> {
+            (
+                // dt : intervalle de temps, évite 0
+                prop_oneof![-5.0..-0.1, 0.1..5.0],
+                // r0 : distance > 0.1
+                0.1..3.0f64,
+                // sig0 : vitesse radiale modérée
+                -0.5..0.5f64,
+                // mu : paramètre gravitationnel
+                0.5..2.0f64,
+                // e0 : excentricité
+                0.01..2.0f64,
+            )
+        }
+
+        proptest! {
+            /// Property test: elliptical branch (alpha < 0)
+            #[test]
+            fn prop_solve_kepuni_elliptical(
+                (dt, r0, sig0, mu, e0) in arb_common_params(),
+                alpha in -5.0..-0.1f64 // strictly negative alpha
+            ) {
+                let res = solve_kepuni(dt, r0, sig0, mu, alpha, e0, Some(1e-12));
+
+                if let Some((psi, s0, s1, s2, s3)) = res {
+                    prop_assert!(psi.is_finite());
+                    prop_assert!(s0.is_finite());
+                    prop_assert!(s1.is_finite());
+                    prop_assert!(s2.is_finite());
+                    prop_assert!(s3.is_finite());
+
+                    // Vérification de l'équation universelle
+                    let residual = r0 * s1 + sig0 * s2 + mu * s3 - dt;
+                    prop_assert!(residual.abs() < 1e-8,
+                        "Residual too large for elliptical case: {}", residual);
+                }
+            }
+        }
+
+        proptest! {
+            /// Property test: hyperbolic branch (alpha > 0)
+            #[test]
+            fn prop_solve_kepuni_hyperbolic(
+                (dt, r0, sig0, mu, e0) in arb_common_params(),
+                alpha in 0.1..5.0f64 // strictly positive alpha
+            ) {
+                let res = solve_kepuni(dt, r0, sig0, mu, alpha, e0, Some(1e-12));
+
+                if let Some((psi, s0, s1, s2, s3)) = res {
+                    prop_assert!(psi.is_finite());
+                    prop_assert!(s0.is_finite());
+                    prop_assert!(s1.is_finite());
+                    prop_assert!(s2.is_finite());
+                    prop_assert!(s3.is_finite());
+
+                    let residual = r0 * s1 + sig0 * s2 + mu * s3 - dt;
+                    prop_assert!(residual.abs() < 1e-8,
+                        "Residual too large for hyperbolic case: {}", residual);
+                }
+            }
+        }
     }
 
     #[test]
