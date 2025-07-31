@@ -60,7 +60,7 @@ impl PartialOrd for WeightedTriplet {
 ///
 /// # Returns
 /// A floating-point score (lower is better).
-fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
+pub fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     fn s3dtw(dt: f64, dtw: f64) -> f64 {
         if dt <= dtw {
             dtw / dt
@@ -171,7 +171,7 @@ fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize
 /// # See also
 /// * [`GaussObs`] – Representation of a triplet ready for Gauss IOD.
 /// * [`triplet_weight`] – The scoring function used to rank triplets.
-pub(crate) fn generate_triplets(
+pub fn generate_triplets(
     observations: &mut Observations,
     state: &Outfit,
     dt_min: f64,

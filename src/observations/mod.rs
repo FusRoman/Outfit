@@ -2,7 +2,7 @@ pub mod ades_reader;
 pub mod observations_ext;
 mod parquet_reader;
 pub mod trajectory_ext;
-pub(crate) mod triplets_iod;
+pub mod triplets_iod;
 
 use crate::{
     constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC, VLIGHT_AU},

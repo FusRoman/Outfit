@@ -40,7 +40,7 @@ impl Outfit {
             .get_or_try_init(|| JPLEphem::new(&self.jpl_source))
     }
 
-    pub(crate) fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
+    pub fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
         &self.env_state.ut1_provider
     }
 
