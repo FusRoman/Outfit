@@ -5,17 +5,18 @@ use core::fmt;
 use nalgebra::Vector3;
 use std::f64::consts::PI;
 
-/// Computes the Stumpff-like auxiliary functions (s0, s1, s2, s3) used in universal variable
-/// formulations of two-body orbital motion.
+/// Computes the Stumpff-like auxiliary functions (s0, s1, s2, s3) used in
+/// universal variable formulations of two-body orbital motion.
 ///
-/// These functions are a generalization of the classical Stumpff functions. They appear in
-/// semi-analytical formulations such as the **f–g series** (Everhart & Pitkin) for universal
-/// Kepler propagation, and are used to compute position and velocity vectors from the universal
-/// anomaly `ψ`.
+/// These functions are a generalization of the classical Stumpff functions.
+/// They appear in semi-analytical formulations such as the **f–g series**
+/// (Everhart & Pitkin) for universal Kepler propagation, and are used to
+/// compute position and velocity vectors from the universal anomaly `ψ`.
 ///
-/// The implementation follows the algorithm used in OrbFit (Fortran `ever_pitkin:s_funct`):
-///
-/// * For small `|α ψ²|`, `s0`, `s1`, `s2`, `s3` are computed directly by power series expansion.
+/// Algorithm
+/// ---------
+/// * For small `|α ψ²|`, `s0`, `s1`, `s2`, `s3` are computed directly
+///   by power series expansion.
 /// * For large `|α ψ²|`, the function:
 ///   1. Reduces `ψ` by repeatedly halving it until `|α ψ²|` becomes small,
 ///   2. Computes `s0` and `s1` from the series at the reduced value,
@@ -24,44 +25,41 @@ use std::f64::consts::PI;
 ///      * `s2 = (s0 - 1)/α`
 ///      * `s3 = (s1 - ψ)/α`
 ///
-/// This approach avoids divergence and preserves numerical stability for large anomalies,
-/// at the cost of some loss of precision for `s2` and `s3`.
+/// This approach avoids divergence and preserves numerical stability for
+/// large anomalies, at the cost of some loss of precision for `s2` and `s3`.
 ///
-/// # Arguments
-///
+/// Arguments
+/// ---------
 /// * `psi` – Universal anomaly (integration parameter).
-/// * `alpha` – Two times the specific orbital energy (2 * E). It can be negative (elliptic),
-///   zero (parabolic), or positive (hyperbolic).
+/// * `alpha` – Two times the specific orbital energy (2 * E). It can be
+///   negative (elliptic), zero (parabolic), or positive (hyperbolic).
 ///
-/// # Returns
+/// Returns
+/// --------
+/// * `(s0, s1, s2, s3)` – Tuple of four Stumpff-like functions:
+///   - `s0 ≈ 1 + α·Σ`  — generalized cosine-like series,
+///   - `s1 ≈ ψ + α·Σ`  — generalized sine-like series,
+///   - `s2 = (s0 - 1)/α`,
+///   - `s3 = (s1 - ψ)/α`.
 ///
-/// A tuple `(s0, s1, s2, s3)` where:
-///
-/// * `s0` ≈ 1 + α·Σ  — generalized cosine-like series
-/// * `s1` ≈ ψ + α·Σ — generalized sine-like series
-/// * `s2` = (s0 - 1)/α
-/// * `s3` = (s1 - ψ)/α
-///
-/// These functions are used to evaluate the f and g Lagrange coefficients:
+/// These functions are used to evaluate the Lagrange f and g coefficients:
 ///
 /// ```text
 /// f = 1 - (μ/r0) s2
 /// g = Δt - μ s3
 /// ```
 ///
-/// # Notes
+/// Remarks
+/// --------
+/// * For very large values of `α ψ²`, `s2` and `s3` may lose some precision
+///   because they are reconstructed from differences of large numbers.
 ///
-/// * For very large values of `α ψ²`, `s2` and `s3` may lose some precision because they are
-///   reconstructed from differences of large numbers (as done in OrbFit).
-/// * This implementation is consistent with OrbFit and the references below.
-///
-/// # References
-///
-/// * Everhart, E. & Pitkin, E.T., *American Journal of Physics*, 51(8), 712-717 (1983)
-/// * Goodyear, W.H., *Astronomical Journal*, 70, 189-192 (1965)
+/// References
+/// ----------
+/// * Everhart, E. & Pitkin, E.T., *American Journal of Physics*, 51(8), 712–717 (1983)
+/// * Goodyear, W.H., *Astronomical Journal*, 70, 189–192 (1965)
 ///
 /// # See also
-///
 /// * [`velocity_correction`] – Uses these functions to compute position and velocity (f–g series).
 /// * [`solve_kepuni`] – Solves universal Kepler's equation using these functions.
 /// * [Battin, *An Introduction to the Mathematics and Methods of Astrodynamics*]
@@ -213,7 +211,54 @@ fn angle_diff(a: f64, b: f64) -> f64 {
     diff
 }
 
-fn prelim_kepuni(
+/// Solve the preliminary universal Kepler problem (initial guess for ψ).
+///
+/// This function computes an initial estimate of the universal anomaly `ψ` at time `t0 + dt`,
+/// given the orbital energy parameter `alpha`, the current position/velocity, and the
+/// orbital eccentricity. This initial value is later refined by a solver of the universal
+/// Kepler equation (`solve_kepuniv` or `solve_kepuniv2`).
+///
+/// The method selects the appropriate branch depending on the sign of `alpha`:
+///
+/// * **Elliptical case (alpha < 0)** – Calls [`prelim_elliptic`] to compute ψ using the
+///   elliptical Kepler equation with eccentric anomaly.
+/// * **Hyperbolic case (alpha > 0)** – Calls [`prelim_hyperbolic`] to compute ψ using the
+///   hyperbolic Kepler equation with hyperbolic anomaly.
+/// * **Parabolic case (alpha = 0)** – Not supported; the function returns `None`.
+///
+/// Arguments
+/// ---------
+/// * `dt` – Time interval (t - t₀) in days.
+/// * `r0` – Initial heliocentric distance of the object at epoch (AU).
+/// * `sig0` – Radial component of the velocity vector at t₀ (AU/day).
+/// * `mu` – Gravitational parameter μ = GM of the central body (AU³/day²).
+/// * `alpha` – Twice the specific orbital energy:
+///    - α < 0 for elliptical orbits,
+///    - α > 0 for hyperbolic orbits,
+///    - α = 0 for parabolic orbits (not handled here).
+/// * `e0` – Orbital eccentricity.
+/// * `contr` – Convergence tolerance for the Newton–Raphson iterations.
+///
+/// Returns
+/// --------
+/// * `Some((psi, alpha))` – Tuple containing:
+///   - `psi`: initial guess for the universal anomaly at time `t0 + dt`,
+///   - `alpha`: the same `alpha` value passed as input (for convenience).
+/// * `None` – If `alpha = 0` (parabolic orbit).
+///
+/// Remarks
+/// --------
+/// * This function does not iterate to full convergence; it only provides a starting
+///   value for `ψ`. It is typically used before calling a solver such as
+///   [`solve_kepuniv2`] to refine the result.
+/// * The hyperbolic and elliptical branches use up to 20 Newton–Raphson iterations.
+/// * The parabolic case must be treated by a separate routine.
+///
+/// # See also
+/// * [`prelim_elliptic`] – Computes ψ for elliptical orbits.
+/// * [`prelim_hyperbolic`] – Computes ψ for hyperbolic orbits.
+/// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
+pub fn prelim_kepuni(
     dt: f64,
     r0: f64,
     sig0: f64,
@@ -222,87 +267,247 @@ fn prelim_kepuni(
     e0: f64,
     contr: f64,
 ) -> Option<(f64, f64)> {
+    // Maximum number of Newton–Raphson iterations
     const ITX: usize = 20;
 
-    // Initialisation de psi
-    let psi0;
-
+    // Elliptical case: alpha < 0
     if alpha < 0.0 {
-        // Cas elliptique
-        let a0 = -mu / alpha;
-        let enne = (-alpha.powi(3)).sqrt() / mu;
-        let (u0, u) = if e0 < contr {
-            (0.0, enne * dt)
-        } else {
-            let cosu0 = (1.0 - r0 / a0) / e0;
-            let mut u0 = if cosu0.abs() <= 1.0 {
-                cosu0.acos()
-            } else if cosu0 >= 1.0 {
-                0.0
-            } else {
-                PI
-            };
-
-            if sig0 < 0.0 {
-                u0 = -u0;
-            }
-
-            u0 = principal_angle(u0);
-            let ell0 = principal_angle(u0 - e0 * u0.sin());
-            let mut u = PI;
-            let ell = principal_angle(ell0 + enne * dt);
-
-            for _ in 0..ITX {
-                let du = -(u - e0 * u.sin() - ell) / (1.0 - e0 * u.cos());
-                u += du;
-                if du.abs() < contr * 1e3 {
-                    break;
-                }
-            }
-            (u0, u)
-        };
-
-        // Conversion en psi
-        psi0 = angle_diff(u, u0) / (-alpha).sqrt();
-    } else if alpha > 0.0 {
-        // Cas hyperbolique
-        let a0 = -mu / alpha;
-        let enne = alpha.powi(3).sqrt() / mu;
-        let coshf0 = (1.0 - r0 / a0) / e0;
-        let mut f0 = if coshf0 > 1.0 {
-            (coshf0 + (coshf0.powi(2) - 1.0).sqrt()).ln()
-        } else {
-            0.0
-        };
-
-        if sig0 < 0.0 {
-            f0 = -f0;
-        }
-
-        let ell0 = e0 * f0.sinh() - f0;
-        let mut f: f64 = 0.0;
-        let ell = ell0 + enne * dt;
-
-        for _ in 0..ITX {
-            if f.abs() < 15.0 {
-                let df = -(e0 * f.sinh() - f - ell) / (e0 * f.cosh() - 1.0);
-                let ff = f + df;
-                f = if f * ff < 0.0 { f / 2.0 } else { ff };
-            } else {
-                f /= 2.0;
-            }
-            if f.abs() < contr * 1e3 {
-                break;
-            }
-        }
-
-        // Conversion en psi
-        psi0 = (f - f0) / alpha.sqrt();
-    } else {
-        return None; // Cas non supporté
+        let psi0 = prelim_elliptic(dt, r0, sig0, mu, alpha, e0, contr, ITX);
+        return Some((psi0, alpha));
     }
 
-    Some((psi0, alpha))
+    // Hyperbolic case: alpha > 0
+    if alpha > 0.0 {
+        let psi0 = prelim_hyperbolic(dt, r0, sig0, mu, alpha, e0, contr, ITX);
+        return Some((psi0, alpha));
+    }
+
+    // Parabolic case: alpha == 0
+    // Not supported: return None so that the caller can handle it explicitly.
+    None
+}
+
+/// Compute a preliminary estimate of the universal anomaly `ψ` for elliptical orbits (α < 0).
+///
+/// This function generates an initial guess of the universal anomaly corresponding
+/// to the time `t0 + dt`, given the initial state of an object in an elliptical
+/// orbit. The universal anomaly is then used as a starting point for solving the
+/// universal Kepler equation.
+///
+/// The algorithm follows these steps:
+///
+/// 1. Compute the semi-major axis `a0 = -μ / α` and mean motion `n = sqrt((-α)^3) / μ`.
+/// 2. If the eccentricity `e0` is very small, approximate `ψ` directly using a linear formula.
+/// 3. Otherwise, compute the initial eccentric anomaly `u0` from the orbital geometry and
+///    correct its sign based on the radial velocity `sig0`.
+/// 4. Compute the mean anomaly at epoch `ℓ0 = u0 - e0·sin(u0)` and propagate it forward
+///    by `n·dt` to obtain the target mean anomaly at `t0 + dt`.
+/// 5. Solve Kepler's equation `M = u - e·sin(u)` using Newton–Raphson iterations to find
+///    the updated eccentric anomaly `u`.
+/// 6. Convert the difference `u - u0` into the universal anomaly `ψ` using the factor `1/sqrt(-α)`.
+///
+/// Arguments
+/// ---------
+/// * `dt` – Propagation time interval (days) from the reference epoch `t0`.
+/// * `r0` – Initial heliocentric distance of the body (in astronomical units, AU).
+/// * `sig0` – Radial component of the velocity at `t0`, i.e., d(r)/dt in AU/day.
+/// * `mu` – Gravitational parameter μ = GM of the central body (in AU³/day²).
+/// * `alpha` – Twice the specific orbital energy (must be negative for elliptical orbits).
+/// * `e0` – Orbital eccentricity (unitless).
+/// * `contr` – Convergence control threshold for the Newton solver.
+/// * `max_iter` – Maximum number of Newton–Raphson iterations.
+///
+/// Returns
+/// --------
+/// * `psi` – Preliminary value of the universal anomaly at time `t0 + dt`.
+///
+/// Remarks
+/// --------
+/// * This routine does not handle parabolic (α = 0) or hyperbolic (α > 0) cases.
+/// * The result is an **initial guess**: a subsequent universal Kepler solver will refine `ψ`.
+/// * The computed `ψ` can be negative if `dt` corresponds to backward propagation.
+///
+/// # See also
+/// * [`prelim_hyperbolic`] – Equivalent procedure for hyperbolic orbits.
+/// * [`solve_kepuni`] – Refines `ψ` by solving the universal Kepler equation.
+/// * [`angle_diff`] – Computes the principal difference between two angles.
+#[allow(clippy::too_many_arguments)]
+fn prelim_elliptic(
+    dt: f64,
+    r0: f64,
+    sig0: f64,
+    mu: f64,
+    alpha: f64,
+    e0: f64,
+    contr: f64,
+    max_iter: usize,
+) -> f64 {
+    // Compute the semi-major axis (a0) and mean motion (n) from energy parameters
+    let a0 = -mu / alpha;
+    let n = (-alpha.powi(3)).sqrt() / mu;
+
+    // Special case: nearly circular orbit
+    // For very small eccentricities, use a simple linear approximation
+    // (avoids division by a tiny e0 and unnecessary Newton iterations)
+    if e0 < contr {
+        return n * dt / (-alpha).sqrt();
+    }
+
+    // Compute the eccentric anomaly at epoch u0 from geometry:
+    // cos u0 = (1 - r0/a0) / e0
+    let cos_u0 = (1.0 - r0 / a0) / e0;
+    let mut u0 = if cos_u0.abs() <= 1.0 {
+        cos_u0.acos()
+    } else if cos_u0 >= 1.0 {
+        0.0 // limit case: object at pericenter
+    } else {
+        PI // limit case: object at apocenter
+    };
+
+    // If the radial velocity is negative, flip the sign of u0
+    if sig0 < 0.0 {
+        u0 = -u0;
+    }
+
+    // Wrap u0 and its corresponding mean anomaly into [0, 2π)
+    u0 = principal_angle(u0);
+    let ell0 = principal_angle(u0 - e0 * u0.sin());
+
+    // Compute the target mean anomaly after dt
+    let target_mean_anomaly = principal_angle(ell0 + n * dt);
+
+    // Initial guess for eccentric anomaly u (starting at π for robustness)
+    let mut u = PI;
+
+    // Iteratively solve Kepler's equation:
+    //    M = u - e sin(u)
+    // with Newton-Raphson corrections
+    for _ in 0..max_iter {
+        let f = u - e0 * u.sin() - target_mean_anomaly; // residual
+        let fp = 1.0 - e0 * u.cos(); // derivative d/d(u)
+        let du = -f / fp;
+        u += du;
+        if du.abs() < contr * 1e3 {
+            break;
+        }
+    }
+
+    // Convert the difference in eccentric anomalies to universal anomaly ψ
+    // using the scaling factor sqrt(-alpha)
+    angle_diff(u, u0) / (-alpha).sqrt()
+}
+
+/// Compute a preliminary estimate of the universal anomaly `ψ` for hyperbolic orbits (α > 0).
+///
+/// This function generates an initial guess of the universal anomaly corresponding
+/// to the time `t0 + dt`, given the initial state of an object on a hyperbolic
+/// trajectory. The universal anomaly is used as a starting point for solving the
+/// universal Kepler equation.
+///
+/// Algorithm
+/// ---------
+/// 1. Compute the semi-major axis `a0 = -μ / α` and the hyperbolic mean motion
+///    `n = sqrt(α³) / μ`.
+/// 2. Compute the initial hyperbolic eccentric anomaly `F₀` from the geometry,
+///    using:
+///    cosh(F₀) = (1 - r₀ / a₀) / e₀.
+/// 3. Adjust the sign of `F₀` based on the sign of the radial velocity `sig0`.
+/// 4. Compute the mean anomaly at epoch: ℓ₀ = e₀·sinh(F₀) - F₀.
+/// 5. Propagate ℓ₀ forward by n·dt to get the target mean anomaly at t₀ + dt.
+/// 6. Solve the hyperbolic Kepler equation:
+///    e₀·sinh(F) - F = ℓ
+///    using Newton-Raphson iterations, with additional handling to avoid
+///    divergence for large |F|.
+/// 7. Convert the difference (F - F₀) into the universal anomaly `ψ`
+///    using the scaling factor 1/√α.
+///
+/// Arguments
+/// ---------
+/// * `dt` – Propagation time interval (days) from the reference epoch `t0`.
+/// * `r0` – Initial heliocentric distance of the body (in AU).
+/// * `sig0` – Radial component of velocity at t₀ (AU/day).
+/// * `mu` – Gravitational parameter μ = GM of the central body (AU³/day²).
+/// * `alpha` – Twice the specific orbital energy (must be positive for hyperbolic orbits).
+/// * `e0` – Orbital eccentricity (must be > 1 for hyperbolic trajectories).
+/// * `contr` – Convergence control threshold for the Newton solver.
+/// * `max_iter` – Maximum number of Newton-Raphson iterations.
+///
+/// Returns
+/// --------
+/// * `psi` – Preliminary value of the universal anomaly at time `t0 + dt`.
+///
+/// Remarks
+/// --------
+/// * This function does not handle elliptical (α < 0) or parabolic (α = 0) orbits.
+/// * The returned `ψ` is only an initial guess and is refined later by a solver.
+///
+/// # See also
+/// * [`prelim_elliptic`] – Equivalent routine for elliptical orbits.
+/// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
+#[allow(clippy::too_many_arguments)]
+fn prelim_hyperbolic(
+    dt: f64,
+    r0: f64,
+    sig0: f64,
+    mu: f64,
+    alpha: f64,
+    e0: f64,
+    contr: f64,
+    max_iter: usize,
+) -> f64 {
+    // Step 1: Compute semi-major axis (a0) and hyperbolic mean motion n
+    // For hyperbolic orbits, a0 is negative.
+    let a0 = -mu / alpha;
+    let n = alpha.powi(3).sqrt() / mu;
+
+    // Step 2: Compute the initial hyperbolic anomaly F₀
+    // cosh(F₀) = (1 - r0/a0) / e0
+    let coshf0 = (1.0 - r0 / a0) / e0;
+    let mut f0 = if coshf0 > 1.0 {
+        // Compute F₀ from cosh⁻¹(x) = ln(x + sqrt(x² - 1))
+        (coshf0 + (coshf0.powi(2) - 1.0).sqrt()).ln()
+    } else {
+        0.0 // limit case: object very close to pericenter
+    };
+
+    // Adjust the sign of F₀ based on the sign of radial velocity
+    if sig0 < 0.0 {
+        f0 = -f0;
+    }
+
+    // Step 3: Compute the mean anomaly at epoch
+    let ell0 = e0 * f0.sinh() - f0;
+
+    // Propagate the mean anomaly forward by n·dt
+    let target_mean_anomaly = ell0 + n * dt;
+
+    // Step 4: Iteratively solve the hyperbolic Kepler equation:
+    //    e·sinh(F) - F = ℓ
+    // starting from F = 0 as an initial guess.
+    let mut f: f64 = 0.0;
+
+    for _ in 0..max_iter {
+        if f.abs() < 15.0 {
+            // Newton-Raphson update
+            let func = e0 * f.sinh() - f - target_mean_anomaly;
+            let deriv = e0 * f.cosh() - 1.0;
+            let df = -func / deriv;
+            let ff = f + df;
+            // If the update crosses zero, dampen the step to avoid divergence
+            f = if f * ff < 0.0 { f / 2.0 } else { ff };
+        } else {
+            // For very large |F|, reduce it progressively
+            f /= 2.0;
+        }
+
+        // Convergence check
+        if f.abs() < contr * 1e3 {
+            break;
+        }
+    }
+
+    // Step 5: Convert the difference in anomalies to universal anomaly ψ
+    (f - f0) / alpha.sqrt()
 }
 
 /// Résout l'équation universelle de Kepler en utilisant une méthode de Newton.
