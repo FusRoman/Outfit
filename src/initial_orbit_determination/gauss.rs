@@ -149,7 +149,7 @@ impl GaussObs {
     /// # Errors
     /// ----------
     /// Returns an error if any call to `Normal::new` fails due to non-finite or negative variance.
-    pub(crate) fn generate_noisy_realizations(
+    pub fn generate_noisy_realizations(
         &self,
         errors_ra: &Vector3<f64>,
         errors_dec: &Vector3<f64>,
@@ -336,7 +336,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::gauss_prelim`] – for computing `vector_a`, `vector_b`, and the unit direction matrix.
-    fn coeff_eight_poly(
+    pub fn coeff_eight_poly(
         &self,
         unit_matrix: &Matrix3<f64>,
         unit_invmatrix: &Matrix3<f64>,
@@ -399,7 +399,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`GaussObs::coeff_eight_poly`] – for computing the coefficients of the polynomial.
-    fn solve_8poly(
+    pub fn solve_8poly(
         &self,
         polynom: &[f64; 9],
         max_iterations: u32,
@@ -452,7 +452,7 @@ impl GaussObs {
     /// # See also
     /// * [`GaussObs::accept_root`] – filters valid roots using this method.
     /// * [`VLIGHT_AU`] – speed of light in AU/day.
-    fn position_vector_and_reference_epoch(
+    pub fn position_vector_and_reference_epoch(
         &self,
         unit_matrix: &Matrix3<f64>,
         unit_matinv: &Matrix3<f64>,
@@ -503,7 +503,7 @@ impl GaussObs {
     /// # See also
     /// * [`GaussObs::position_vector_and_reference_epoch`] – computes `ast_pos_vector` used as input here.
     /// * [`GAUSS_GRAV`] – Gaussian gravitational constant.
-    fn gibbs_correction(
+    pub fn gibbs_correction(
         &self,
         ast_pos_vector: &Matrix3<f64>,
         tau1: f64,
@@ -564,7 +564,7 @@ impl GaussObs {
     /// * [`GaussObs::position_vector_and_reference_epoch`] – computes the full 3×3 object position matrix.
     /// * [`GaussObs::gibbs_correction`] – estimates the velocity at central epoch from positions.
     #[allow(clippy::too_many_arguments)]
-    fn accept_root(
+    pub fn accept_root(
         &self,
         root: f64,
         unit_matrix: &Matrix3<f64>,
@@ -795,7 +795,7 @@ impl GaussObs {
     /// * [`eccentricity_control`] – Filters solutions based on dynamic acceptability.
     /// * [`GaussObs::position_vector_and_reference_epoch`] – Recomputes full asteroid positions at each epoch.
     #[allow(clippy::too_many_arguments)]
-    fn pos_and_vel_correction(
+    pub fn pos_and_vel_correction(
         &self,
         asteroid_position: &Matrix3<f64>,
         asteroid_velocity: &Vector3<f64>,

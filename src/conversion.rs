@@ -23,17 +23,38 @@ fn compute_accuracy(field: &str, factor: f64) -> Option<f64> {
     }
 }
 
-/// Parse a right ascension string to degrees
+/// Parse a right ascension (RA) string and convert it to degrees, with an estimate of its accuracy.
 ///
-/// Arguments
-/// ---------
-/// * `ra`: a string representing the right ascension in the format `HH MM SS.SS`
+/// This function parses a right ascension expressed in **sexagesimal hours**
+/// (`HH MM SS.SS`) and converts it into degrees. The input must have exactly
+/// three whitespace-separated fields: hours, minutes, and seconds (which may
+/// include fractional seconds).
 ///
-/// Returns
-/// -------
-/// * `Option<(Degree, ArcSec)>`: A tuple where the first element is the right ascension in degrees
-///   and the second element is the accuracy in arcseconds. Returns `None` if the input format is invalid.
-pub(crate) fn parse_ra_to_deg(ra: &str) -> Option<(Degree, ArcSec)> {
+/// # Arguments
+///
+/// * `ra` – A string in the format:
+///   * `"HH MM SS.SS"` (e.g., `"12 30 45.67"`).
+///
+/// # Returns
+///
+/// Returns `Some((ra_deg, accuracy_arcsec))` where:
+/// * `ra_deg` – Right ascension in **degrees** (0° ≤ RA < 360°),
+/// * `accuracy_arcsec` – Estimated accuracy of the RA, derived from the number
+///   of decimals provided in the seconds field, in **arcseconds**.
+///
+/// Returns `None` if:
+/// * The string does not have exactly 3 whitespace-separated components,
+/// * Any component fails to parse as a floating-point number.
+///
+/// # Formula
+///
+/// ```text
+/// RA(deg) = (hours + minutes / 60 + seconds / 3600) × 15
+/// ```
+///
+/// # See also
+/// * [`parse_dec_to_deg`] – Parses declination strings into degrees.
+pub fn parse_ra_to_deg(ra: &str) -> Option<(Degree, ArcSec)> {
     let parts: Vec<&str> = ra.split_whitespace().collect();
     if parts.len() != 3 {
         return None;
@@ -49,16 +70,37 @@ pub(crate) fn parse_ra_to_deg(ra: &str) -> Option<(Degree, ArcSec)> {
     Some((ra_deg, acc_arcsec))
 }
 
-/// Parse a declination string to degrees
+/// Parse a declination (DEC) string and convert it to degrees, with an estimate of its accuracy.
 ///
-/// Arguments
-/// ---------
-/// * `dec`: a string representing the declination in the format `±DD MM SS.SS`
+/// This function parses a declination expressed in **sexagesimal degrees**
+/// (`±DD MM SS.SS`) and converts it into degrees. The input must have exactly
+/// three whitespace-separated fields: degrees (with sign), minutes, and seconds
+/// (which may include fractional seconds).
 ///
-/// Returns
-/// -------
-/// * `Option<(Degree, ArcSec)>`: A tuple where the first element is the declination in degrees
-///   and the second element is the accuracy in arcseconds. Returns `None` if the input format is invalid.
+/// # Arguments
+///
+/// * `dec` – A string in the format:
+///   * `"±DD MM SS.SS"` (e.g., `"-23 26 45.1"` or `"+10 15 30"`).
+///
+/// # Returns
+///
+/// Returns `Some((dec_deg, accuracy_arcsec))` where:
+/// * `dec_deg` – Declination in **degrees** (−90° ≤ DEC ≤ +90°),
+/// * `accuracy_arcsec` – Estimated accuracy of the DEC, derived from the number
+///   of decimals provided in the seconds field, in **arcseconds**.
+///
+/// Returns `None` if:
+/// * The string does not have exactly 3 whitespace-separated components,
+/// * Any component fails to parse as a floating-point number.
+///
+/// # Formula
+///
+/// ```text
+/// DEC(deg) = sign × (degrees + minutes / 60 + seconds / 3600)
+/// ```
+///
+/// # See also
+/// * [`parse_ra_to_deg`] – Parses right ascension strings into degrees.
 pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
     let parts: Vec<&str> = dec.split_whitespace().collect();
     if parts.len() != 3 {
@@ -100,7 +142,7 @@ pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
 ///
 /// # See also
 /// * [`correct_aberration`](crate::observations::correct_aberration) – apply aberration correction before calling this if needed
-pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
+pub fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let pos_norm = cartesian_position.norm();
     if pos_norm == 0. {
         return (0.0, 0.0, pos_norm);

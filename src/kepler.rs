@@ -270,7 +270,7 @@ fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
 ///
 /// This ensures any input angle is wrapped into the principal interval
 /// 0 ≤ θ < 2π using Euclidean remainder.
-pub(crate) fn principal_angle(a: f64) -> f64 {
+pub fn principal_angle(a: f64) -> f64 {
     a.rem_euclid(DPI)
 }
 
@@ -278,7 +278,7 @@ pub(crate) fn principal_angle(a: f64) -> f64 {
 ///
 /// Returns the value of (a - b) wrapped into the range [-π, π],
 /// i.e. the smallest signed rotation from `b` to `a`.
-fn angle_diff(a: f64, b: f64) -> f64 {
+pub fn angle_diff(a: f64, b: f64) -> f64 {
     let a = principal_angle(a);
     let b = principal_angle(b);
 
@@ -326,7 +326,7 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 /// * [`prelim_elliptic`] – Computes ψ for elliptical orbits.
 /// * [`prelim_hyperbolic`] – Computes ψ for hyperbolic orbits.
 /// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
-fn prelim_kepuni(params: &UniversalKeplerParams, contr: f64) -> Option<f64> {
+pub fn prelim_kepuni(params: &UniversalKeplerParams, contr: f64) -> Option<f64> {
     const ITX: usize = 20;
 
     match params.orbit_type() {
@@ -375,7 +375,7 @@ fn prelim_kepuni(params: &UniversalKeplerParams, contr: f64) -> Option<f64> {
 /// * [`prelim_hyperbolic`] – Equivalent procedure for hyperbolic orbits.
 /// * [`solve_kepuni`] – Refines `ψ` by solving the universal Kepler equation.
 /// * [`angle_diff`] – Computes the principal difference between two angles.
-fn prelim_elliptic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
+pub fn prelim_elliptic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
     // Step 1: Compute semi-major axis (a0) and mean motion (n)
     let a0 = -params.mu / params.alpha;
     let n = (-params.alpha.powi(3)).sqrt() / params.mu;
@@ -466,7 +466,7 @@ fn prelim_elliptic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) 
 /// # See also
 /// * [`prelim_elliptic`] – Equivalent routine for elliptical orbits.
 /// * [`solve_kepuni`] – Refines ψ by solving the universal Kepler equation.
-fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
+pub fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
     // Step 1: Compute semi-major axis (a0) and hyperbolic mean motion n
     // For hyperbolic orbits, a0 is negative.
     let a0 = -params.mu / params.alpha;
@@ -556,7 +556,7 @@ fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: usize
 /// --------
 /// * The initial guess for `ψ` is computed using [`prelim_kepuni`].
 /// * Convergence is usually fast (few iterations).
-fn solve_kepuni(
+pub fn solve_kepuni(
     params: &UniversalKeplerParams,
     convergency: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {

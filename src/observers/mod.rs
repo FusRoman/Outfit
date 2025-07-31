@@ -73,7 +73,7 @@ impl Observer {
     /// ------
     /// * observer fixed coordinates vector on the Earth (not corrected from Earth motion)
     /// * units is AU
-    pub(crate) fn body_fixed_coord(&self) -> Vector3<f64> {
+    pub fn body_fixed_coord(&self) -> Vector3<f64> {
         let lon_radians = self.longitude.to_radians();
 
         Vector3::new(
@@ -116,7 +116,7 @@ impl Observer {
     /// * [`Observer::body_fixed_coord`] – observer's base vector in Earth-fixed frame
     /// * [`rotpn`] – rotation between reference frames
     /// * [`gmst`], [`equequ`] – time-dependent Earth orientation
-    pub(crate) fn pvobs(
+    pub fn pvobs(
         &self,
         tmjd: &Epoch,
         ut1_provider: &Ut1Provider,

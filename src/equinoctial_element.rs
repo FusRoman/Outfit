@@ -136,7 +136,7 @@ impl EquinoctialElements {
     /// Return
     /// ------
     /// * A `Result` containing the eccentric anomaly (radians) or an error if the solution fails.
-    fn solve_kepler_equation(
+    pub fn solve_kepler_equation(
         &self,
         mean_longitude_t1: f64,
         longitude_of_periastre: f64,
@@ -448,7 +448,7 @@ impl EquinoctialElements {
     /// - Velocity: **UA/day**  
     /// - Time: **days**  
     /// - Angles: **radians**
-    fn compute_cartesian_position_and_velocity(
+    pub fn compute_cartesian_position_and_velocity(
         &self,
         mean_motion: f64,
         eccentric_anomaly: f64,

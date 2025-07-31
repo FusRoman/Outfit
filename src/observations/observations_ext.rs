@@ -78,7 +78,7 @@ use crate::{
 ///
 /// This trait is central to orbit determination pipelines and is designed
 /// to work with small batches of observations (often < 100 per object).
-trait ObservationsExt {
+pub trait ObservationsExt {
     /// Compute triplets of observations for initial orbit determination.
     ///
     /// This method is a thin wrapper around [`generate_triplets`] that calls it
