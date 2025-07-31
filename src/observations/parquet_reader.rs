@@ -22,7 +22,7 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 /// * `trajectories`: a mutable reference to a TrajectorySet
 /// * `env_state`: a mutable reference to an Outfit
 /// * `parquet`: a path to a Parquet file
-/// * `observer`: an Arc<Observer>
+/// * `observer`: an `Arc<Observer>`
 /// * `error_ra`: the error in right ascension (RA) in arcseconds
 /// * `error_dec`: the error in declination (DEC) in arcseconds
 /// * `batch_size`: an optional batch size to use when reading the Parquet file, If None, the default batch size is 2048

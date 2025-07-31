@@ -1,6 +1,6 @@
 use crate::outfit_errors::OutfitError;
 
-pub(crate) mod gauss;
+pub mod gauss;
 pub mod gauss_result;
 
 /// Configuration parameters controlling the behavior of [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).

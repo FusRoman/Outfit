@@ -99,7 +99,7 @@ pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
 /// * This function is used when converting inertial position vectors to observable angles.
 ///
 /// # See also
-/// * [`correct_aberration`] – apply aberration correction before calling this if needed
+/// * [`correct_aberration`](crate::observations::correct_aberration) – apply aberration correction before calling this if needed
 pub(crate) fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let pos_norm = cartesian_position.norm();
     if pos_norm == 0. {

@@ -72,9 +72,9 @@ fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
 ///
 /// # See also
 /// * [`eccentricity_control`] – Filters orbital solutions based on eccentricity and perihelion distance thresholds.
-/// * [`KeplerianElements`] – Struct holding canonical orbital elements.
-/// * [`velocity_correction`] – Lagrange-based velocity refinement from triplet position vectors.
-/// * [`GAUSS_GRAV_SQUARED`](crate::constants::GAUSS_GRAV_SQUARED) – Gaussian gravitational constant.
+/// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – Struct holding canonical orbital elements.
+/// * [`velocity_correction`](crate::kepler::velocity_correction) – Lagrange-based velocity refinement from triplet position vectors.
+/// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant.
 pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
     let mut elle = [0.0; 3]; // Angular momentum vector (r × v)
     let mut elv = [0.0; 3]; // Normalized angular momentum vector
@@ -243,9 +243,9 @@ pub fn ccek1(elem: &mut [f64; 6], type_: &mut String, xv: &[f64; 6]) {
 ///
 /// # See also
 /// * [`ccek1`] – Computes classical orbital elements from a Cartesian state vector.
-/// * [`KeplerianElements`] – Structured representation of orbital parameters.
-/// * [`velocity_correction`] – Computes orbital velocity from position triplets using the Lagrange formulation.
-/// * [`GAUSS_GRAV_SQUARED`](crate::constants::GAUSS_GRAV_SQUARED) – Gaussian gravitational constant squared.
+/// * [`KeplerianElements`](crate::keplerian_element::KeplerianElements) – Structured representation of orbital parameters.
+/// * [`velocity_correction`](crate::kepler::velocity_correction) – Computes orbital velocity from position triplets using the Lagrange formulation.
+/// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant squared.
 pub fn eccentricity_control(
     asteroid_position: &Vector3<f64>,
     asteroid_velocity: &Vector3<f64>,

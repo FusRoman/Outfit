@@ -69,13 +69,13 @@ impl EquinoctialElements {
     /// e = sqrt(h² + k²)
     /// ```
     ///
-    /// See also [`squared_eccentricity`] for the squared value.
+    /// See also [`EquinoctialElements::squared_eccentricity`] for the squared value.
     ///
     /// # Returns
     /// * The eccentricity `e` (dimensionless).
     ///
     /// # See also
-    /// * [`squared_eccentricity`] – Returns `e²` directly.
+    /// * [`EquinoctialElements::squared_eccentricity`] – Returns `e²` directly.
     pub fn eccentricity(&self) -> f64 {
         self.squared_eccentricity().sqrt()
     }

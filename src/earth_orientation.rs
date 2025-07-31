@@ -87,12 +87,6 @@ pub fn obleq(tjm: f64) -> Radian {
 /// The returned values are **in arcseconds**, as per the original IAU convention. They are typically
 /// converted to radians for use in rotation matrices (via [`RADSEC`] in other modules).
 ///
-/// Notes
-/// ------
-/// * The internal coefficients and series expansion are directly adapted from OrbFit (Fortran), which itself
-///   follows the IAU 1980 formulation by Wahr.
-/// * This implementation is compatible with OrbFit’s `nutn80` and yields identical output to within machine precision.
-///
 /// # See also
 /// * [`rnut80`] – uses these angles to build the nutation rotation matrix
 /// * [`rotpn`](crate::ref_system::rotpn) – applies nutation when transforming between Equt and Equm systems

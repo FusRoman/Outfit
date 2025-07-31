@@ -168,7 +168,7 @@ trait ObservationsExt {
     ///
     /// # Computation Details
     /// ----------
-    /// - The residuals per observation are computed using [`Observation::ephemeris_error`](crate::observations::observations::Observation::ephemeris_error), returning a weighted sum of squares (normalized).
+    /// - The residuals per observation are computed using [`Observation::ephemeris_error`](crate::observations::Observation::ephemeris_error), returning a weighted sum of squares (normalized).
     /// - The RMS is computed as:
     ///   RMS = √[ (1 / 2N) × Σᵢ (RAᵢ² + DECᵢ²) ]
     ///   where N is the number of observations in the selected interval.
