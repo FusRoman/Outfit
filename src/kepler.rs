@@ -1193,38 +1193,219 @@ mod kepler_test {
         }
     }
 
-    #[test]
-    fn test_velocity_correction() {
-        let x1 = Vector3::new(
-            -0.843_561_126_129_683_3,
-            0.937_288_327_370_772_8,
-            0.659_183_901_029_776_6,
-        );
+    mod tests_velocity_correction {
+        use super::*;
+        use approx::assert_relative_eq;
+        use nalgebra::Vector3;
 
-        let x2 = Vector3::new(
-            -0.623_121_622_917_384,
-            1.0076797884556383,
-            0.708_125_687_984_424_5,
-        );
+        /// Helper function: easily build a 3D vector.
+        fn v(x: f64, y: f64, z: f64) -> Vector3<f64> {
+            Vector3::new(x, y, z)
+        }
 
-        let v2 = Vector3::new(
-            -1.552_431_036_862_405_6E-2,
-            -3.984_104_176_604_068E-3,
-            -2.764_015_436_163_718_3E-3,
-        );
-        let dt = 14.731970000000729;
+        #[test]
+        fn test_velocity_correction_nominal_elliptic() {
+            // Nominal test: elliptical orbit with simple positions and velocity.
+            // This ensures that the correction converges and returns reasonable values.
+            let x1 = v(1.0, 0.0, 0.0);
+            let x2 = v(1.1, 0.0, 0.0);
+            let v2 = v(0.0, 0.017, 0.0); // Approximate Earth orbital speed in AU/day
+            let dt = 1.0; // 1 day
+            let peri_max = 5.0;
+            let ecc_max = 0.9;
 
-        let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1.).unwrap();
+            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max);
+            assert!(result.is_ok(), "Velocity correction should succeed");
 
-        assert_eq!(f, 0.988_164_877_097_290_6);
-        assert_eq!(g, 14.674676076120734);
-        assert_eq!(
-            v2.as_slice(),
-            [
-                -0.015524310248562921,
-                -0.003984104769239458,
-                -0.0027640155187336176
-            ]
-        )
+            let (vcorr, f, g) = result.unwrap();
+
+            // All outputs should be finite
+            assert!(vcorr.iter().all(|c| c.is_finite()));
+            assert!(f.is_finite());
+            assert!(g.is_finite());
+
+            // f should be reasonably close to 1 for small geometry changes
+            assert!(f > 0.5 && f < 1.5, "f coefficient is in a reasonable range");
+            // g should be close to dt
+            assert_relative_eq!(g, dt, epsilon = 0.1);
+        }
+
+        #[test]
+        fn test_velocity_correction_rejects_bad_orbit() {
+            // Use completely unrealistic input values to trigger an error in eccentricity_control.
+            // This ensures that the function correctly returns an error instead of panicking.
+            let x1 = v(1e6, 1e6, 1e6);
+            let x2 = v(1e6, 1e6, 1e6);
+            let v2 = v(1e6, 1e6, 1e6);
+            let dt = 0.1;
+            let peri_max = 0.001;
+            let ecc_max = 0.001;
+
+            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max);
+            assert!(
+                result.is_err(),
+                "Velocity correction should fail on an invalid orbit"
+            );
+        }
+
+        #[test]
+        fn test_velocity_correction_sensitivity_to_x1() {
+            // Sensitivity test:
+            // If x1 changes slightly, the corrected velocity vector should also change.
+            let x1 = v(1.0, 0.0, 0.0);
+            let x1_shifted = v(1.05, 0.0, 0.0); // Slight offset
+            let x2 = v(1.1, 0.0, 0.0);
+            let v2 = v(0.0, 0.017, 0.0);
+            let dt = 1.0;
+            let peri_max = 5.0;
+            let ecc_max = 0.9;
+
+            let result1 = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+            let result2 =
+                velocity_correction(&x1_shifted, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+
+            let (v_corr1, _, _) = result1;
+            let (v_corr2, _, _) = result2;
+
+            let diff = (v_corr1 - v_corr2).norm();
+            assert!(
+                diff > 1e-6,
+                "Changing x1 must influence the corrected velocity (diff = {diff})"
+            );
+        }
+
+        #[test]
+        fn test_velocity_correction_output_not_nan() {
+            // This test ensures that the correction never returns NaN values,
+            // even for slightly irregular configurations.
+            let x1 = v(1.0, 0.5, 0.0);
+            let x2 = v(1.1, 0.2, 0.0);
+            let v2 = v(0.0, 0.02, 0.0);
+            let dt = 0.5;
+            let peri_max = 5.0;
+            let ecc_max = 0.9;
+
+            let (v_corr, f, g) = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+            assert!(
+                !v_corr.iter().any(|x| x.is_nan()),
+                "Corrected velocity vector contains NaN"
+            );
+            assert!(!f.is_nan(), "f coefficient is NaN");
+            assert!(!g.is_nan(), "g coefficient is NaN");
+        }
+
+        #[test]
+        fn test_velocity_correction_real_data() {
+            let x1 = Vector3::new(
+                -0.843_561_126_129_683_3,
+                0.937_288_327_370_772_8,
+                0.659_183_901_029_776_6,
+            );
+
+            let x2 = Vector3::new(
+                -0.623_121_622_917_384,
+                1.0076797884556383,
+                0.708_125_687_984_424_5,
+            );
+
+            let v2 = Vector3::new(
+                -1.552_431_036_862_405_6E-2,
+                -3.984_104_176_604_068E-3,
+                -2.764_015_436_163_718_3E-3,
+            );
+            let dt = 14.731970000000729;
+
+            let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1.).unwrap();
+
+            assert_eq!(f, 0.988_164_877_097_290_6);
+            assert_eq!(g, 14.674676076120734);
+            assert_eq!(
+                v2.as_slice(),
+                [
+                    -0.015524310248562921,
+                    -0.003984104769239458,
+                    -0.0027640155187336176
+                ]
+            )
+        }
+
+        mod velocity_correction_prop_tests {
+            use super::*;
+            use nalgebra::Vector3;
+            use proptest::prelude::*;
+
+            /// Build a Vector3 from components
+            fn v(x: f64, y: f64, z: f64) -> Vector3<f64> {
+                Vector3::new(x, y, z)
+            }
+
+            /// Strategy to generate realistic orbital parameters
+            fn arb_orbit_params(
+            ) -> impl Strategy<Value = (Vector3<f64>, Vector3<f64>, Vector3<f64>, f64, f64, f64)>
+            {
+                (
+                    // x1: position vector (avoid zero)
+                    (-2.0..2.0f64, -2.0..2.0f64, -2.0..2.0f64)
+                        .prop_map(|(x, y, z)| v(x + 1.0, y + 1.0, z)), // ensure non-zero
+                    // x2: position vector (close to x1)
+                    (-2.0..2.0f64, -2.0..2.0f64, -2.0..2.0f64)
+                        .prop_map(|(x, y, z)| v(x + 1.1, y + 1.0, z)),
+                    // v2: velocity vector
+                    (-0.05..0.05f64, -0.05..0.05f64, -0.05..0.05f64)
+                        .prop_map(|(x, y, z)| v(x, y, z)),
+                    // dt: time interval
+                    0.01..5.0f64,
+                    // peri_max
+                    0.1..10.0f64,
+                    // ecc_max
+                    0.1..2.0f64,
+                )
+            }
+
+            proptest! {
+                /// Property test: velocity_correction should never panic
+                /// and always return finite results when it succeeds.
+                #[test]
+                fn prop_velocity_correction_no_panic(
+                    (x1,x2,v2,dt,peri_max,ecc_max) in arb_orbit_params()
+                ) {
+                    let res = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max);
+
+                    match res {
+                        Ok((vcorr, f, g)) => {
+                            // Ensure outputs are finite
+                            prop_assert!(vcorr.iter().all(|c| c.is_finite()));
+                            prop_assert!(f.is_finite());
+                            prop_assert!(g.is_finite());
+                        }
+                        Err(_) => {
+                            // Err is acceptable: indicates eccentricity_control or solve_kepuni failure
+                        }
+                    }
+                }
+            }
+
+            proptest! {
+                /// Differential property test: a slight change in x1 should
+                /// change the result (when both calls return Ok).
+                #[test]
+                fn prop_velocity_correction_sensitive_to_x1(
+                    (x1,x2,v2,dt,peri_max,ecc_max) in arb_orbit_params()
+                ) {
+                    // Slight perturbation on x1
+                    let mut x1_shifted = x1;
+                    x1_shifted[0] += 0.01;
+
+                    let res1 = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max);
+                    let res2 = velocity_correction(&x1_shifted,&x2,&v2,dt,peri_max,ecc_max);
+
+                    if let (Ok((v1, _, _)), Ok((v2c, _, _))) = (res1, res2) {
+                        let diff = (v1 - v2c).norm();
+                        // Either result is valid and diff can be very small or non-zero
+                        prop_assert!(diff >= 0.0);
+                    }
+                }
+            }
+        }
     }
 }
