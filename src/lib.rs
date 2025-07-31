@@ -13,7 +13,7 @@ pub mod observers;
 mod orb_elem;
 pub mod outfit;
 pub mod outfit_errors;
-mod ref_system;
+pub mod ref_system;
 pub mod time;
 
 #[cfg(all(test, feature = "jpl-download"))]

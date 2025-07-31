@@ -331,14 +331,11 @@ pub(crate) fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 /// Remarks
 /// -------
 /// * This function performs the following steps for each observer/time pair:
-///     1. Computes the observer’s geocentric position in the ecliptic mean J2000 frame via [`pvobs`].
+///     1. Computes the observer’s geocentric position in the ecliptic mean J2000 frame via [`Observer::pvobs`].
 ///     2. Retrieves the heliocentric Earth position from the JPL ephemeris.
 ///     3. Transforms the observer’s position from the ecliptic mean J2000 frame to the equatorial mean J2000 frame using [`rotpn`].
 ///     4. Computes the heliocentric observer position by summing the Earth and transformed observer vectors.
 ///
-/// # Validation
-/// This function is tested in [`observer_pos_tests::test_helio_pos_obs`] and validated against known heliocentric
-/// positions from authoritative sources such as JPL Horizons and OrbFit for real observatories.
 ///
 /// # See also
 /// * [`Observer::pvobs`] – computes the observer’s geocentric position in the ecliptic mean J2000 frame

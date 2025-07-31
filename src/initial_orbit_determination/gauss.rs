@@ -335,7 +335,7 @@ impl GaussObs {
     ///   onto the unit direction at the central epoch, ensuring consistency between dynamic and geometric models.
     ///
     /// # See also
-    /// * [`gauss_prelim`] – for computing `vector_a`, `vector_b`, and the unit direction matrix.
+    /// * [`GaussObs::gauss_prelim`] – for computing `vector_a`, `vector_b`, and the unit direction matrix.
     fn coeff_eight_poly(
         &self,
         unit_matrix: &Matrix3<f64>,
@@ -398,7 +398,7 @@ impl GaussObs {
     /// * The root-finding is powered by the `aberth` crate.
     ///
     /// # See also
-    /// * [`coeff_eight_poly`] – for computing the coefficients of the polynomial.
+    /// * [`GaussObs::coeff_eight_poly`] – for computing the coefficients of the polynomial.
     fn solve_8poly(
         &self,
         polynom: &[f64; 9],
@@ -450,7 +450,7 @@ impl GaussObs {
     /// * The returned `reference_epoch` accounts for the light-time delay correction (aberration).
     ///
     /// # See also
-    /// * [`accept_root`] – filters valid roots using this method.
+    /// * [`GaussObs::accept_root`] – filters valid roots using this method.
     /// * [`VLIGHT_AU`](crate::constants::VLIGHT_AU) – speed of light in AU/day.
     fn position_vector_and_reference_epoch(
         &self,
@@ -501,7 +501,7 @@ impl GaussObs {
     ///   approximations and gravity-based scaling.
     ///
     /// # See also
-    /// * [`position_vector_and_reference_epoch`] – computes `ast_pos_vector` used as input here.
+    /// * [`GaussObs::position_vector_and_reference_epoch`] – computes `ast_pos_vector` used as input here.
     /// * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV) – Gaussian gravitational constant.
     fn gibbs_correction(
         &self,
@@ -561,8 +561,8 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`eccentricity_control`] – checks if an orbit meets physical bounds.
-    /// * [`position_vector_and_reference_epoch`] – computes the full 3×3 object position matrix.
-    /// * [`gibbs_correction`] – estimates the velocity at central epoch from positions.
+    /// * [`GaussObs::position_vector_and_reference_epoch`] – computes the full 3×3 object position matrix.
+    /// * [`GaussObs::gibbs_correction`] – estimates the velocity at central epoch from positions.
     #[allow(clippy::too_many_arguments)]
     fn accept_root(
         &self,
@@ -702,8 +702,8 @@ impl GaussObs {
     /// # See also
     /// * [`GaussObs`] – Struct holding the observation triplet used in this computation.
     /// * [`GaussResult`] – Enum indicating whether the orbit is preliminary or corrected.
-    /// * [`pos_and_vel_correction`] – Performs the refinement step on the orbital state.
-    /// * [`solve_8poly`] – Finds valid roots of the 8th-degree distance polynomial.
+    /// * [`GaussObs::pos_and_vel_correction`] – Performs the refinement step on the orbital state.
+    /// * [`GaussObs::solve_8poly`] – Finds valid roots of the 8th-degree distance polynomial.
     pub fn prelim_orbit(&self) -> Result<GaussResult, OutfitError> {
         // Compute core quantities: time intervals, direction matrix and its inverse, and coefficients
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) = self.gauss_prelim()?;
@@ -793,7 +793,7 @@ impl GaussObs {
     /// # See also
     /// * [`velocity_correction`] – Lagrange-based velocity update.
     /// * [`eccentricity_control`] – Filters solutions based on dynamic acceptability.
-    /// * [`position_vector_and_reference_epoch`] – Recomputes full asteroid positions at each epoch.
+    /// * [`GaussObs::position_vector_and_reference_epoch`] – Recomputes full asteroid positions at each epoch.
     #[allow(clippy::too_many_arguments)]
     fn pos_and_vel_correction(
         &self,

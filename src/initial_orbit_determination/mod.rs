@@ -3,7 +3,7 @@ use crate::outfit_errors::OutfitError;
 pub(crate) mod gauss;
 pub mod gauss_result;
 
-/// Configuration parameters controlling the behavior of [`ObservationIOD::estimate_best_orbit`].
+/// Configuration parameters controlling the behavior of [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
 ///
 /// This structure centralizes all the tunable parameters used during
 /// preliminary orbit determination with the Gauss method. It allows
@@ -125,7 +125,7 @@ pub mod gauss_result;
 ///
 /// # See also
 ///
-/// * [`ObservationIOD::estimate_best_orbit`] – Main orbit determination entry point.
+/// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – Main orbit determination entry point.
 #[derive(Debug, Clone)]
 pub struct IODParams {
     pub n_noise_realizations: usize,
@@ -148,7 +148,30 @@ impl IODParams {
         Self::default()
     }
 
-    /// Start building a customized [`IODParams`] using a fluent builder.
+    /// Create a new [`IODParamsBuilder`] to configure custom parameters
+    /// for Initial Orbit Determination (IOD).
+    ///
+    /// This is a **fluent builder API** for [`IODParams`], allowing you to
+    /// override the default parameters step by step before running
+    /// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let params = IODParams::builder()
+    ///     .n_noise_realizations(100)
+    ///     .noise_scale(1.0)
+    ///     .dtmax(30.0)
+    ///     .max_triplets(50)
+    ///     .build();
+    ///
+    /// let (orbit, rms) = observations.estimate_best_orbit(
+    ///     &state, &error_model, &mut rng, &params)?;
+    /// ```
+    ///
+    /// # See also
+    /// * [`IODParams`] – Holds all configuration parameters for IOD.
+    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – Consumes these parameters to perform orbit determination.
     pub fn builder() -> IODParamsBuilder {
         IODParamsBuilder::new()
     }
@@ -261,7 +284,7 @@ impl IODParamsBuilder {
     /// * In this case, the noise generation stage does not produce any
     ///   perturbed copies of a triplet.  
     ///   The orbit estimation uses **only the original triplet** (so
-    ///   [`generate_noisy_realizations`] returns a vector of size 1).
+    ///   [`generate_noisy_realizations`](crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations) returns a vector of size 1).
     ///
     /// **Special case – `max_obs_for_triplets < 3`:**
     ///
@@ -295,7 +318,7 @@ impl IODParamsBuilder {
     /// ```
     ///
     /// When `.build()` succeeds, the resulting [`IODParams`] can be passed
-    /// to [`ObservationIOD::estimate_best_orbit`].
+    /// to [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
     pub fn build(self) -> Result<IODParams, OutfitError> {
         if self.params.noise_scale < 0.0 {
             return Err(OutfitError::InvalidIODParameter(
