@@ -21,7 +21,7 @@ pub struct KeplerianElements {
 }
 
 impl KeplerianElements {
-    pub(crate) fn from_equinoctial_internal(
+    pub fn from_equinoctial_internal(
         reference_epoch: f64,
         semi_major_axis: f64,
         eccentricity_sin_lon: f64,

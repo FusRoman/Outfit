@@ -78,6 +78,9 @@ pub enum OutfitError {
 
     #[error("Invalid reference system: {0}")]
     InvalidRefSystem(String),
+
+    #[error("Velocity correction error: {0}")]
+    VelocityCorrectionError(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
