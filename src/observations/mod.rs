@@ -120,7 +120,7 @@ impl Observation {
     /// * [`correct_aberration`] – Applies aberration correction to the apparent direction of the body.
     /// * [`cartesian_to_radec`] – Converts 3D Cartesian vectors into equatorial coordinates (RA/DEC).
     /// * [`solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
-    pub(crate) fn ephemeris_error(
+    pub fn ephemeris_error(
         &self,
         state: &Outfit,
         equinoctial_element: &EquinoctialElements,
@@ -221,7 +221,7 @@ impl Observation {
 /// * This function does **not** normalize the output.
 /// * Suitable for use in astrometric modeling or when computing apparent direction
 ///   of celestial objects as seen from a moving observer.
-pub(crate) fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
+fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
     let norm_vector = xrel.norm();
     let dt = norm_vector / VLIGHT_AU;
     xrel - dt * vrel
