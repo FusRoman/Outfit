@@ -249,16 +249,11 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 fn prelim_kepuni(params: &UniversalKeplerParams, contr: f64) -> Option<f64> {
     const ITX: usize = 20;
 
-    if params.alpha < 0.0 {
-        return Some(prelim_elliptic(params, contr, ITX));
+    match params.orbit_type() {
+        OrbitType::Elliptic => Some(prelim_elliptic(params, contr, ITX)),
+        OrbitType::Hyperbolic => Some(prelim_hyperbolic(params, contr, ITX)),
+        OrbitType::Parabolic => None, // Not supported
     }
-
-    if params.alpha > 0.0 {
-        return Some(prelim_hyperbolic(params, contr, ITX));
-    }
-
-    // Parabolic (alpha == 0): not supported
-    None
 }
 
 /// Compute a preliminary estimate of the universal anomaly `ψ` for elliptical orbits (α < 0).
