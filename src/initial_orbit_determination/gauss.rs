@@ -1,3 +1,91 @@
+//! # Gauss Method for Initial Orbit Determination
+//!
+//! This module implements the **classical Gauss method** for initial orbit determination (IOD)
+//! using three optical astrometric observations taken from the same observing site.
+//!
+//! ## Main structure: [`GaussObs`]
+//!
+//! The [`GaussObs`] struct stores all the data required to apply the Gauss algorithm:
+//!
+//! * Indices of the three selected observations,
+//! * Right ascensions and declinations (in radians),
+//! * Observation times (MJD, TT),
+//! * Observer heliocentric positions at each epoch (computed via [`helio_obs_pos`] during construction).
+//!
+//! This struct provides all methods to:
+//! 1. Prepare geometric quantities,
+//! 2. Solve the polynomial equations for topocentric distance,
+//! 3. Compute preliminary orbital elements,
+//! 4. Optionally refine the solution.
+//!
+//! ## Main functionalities
+//!
+//! - **Construction:**
+//!   * [`GaussObs::with_observer_position`] – Build a `GaussObs` from observation data and an [`Outfit`] state.
+//!
+//! - **Geometry preparation:**
+//!   * Compute the 3×3 matrix of line-of-sight unit vectors,
+//!   * Build the time-scaled coefficients and `a`, `b` vectors for the 8th-degree Gauss polynomial.
+//!
+//! - **Orbit determination:**
+//!   * Solve the 8th-degree polynomial using the Aberth method,
+//!   * Compute preliminary heliocentric positions,
+//!   * Estimate velocity via **Gibbs' method**,
+//!   * Return a [`GaussResult`] (PrelimOrbit or CorrectedOrbit) containing classical [`KeplerianElements`].
+//!
+//! - **Orbit refinement:**
+//!   * [`GaussObs::pos_and_vel_correction`] – Iterative refinement of positions and velocities,
+//!   * Apply physical filters (eccentricity, perihelion distance) using [`eccentricity_control`].
+//!
+//! - **Monte Carlo perturbations:**
+//!   * [`GaussObs::generate_noisy_realizations`] – Generate multiple noisy triplets by adding Gaussian noise to RA and DEC,
+//!     useful for uncertainty studies and robustness tests.
+//!
+//! ## Algorithm outline
+//!
+//! 1. Compute **unit direction vectors** from the three RA/DEC observations.
+//! 2. Invert the direction matrix to solve the **linear system** for topocentric distances.
+//! 3. Solve the **8th-degree polynomial** for the central distance `ρ₂` using Aberth’s method.
+//! 4. Reconstruct heliocentric positions and estimate velocity via **Gibbs' method**.
+//! 5. Convert the resulting position/velocity to **Keplerian orbital elements**.
+//! 6. Optionally refine the orbit iteratively if required.
+//!
+//! ## Output
+//!
+//! The main result is a [`GaussResult`] which contains the computed orbit as
+//! a [`KeplerianElements`] object. It can be either preliminary (direct result)
+//! or corrected (after refinement).
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use outfit::initial_orbit_determination::gauss::GaussObs;
+//! use nalgebra::Vector3;
+//!
+//! // Build GaussObs (here positions are assumed precomputed)
+//! let gauss = GaussObs {
+//!     idx_obs: Vector3::new(0, 1, 2),
+//!     ra: Vector3::new(1.68, 1.69, 1.75),
+//!     dec: Vector3::new(1.08, 0.94, 0.82),
+//!     time: Vector3::new(57028.4, 57049.2, 57063.9),
+//!     observer_position: Matrix3::zeros(),
+//! };
+//!
+//! // Run the preliminary orbit computation
+//! let result = gauss.prelim_orbit().unwrap();
+//! println!("Semi-major axis: {}", result.get_orbit().semi_major_axis);
+//! ```
+//!
+//! ## References
+//!
+//! * Milani & Gronchi (2010) – *Theory of Orbit Determination*
+//! * The original Fortran implementation in [OrbFit](http://adams.dm.unipi.it/orbfit/).
+//!
+//! ## See also
+//!
+//! - [`GaussResult`]
+//! - [`KeplerianElements`]
+//! - [`helio_obs_pos`]
 use aberth::StopReason;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;

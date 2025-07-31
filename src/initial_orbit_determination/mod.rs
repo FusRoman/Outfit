@@ -1,3 +1,33 @@
+//! # Initial Orbit Determination (IOD) parameters
+//!
+//! This module defines the [`crate::initial_orbit_determination::IODParams`] configuration struct and its builder,
+//! which control how the **Gauss method** selects observation triplets and evaluates
+//! preliminary orbits.
+//!
+//! ## Purpose
+//!
+//! These parameters are used by
+//! [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit)
+//! to:
+//! - Select triplets of observations (time windows, maximum count),
+//! - Apply Monte Carlo noise perturbations,
+//! - Control time constraints when computing RMS values.
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use outfit::initial_orbit_determination::IODParams;
+//!
+//! let params = IODParams::builder()
+//!     .n_noise_realizations(10)
+//!     .noise_scale(1.0)
+//!     .dt_min(0.5)
+//!     .dt_max_triplet(20.0)
+//!     .build()
+//!     .unwrap();
+//! ```
+//!
+//! The resulting configuration can be passed to `estimate_best_orbit`.
 use crate::outfit_errors::OutfitError;
 
 pub mod gauss;

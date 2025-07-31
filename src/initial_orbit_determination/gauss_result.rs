@@ -1,3 +1,66 @@
+//! # Gauss orbit determination result
+//!
+//! This module defines [`GaussResult`], an enum representing the outcome of the
+//! **Gauss initial orbit determination method** applied to a triplet of astrometric
+//! observations. It encapsulates the **classical Keplerian orbital elements** computed
+//! from the Gauss method and distinguishes between two stages of the algorithm:
+//!
+//! ## Variants
+//!
+//! - **`PrelimOrbit`**  
+//!   A preliminary orbit computed directly from the root of the 8th-degree polynomial
+//!   and the Gibbs method without any iterative refinement.
+//!
+//! - **`CorrectedOrbit`**  
+//!   A corrected orbit obtained after at least one iteration of refinement, typically
+//!   using position/velocity correction or Lagrange coefficient adjustments.
+//!
+//! Both variants wrap a [`KeplerianElements`] structure that contains the six
+//! classical orbital elements (a, e, i, Ω, ω, M).
+//!
+//! ## Features
+//!
+//! - Query methods:
+//!   * [`GaussResult::is_prelim`] – check if the result is a preliminary orbit.
+//!   * [`GaussResult::is_corrected`] – check if the result includes correction.
+//! - Accessors:
+//!   * [`GaussResult::get_orbit`] – get a reference to the inner [`KeplerianElements`].
+//!   * [`GaussResult::as_inner`] – alias to `get_orbit`, useful in generic contexts.
+//!   * [`GaussResult::into_inner`] – consume the enum and return the inner data by value.
+//!
+//! Additionally, `GaussResult` implements [`Deref`](https://doc.rust-lang.org/std/ops/trait.Deref.html)
+//! to `KeplerianElements`, allowing you to directly access fields like
+//! `result.semi_major_axis` without explicitly calling `get_orbit()`.
+//!
+//! ## Usage
+//!
+//! This type is returned by functions such as
+//! [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit)
+//! or [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+//!
+//! ```rust,ignore
+//! use outfit::initial_orbit_determination::gauss_result::GaussResult;
+//!
+//! fn handle_result(result: GaussResult) {
+//!     if result.is_corrected() {
+//!         println!("Corrected orbit: a = {} AU", result.semi_major_axis);
+//!     } else {
+//!         println!("Preliminary orbit: a = {} AU", result.get_orbit().semi_major_axis);
+//!     }
+//! }
+//! ```
+//!
+//! ## Notes
+//!
+//! - This enum is a thin wrapper over [`KeplerianElements`] and does not store any
+//!   additional metadata beyond the refinement stage.
+//! - For consistency, prefer `get_orbit()` or `as_inner()` in generic code where explicitness matters.
+//!
+//! ## See also
+//!
+//! - [`KeplerianElements`]
+//! - [`GaussObs`](crate::initial_orbit_determination::gauss::GaussObs)
+//! - Milani & Gronchi (2010), *Theory of Orbit Determination*
 use crate::keplerian_element::KeplerianElements;
 use std::fmt;
 use std::ops::Deref;
