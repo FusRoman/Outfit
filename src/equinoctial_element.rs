@@ -124,43 +124,62 @@ impl EquinoctialElements {
         )
     }
 
-    /// Computes partial derivatives of the position and velocity vectors
-    /// with respect to equinoctial orbital elements.
+    /// Computes the Jacobian matrices of position and velocity
+    /// with respect to the equinoctial orbital elements.
     ///
-    /// This function evaluates how the Cartesian state vector of an orbiting body
-    /// (position and velocity in 3D space) changes when each of its orbital elements
-    /// is perturbed. It returns the Jacobian matrices of partial derivatives:
+    /// This function calculates how small variations in the six equinoctial
+    /// elements affect the Cartesian state vector (3D position and 3D velocity)
+    /// of an orbiting body. It returns two 6×3 matrices:
     ///
-    /// - The first matrix contains ∂(position)/∂(element)
-    /// - The second matrix contains ∂(velocity)/∂(element)
+    /// * The first matrix contains the partial derivatives of position
+    ///   with respect to each orbital element.
+    /// * The second matrix contains the partial derivatives of velocity
+    ///   with respect to each orbital element.
     ///
-    /// These derivatives are useful for orbit propagation, uncertainty estimation,
-    /// sensitivity analysis, and orbital parameter fitting.
+    /// The equinoctial elements are, in order:
+    /// 1. a – semi-major axis (AU)
+    /// 2. h – e * sin(ω + Ω)
+    /// 3. k – e * cos(ω + Ω)
+    /// 4. p – tan(i/2) * sin Ω
+    /// 5. q – tan(i/2) * cos Ω
+    /// 6. λ – mean longitude at epoch
     ///
-    /// Arguments
-    /// ---------
-    /// * `t0`, `t1`: Epoch and target times (in days)
-    /// * `mean_motion`: √(GM / a³), in rad/day
-    /// * `mean_longitude_t1`: λ(t1) = λ₀ + n·(t1 - t0)
-    /// * `eccentric_anomaly`: generalized eccentric anomaly F
-    /// * `inv_u`: 1 / (1 + p² + q²) — normalization of equinoctial frame
-    /// * `beta`: helper factor = 1 / (1 + √(1 - h² - k²))
-    /// * `sin_ecc_anom`, `cos_ecc_anom`: sin(F), cos(F)
-    /// * `xe`, `ye`: position in orbital plane
-    /// * `v_xe`, `v_ye`: velocity in orbital plane
-    /// * `f_vector`, `g_vector`: equinoctial base vectors
-    /// * `cart_position`, `cart_velocity`: 3D Cartesian state vectors
+    /// These derivatives are commonly used for:
+    /// * Orbit propagation using variational equations,
+    /// * Covariance propagation and orbit uncertainty estimation,
+    /// * Sensitivity analysis,
+    /// * Non-linear least squares fitting of orbital parameters.
     ///
-    /// Returns
-    /// -------
-    /// * `(dxde, dvde)`: Tuple of 6×3 matrices containing partial derivatives of
-    ///   position and velocity (rows) with respect to each orbital element (columns)
+    /// # Arguments
     ///
-    /// Units
-    /// -----
-    /// * All lengths: UA
+    /// * `t0`, `t1` – Epoch of the elements and target time (days)
+    /// * `mean_motion` – Mean motion (sqrt(GM / a^3), in rad/day)
+    /// * `mean_longitude_t1` – Mean longitude at `t1`
+    /// * `eccentric_anomaly` – Generalized eccentric anomaly F (radians)
+    /// * `inv_u` – 1 / (1 + p² + q²), normalizing factor for the equinoctial frame
+    /// * `beta` – Auxiliary factor: 1 / (1 + sqrt(1 - h² - k²))
+    /// * `sin_ecc_anom`, `cos_ecc_anom` – sin(F) and cos(F)
+    /// * `xe`, `ye` – Position components in the orbital plane (AU)
+    /// * `v_xe`, `v_ye` – Velocity components in the orbital plane (AU/day)
+    /// * `f_vector`, `g_vector` – Base vectors of the equinoctial reference frame
+    /// * `cart_position`, `cart_velocity` – Cartesian position and velocity vectors
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple `(dxde, dvde)` where:
+    ///
+    /// * `dxde` is a 6×3 matrix of partial derivatives of position
+    /// * `dvde` is a 6×3 matrix of partial derivatives of velocity
+    ///
+    /// # Units
+    ///
+    /// * Lengths: astronomical units (AU)
     /// * Time: days
-    /// * Velocity: UA/day
+    /// * Velocities: AU/day
+    ///
+    /// # See also
+    /// * [`EquinoctialElements::compute_w_vector`] – builds the third equinoctial base vector (W)
+    /// * [`KeplerianElements`] – conversion between Keplerian and equinoctial elements
     #[allow(clippy::too_many_arguments)]
     fn compute_derivative(
         &self,
@@ -182,12 +201,16 @@ impl EquinoctialElements {
         cart_position: Vector3<f64>,
         cart_velocity: Vector3<f64>,
     ) -> (Matrix6x3<f64>, Matrix6x3<f64>) {
+        // Compute the third base vector of the equinoctial reference frame.
+        // f_vector and g_vector define the orbital plane, w_vector is perpendicular.
         let w_vector = self.compute_w_vector(inv_u);
 
-        let r = (xe.powi(2) + ye.powi(2)).sqrt();
-        let inv_r = 1.0 / r;
-        let inv_1_beta = 1.0 / (1. - beta);
+        // Compute useful scalars for derivative formulas
+        let r = (xe.powi(2) + ye.powi(2)).sqrt(); // radial distance in the orbital plane
+        let inv_r = 1.0 / r; // 1/r
+        let inv_1_beta = 1.0 / (1. - beta); // 1/(1 - beta) auxiliary term
 
+        // Precompute repeated terms to simplify derivative expressions
         let tmp1 = mean_longitude_t1 - eccentric_anomaly;
         let tmp2 = beta + self.eccentricity_sin_lon.powi(2) * beta.powi(3) * inv_1_beta;
         let tmp3 =
@@ -202,35 +225,52 @@ impl EquinoctialElements {
         let tmp11 = self.semi_major_axis * sin_ecc_anom * inv_r;
         let tmp12 = mean_motion * self.semi_major_axis.powi(2) * inv_r;
 
-        // compute the derivatives of the position w.r.t to the equinoctial elements
+        // =========================================================================
+        // 1. Partial derivatives of position with respect to equinoctial elements
+        // =========================================================================
+
+        // Derivative of position with respect to semi-major axis (a)
+        // The expression includes a correction for time difference (t1 - t0).
         let dxde_pos1 =
             (cart_position - 3. * cart_velocity * (t1 - t0) / 2.) / self.semi_major_axis;
 
+        // Derivative with respect to element h (second column)
         let dx1de2_pos = -self.semi_major_axis
             * (tmp1 * tmp2 + self.semi_major_axis * cos_ecc_anom * tmp4 * inv_r);
         let dx2de2_pos = self.semi_major_axis
             * (tmp1 * tmp3 - 1.0 + self.semi_major_axis * cos_ecc_anom * tmp5 * inv_r);
-
         let dxde_pos2 = dx1de2_pos * f_vector + dx2de2_pos * g_vector;
 
+        // Derivative with respect to element k (third column)
         let dx1de3_pos = -self.semi_major_axis
             * (tmp1 * tmp3 + 1.0 - self.semi_major_axis * sin_ecc_anom * tmp4 * inv_r);
         let dx2de3_pos = self.semi_major_axis
             * (tmp1 * tmp6 - self.semi_major_axis * sin_ecc_anom * tmp5 * inv_r);
         let dxde_pos3 = dx1de3_pos * f_vector + dx2de3_pos * g_vector;
+
+        // Derivative with respect to element p (related to inclination and node)
         let dxde_pos4 = 2.0
             * (self.tan_half_incl_cos_node * (ye * f_vector - xe * g_vector) - xe * w_vector)
             * inv_u;
+
+        // Derivative with respect to element q (related to inclination and node)
         let dxde_pos5 = 2.0
             * (self.tan_half_incl_sin_node * (-ye * f_vector + xe * g_vector) + ye * w_vector)
             * inv_u;
+
+        // Derivative with respect to mean longitude (lambda)
         let dxde_pos6 = cart_velocity / mean_motion;
 
-        // compute the derivatives of the velocity w.r.t to the equinoctial elements
+        // =========================================================================
+        // 2. Partial derivatives of velocity with respect to equinoctial elements
+        // =========================================================================
+
+        // Derivative of velocity with respect to semi-major axis
         let dxde_vel1 = -(cart_velocity
             - 3. * GAUSS_GRAV_SQUARED * cart_position * (t1 - t0) / r.powi(3))
             / (2. * self.semi_major_axis);
 
+        // Derivatives of velocity with respect to h
         let dx4de2_vel = tmp12
             * (tmp7 * tmp2
                 + self.semi_major_axis.powi(2) * tmp8 * tmp4 * inv_r.powi(2)
@@ -240,6 +280,7 @@ impl EquinoctialElements {
                 - tmp10 * sin_ecc_anom);
         let dxde_vel2 = dx4de2_vel * f_vector + dx5de2_vel * g_vector;
 
+        // Derivatives of velocity with respect to k
         let dx4de3_vel = tmp12
             * (tmp7 * tmp3 + self.semi_major_axis.powi(2) * tmp9 * tmp4 * inv_r.powi(2)
                 - tmp11 * cos_ecc_anom);
@@ -249,25 +290,36 @@ impl EquinoctialElements {
                 + tmp11 * sin_ecc_anom);
         let dxde_vel3 = dx4de3_vel * f_vector + dx5de3_vel * g_vector;
 
+        // Derivative of velocity with respect to p
         let dxde_vel4 = 2.0
             * (self.tan_half_incl_cos_node * (v_ye * f_vector - v_xe * g_vector) - v_xe * w_vector)
             * inv_u;
+
+        // Derivative of velocity with respect to q
         let dxde_vel5 = 2.0
             * (self.tan_half_incl_sin_node * (-v_ye * f_vector + v_xe * g_vector)
                 + v_ye * w_vector)
             * inv_u;
+
+        // Derivative of velocity with respect to mean longitude
         let dxde_vel6 = -mean_motion * self.semi_major_axis.powi(3) * cart_position * inv_r.powi(3);
 
+        // =========================================================================
+        // 3. Assemble the Jacobian matrices
+        // =========================================================================
+        // Position derivatives: 6x3 matrix (transposed from 3x6)
         let derivative_position_matrix = Matrix3x6::from_columns(&[
             dxde_pos1, dxde_pos2, dxde_pos3, dxde_pos4, dxde_pos5, dxde_pos6,
         ])
         .transpose();
 
+        // Velocity derivatives: 6x3 matrix
         let derivative_velocity_matrix = Matrix3x6::from_columns(&[
             dxde_vel1, dxde_vel2, dxde_vel3, dxde_vel4, dxde_vel5, dxde_vel6,
         ])
         .transpose();
 
+        // Return the Jacobian matrices (d(r)/dE, d(v)/dE)
         (derivative_position_matrix, derivative_velocity_matrix)
     }
 
@@ -332,13 +384,24 @@ impl EquinoctialElements {
         eccentricity_pow2: f64,
         compute_derivatives: bool,
     ) -> TwoBodyResult {
+        // -------------------------------------------------------------------------
+        // 1. Compute auxiliary parameters
+        // -------------------------------------------------------------------------
+        // beta factor: depends on eccentricity, used to express coordinates in equinoctial form
         let beta = 1. / (1. + (1. - eccentricity_pow2).sqrt());
 
+        // Combination of beta, sin(ω+Ω) and cos(ω+Ω), reused many times
         let beta_ecc_term = beta * self.eccentricity_sin_lon * self.eccentricity_cos_lon;
 
+        // Precompute sine and cosine of the generalized eccentric anomaly
         let sin_ecc_anom = eccentric_anomaly.sin();
         let cos_ecc_anom = eccentric_anomaly.cos();
 
+        // -------------------------------------------------------------------------
+        // 2. Compute position in the orbital plane (x_e, y_e)
+        // -------------------------------------------------------------------------
+        // These expressions correspond to the equinoctial formulation
+        // of the solution of Kepler's equation.
         let xe = self.semi_major_axis
             * ((1. - beta * self.eccentricity_sin_lon.powi(2)) * cos_ecc_anom
                 + beta_ecc_term * sin_ecc_anom
@@ -349,12 +412,18 @@ impl EquinoctialElements {
                 + beta_ecc_term * cos_ecc_anom
                 - self.eccentricity_sin_lon);
 
+        // -------------------------------------------------------------------------
+        // 3. Build equinoctial reference frame (f, g)
+        // -------------------------------------------------------------------------
+        // u = normalization factor = 1 + p^2 + q^2
         let u = 1. + self.tan_half_incl_sin_node.powi(2) + self.tan_half_incl_cos_node.powi(2);
         let inv_u = 1.0 / u;
 
+        // Term common to several components of the f and g vectors
         let common_component =
             2. * self.tan_half_incl_sin_node * self.tan_half_incl_cos_node * inv_u;
 
+        // f_vector points approximately toward periapsis
         let f_vector = Vector3::new(
             (1. - self.tan_half_incl_sin_node.powi(2) + self.tan_half_incl_cos_node.powi(2))
                 * inv_u,
@@ -362,6 +431,7 @@ impl EquinoctialElements {
             -2. * self.tan_half_incl_sin_node * inv_u,
         );
 
+        // g_vector is orthogonal to f_vector within the orbital plane
         let g_vector = Vector3::new(
             common_component,
             (1. + self.tan_half_incl_sin_node.powi(2) - self.tan_half_incl_cos_node.powi(2))
@@ -369,10 +439,18 @@ impl EquinoctialElements {
             2. * self.tan_half_incl_cos_node * inv_u,
         );
 
+        // -------------------------------------------------------------------------
+        // 4. Transform plane coordinates into 3D inertial position
+        // -------------------------------------------------------------------------
         let cartesian_position = xe * f_vector + ye * g_vector;
 
+        // -------------------------------------------------------------------------
+        // 5. Compute velocity
+        // -------------------------------------------------------------------------
+        // v_const is a scaling factor for velocity components in the plane
         let v_const = mean_motion * self.semi_major_axis.powi(2) / (xe.powi(2) + ye.powi(2)).sqrt();
 
+        // Velocity components in the orbital plane
         let v_xe = v_const
             * (beta_ecc_term * cos_ecc_anom
                 - (1. - beta * self.eccentricity_sin_lon.powi(2)) * sin_ecc_anom);
@@ -380,8 +458,12 @@ impl EquinoctialElements {
             * ((1. - beta * self.eccentricity_cos_lon.powi(2)) * cos_ecc_anom
                 - beta_ecc_term * sin_ecc_anom);
 
+        // Project velocity components onto inertial frame
         let cartesian_velocity = v_xe * f_vector + v_ye * g_vector;
 
+        // -------------------------------------------------------------------------
+        // 6. Optionally compute partial derivatives (Jacobian matrices)
+        // -------------------------------------------------------------------------
         if compute_derivatives {
             let (dxde_pos, dxde_vel) = self.compute_derivative(
                 self.reference_epoch,
@@ -410,95 +492,108 @@ impl EquinoctialElements {
             );
         }
 
+        // If derivatives are not requested, return position and velocity only
         (cartesian_position, cartesian_velocity, None)
     }
 
-    /// Solves the two-body orbital motion using equinoctial elements.
+    /// Propagates an orbit (two-body problem) from equinoctial elements to a future state vector.
     ///
-    /// This function computes the inertial Cartesian position and velocity of an orbiting body
-    /// at a future time `t1`, starting from its equinoctial orbital elements at epoch `t0`.
-    /// It uses a generalized form of Kepler's equation and a transformation to 3D Cartesian
-    /// space through the equinoctial reference frame.
+    /// This function computes the inertial Cartesian position and velocity of a body
+    /// at a target epoch `t1`, starting from its equinoctial orbital elements defined at `t0`.
     ///
-    /// Optionally, the function can also compute the Jacobian matrix of partial derivatives
-    /// of the position and velocity vectors with respect to the six equinoctial orbital elements.
+    /// Internally, the algorithm:
+    /// 1. Computes the mean motion from the semi-major axis.
+    /// 2. Advances the mean longitude to `t1`.
+    /// 3. Solves the generalized Kepler equation to obtain the generalized eccentric anomaly `F`.
+    /// 4. Converts the result from the orbital plane to 3D inertial coordinates using
+    ///    the equinoctial basis vectors (`f`, `g`, `w`).
     ///
-    /// Arguments
-    /// ---------
+    /// If requested, it can also compute the Jacobian matrices of the state vector
+    /// with respect to the six equinoctial elements.
     ///
-    /// - `t0`:  
-    ///   Epoch time, in days. This is the time at which the orbital elements are defined.
+    /// # Arguments
     ///
-    /// - `t1`:  
-    ///   Prediction time, in days. The function computes the state at this time.
+    /// * `t0` – Epoch of the orbital elements, in days.
+    /// * `t1` – Target time for propagation, in days.
+    /// * `compute_derivatives` – If `true`, also computes Jacobians
+    ///   of position and velocity with respect to the elements.
     ///
-    /// - `compute_derivatives`:  
-    ///   If `true`, the function also returns the Jacobian matrices of the state vector
-    ///   with respect to the orbital elements.
+    /// # Returns
     ///
-    /// Returns
-    /// -------
+    /// On success, returns a [`TwoBodyResult`] tuple:
     ///
-    /// Returns a `Result<TwoBodyResult, OutfitError>` where:
+    /// * `position`: 3D position in AU
+    /// * `velocity`: 3D velocity in AU/day
+    /// * `Option<(dxde, dvde)>`: Optional Jacobians if requested
     ///
-    /// - `TwoBodyResult` is a tuple:
-    ///   - `position`: 3D position vector `[x, y, z]` in astronomical units (UA)
-    ///   - `velocity`: 3D velocity vector `[vx, vy, vz]` in UA/day
-    ///   - `Option<(dxde, dvde)>`: If `compute_derivatives` is `true`, this contains:
-    ///     - `dxde`: matrix of ∂(position)/∂(elements)
-    ///     - `dvde`: matrix of ∂(velocity)/∂(elements)
+    /// # Notes
     ///
-    /// Units
-    /// -----
-    ///
-    /// - Lengths: **astronomical units (UA)**  
-    /// - Velocities: **UA/day**  
-    /// - Time: **days**  
-    /// - Angles: **radians**
-    ///
-    /// Notes
-    /// -----
-    ///
-    /// - This method uses equinoctial orbital elements, which provide a non-singular
-    ///   representation even for circular and equatorial orbits.
-    /// - The generalized Kepler equation is solved numerically:
-    ///
+    /// * Uses non-singular equinoctial elements, robust for nearly circular/equatorial orbits.
+    /// * The generalized Kepler equation solved is:
     ///   `F - k·sin(F) + h·cos(F) = λ(t1)`
+    /// * The solution domain is constrained to `[ω, ω + 2π]` for stability,
+    ///   where ω is the longitude of periapsis.
     ///
-    ///   where `F` is a generalized eccentric anomaly, and `λ(t1)` is the mean longitude
-    ///   at time `t1`.
+    /// # Units
+    /// * Lengths: AU
+    /// * Velocities: AU/day
+    /// * Angles: radians
+    /// * Time: days
     ///
-    /// - The solution is constrained to lie in the interval `[W, W + 2π]`
-    ///   for numerical stability (`W` being the longitude of pericenter).
-    /// - The position and velocity are projected from the orbital plane
-    ///   using the equinoctial basis vectors `f`, `g`, and `w`.
+    /// # See also
+    /// * [`EquinoctialElements::compute_cartesian_position_and_velocity`] – projects equinoctial elements to 3D
+    /// * [`EquinoctialElements::solve_kepler_equation`] – solves the generalized Kepler equation
+    /// * [`principal_angle`] – normalizes an angle to [0, 2π)
     pub(crate) fn solve_two_body_problem(
         &self,
         t0: f64,
         t1: f64,
         compute_derivatives: bool,
     ) -> Result<TwoBodyResult, OutfitError> {
+        // ---------------------------------------------------------------------
+        // 1. Compute mean motion n = sqrt(mu / a^3)
+        // ---------------------------------------------------------------------
         let mean_motion = (GAUSS_GRAV_SQUARED / self.semi_major_axis.powi(3)).sqrt();
+
+        // Advance the mean longitude to the target time:
+        // λ(t1) = λ0 + n * (t1 - t0)
         let mut mean_longitude_t1 = self.mean_longitude + mean_motion * (t1 - t0);
 
+        // ---------------------------------------------------------------------
+        // 2. Compute squared eccentricity = h² + k²
+        //    Used to detect circular orbits (avoid division by zero)
+        // ---------------------------------------------------------------------
         let eccentricity_pow2 =
             self.eccentricity_sin_lon.powi(2) + self.eccentricity_cos_lon.powi(2);
-        let epsilon = f64::EPSILON * 1e2;
+        let epsilon = f64::EPSILON * 1e2; // threshold for near-circular orbit
 
+        // ---------------------------------------------------------------------
+        // 3. Compute longitude of periapsis (ω = atan2(h, k)) if e > 0
+        // ---------------------------------------------------------------------
         let mut longitude_of_periastre = 0.0;
         if eccentricity_pow2 > epsilon {
             longitude_of_periastre =
                 principal_angle(self.eccentricity_sin_lon.atan2(self.eccentricity_cos_lon));
         }
 
+        // Normalize λ(t1) to [0, 2π)
         mean_longitude_t1 = principal_angle(mean_longitude_t1);
+
+        // Ensure λ(t1) lies ahead of ω, so that F is in [ω, ω+2π]
         if mean_longitude_t1 < longitude_of_periastre {
             mean_longitude_t1 += DPI;
         }
 
+        // ---------------------------------------------------------------------
+        // 4. Solve the generalized Kepler equation for F
+        //    F - k sin F + h cos F = λ(t1)
+        // ---------------------------------------------------------------------
         let eccentric_anomaly =
             self.solve_kepler_equation(mean_longitude_t1, longitude_of_periastre)?;
 
+        // ---------------------------------------------------------------------
+        // 5. Compute final Cartesian position and velocity
+        // ---------------------------------------------------------------------
         Ok(self.compute_cartesian_position_and_velocity(
             mean_motion,
             eccentric_anomaly,
