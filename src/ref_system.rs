@@ -1,3 +1,111 @@
+//! # Reference-frame transformations (equatorial/ecliptic, mean/true, epoch-aware)
+//!
+//! This module defines the types and routines used to build **3×3 rotation
+//! matrices** between common celestial reference systems:
+//! - **Equatorial mean** (precession only),
+//! - **Equatorial true** (precession + nutation),
+//! - **Ecliptic mean** (mean obliquity),
+//! each optionally tied to an **epoch** (J2000 or a specific Modified Julian Date, TT).
+//!
+//! The central entry point is [`rotpn`](crate::ref_system::rotpn), which composes the necessary rotations
+//! (precession, nutation, obliquity) to transform vectors between any two supported
+//! frames and epochs. All rotations are **active**, right‑handed and orthonormal.
+//!
+//! ## Coordinate systems & epochs
+//!
+//! - [`RefSystem::Equm(e)`] — *Equatorial mean* at epoch `e` (precession only).
+//! - [`RefSystem::Equt(e)`] — *Equatorial true* at epoch `e` (precession + nutation).
+//! - [`RefSystem::Eclm(e)`] — *Ecliptic mean* at epoch `e` (mean obliquity).
+//!
+//! Epochs are represented by [`RefEpoch`](crate::ref_system::RefEpoch):
+//! - [`RefEpoch::J2000`](crate::ref_system::RefEpoch::J2000) — Fixed epoch at **MJD 51544.5 (TT)**.
+//! - [`RefEpoch::Epoch(d)`] — “of-date” epoch at MJD `d` (TT).
+//!
+//! **Units & conventions**
+//! -----------------------
+//! - Angles are in **radians**.
+//! - Dates are **Modified Julian Date** in **Terrestrial Time (TT)**.
+//! - Rotations are **active**: the matrix `R` rotates vectors (`x_dst = R · x_src`).
+//! - All matrices are **orthonormal**: `R.transpose() == R.inverse()`.
+//! - Right‑handed axes (X,Y,Z). See [`rotmt`](crate::ref_system::rotmt) for axis indexing.
+//!
+//! ## Mathematical models
+//!
+//! - **Precession**: IAU 1976, via [`prec`](crate::earth_orientation::prec) (matrix from/to J2000 or of‑date).
+//! - **Nutation**: IAU 1980, via [`rnut80`](crate::earth_orientation::rnut80) (true ↔ mean equator/equinox).
+//! - **Mean obliquity**: via [`obleq`](crate::earth_orientation::obleq) (ecliptic ↔ equatorial).
+//!
+//! The composition strategy used by [`rotpn`](crate::ref_system::rotpn) is intentionally explicit and
+//! mirror‑friendly to classic astrometry codes (e.g., OrbFit): whenever helpful,
+//! transformations are routed through **Equatorial Mean J2000** as an intermediate,
+//! ensuring determinism and easing verification against reference implementations.
+//!
+//! ## Typical usage
+//!
+//! ```rust, no_run
+//! use outfit::ref_system::{RefEpoch, RefSystem, rotpn};
+//! use nalgebra::{Matrix3, Vector3};
+//!
+//! // Equatorial mean J2000 → Ecliptic mean J2000
+//! let src = RefSystem::Equm(RefEpoch::J2000);
+//! let dst = RefSystem::Eclm(RefEpoch::J2000);
+//! let r_eq_to_ec: Matrix3<f64> = rotpn(&src, &dst)?;
+//!
+//! // Apply to a position vector (active rotation):
+//! let x_eq = Vector3::new(1.0, 0.0, 0.0);
+//! let x_ec = r_eq_to_ec * x_eq;
+//!
+//! // “Of-date” example: Equatorial true @ t1 → Equatorial mean @ t2
+//! let t1 = RefEpoch::Epoch(60725.5);
+//! let t2 = RefEpoch::Epoch(60730.5);
+//! let r_t1_to_t2 = rotpn(&RefSystem::Equt(t1), &RefSystem::Equm(t2))?;
+//! # Ok::<(), outfit::outfit_errors::OutfitError>(())
+//! ```
+//!
+//! ## API overview
+//!
+//! - [`RefEpoch`](crate::ref_system::RefEpoch) — Epoch tagging (J2000 vs. MJD(TT) “of‑date”).
+//! - [`RefSystem`](crate::ref_system::RefSystem) — Frame tagging (equatorial/ecliptic, mean/true) + epoch.
+//! - [`rotpn`](crate::ref_system::rotpn) — Build the **full rotation** from any source to any destination frame.
+//! - [`rotmt`](crate::ref_system::rotmt) — Primitive axis‑angle rotation used by precession/nutation steps.
+//!
+//! Internally, [`RefSystem`](crate::ref_system::RefSystem) offers two helpers used by [`rotpn`](crate::ref_system::rotpn):
+//! - `transform_to_equm_date` — Normalize to **Equatorial Mean** at a target epoch
+//!   (handles precession, removes nutation/obliquity as needed).
+//! - `transform_to_target_system` — Switch **system type** at fixed epoch
+//!   (apply/remove nutation or obliquity).
+//!
+//! ## Numerical behavior & guarantees
+//!
+//! - **Round‑trip** stability: forward/backward transforms compose to (near) identity;
+//!   test coverage verifies this for representative cases.
+//! - **Orthogonality** is preserved within floating‑point tolerance.
+//! - **Epoch equality** uses a small tolerance [`EPS`](crate::constants::EPS) to avoid spurious precession steps.
+//! - A safety cap (20 iterations) protects against non‑convergent sequences; exceeding it
+//!   yields an [`OutfitError::InvalidRefSystem`](crate::outfit_errors::OutfitError::InvalidRefSystem).
+//!
+//! ## Common pitfalls
+//!
+//! - **Active vs. passive**: results here are **active** rotations (rotate vectors).
+//!   If you need change‑of‑basis, use the transpose/inverse accordingly.
+//! - **Time scale**: epochs must be in **TT**; mixing with UTC/TDB without conversion
+//!   will introduce arcsecond‑level errors over long spans.
+//! - **Axis index**: [`rotmt`](crate::ref_system::rotmt) panics for `k > 2` (valid axes: 0→X, 1→Y, 2→Z).
+//!
+//! ## Testing hints
+//!
+//! - Identity cases when source and destination frames match (including of‑date).
+//! - Inverse consistency: `rotpn(dst, src) * rotpn(src, dst) ≈ I`.
+//! - Large epoch spans: check orthonormality and non‑identity behavior.
+//! - Sensitivity: small but non‑zero precession deltas over ~years (diagonal drift).
+//!
+//! ## See also
+//! ------------
+//! * [`rotpn`](crate::ref_system::rotpn) – Build compound frame transformations (precession/nutation/obliquity).
+//! * [`rotmt`](crate::ref_system::rotmt) – Right‑handed axis rotations used by the low‑level models.
+//! * [`prec`](crate::earth_orientation::prec) – IAU 1976 precession matrix builder.
+//! * [`rnut80`](crate::earth_orientation::rnut80) – IAU 1980 nutation rotation.
+//! * [`obleq`](crate::earth_orientation::obleq) – Mean obliquity (radians) used for ecliptic ↔ equatorial.
 use nalgebra::{Matrix3, Rotation3, Vector3};
 
 use crate::{

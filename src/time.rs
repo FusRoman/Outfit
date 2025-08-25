@@ -1,3 +1,75 @@
+//! # Time utilities for astronomical computations
+//!
+//! This module provides utilities to convert between common astronomical
+//! time representations (**calendar date, MJD, JD**) and to compute the
+//! **Greenwich Mean Sidereal Time (GMST)**.  
+//!
+//! It is built on top of the [`hifitime`](https://docs.rs/hifitime) crate
+//! for precise epoch handling and supports the time scales **UTC**, **TT**, and **UT1**.
+//!
+//! ## Supported conversions
+//!
+//! - **Calendar string → MJD (UTC)**  
+//!   [`date_to_mjd`](crate::time::date_to_mjd) parses ISO-8601 dates (`YYYY-MM-DDTHH:mm:ss`) into Modified Julian Date.
+//!
+//! - **MJD (UTC) ↔ JD (UTC)**  
+//!   [`mjd_to_jd`](crate::time::mjd_to_jd) and [`jd_to_mjd`](crate::time::jd_to_mjd) convert between Modified Julian Date and Julian Date.
+//!
+//! - **Fractional day format → MJD (TT)**  
+//!   [`frac_date_to_mjd`](crate::time::frac_date_to_mjd) parses dates in the format `YYYY MM DD.FFFFF`
+//!   where the last field encodes the fractional day. The result is
+//!   expressed in Modified Julian Date in the **Terrestrial Time** scale.
+//!
+//! - **GMST computation**  
+//!   [`gmst`](crate::time::gmst) computes the Greenwich Mean Sidereal Time angle (radians) for
+//!   a given MJD in the **UT1 time scale**.
+//!
+//! ## Units & conventions
+//!
+//! - **Dates**: input strings are interpreted as UTC unless otherwise specified.
+//! - **Julian/Modified Julian Dates**: expressed in **days** (floating-point).
+//! - **GMST**: returned in **radians**, normalized to `[0, 2π)`.
+//! - **Epoch constants**: [`T2000`](crate::constants::T2000) = reference epoch J2000.0 (MJD 51544.5, TT).
+//! - **Angle constants**: [`DPI`](crate::constants::DPI) = `2π`.
+//!
+//! ## Examples
+//!
+//! ```rust, no_run
+//! use outfit::time::{date_to_mjd, mjd_to_jd, jd_to_mjd, frac_date_to_mjd, gmst};
+//!
+//! // Calendar string to MJD (UTC)
+//! let mjd = date_to_mjd(&vec!["2021-01-01T00:00:00"]);
+//! assert_eq!(mjd, vec![59215.0]);
+//!
+//! // MJD (UTC) to JD (UTC)
+//! let jd = mjd_to_jd(&mjd);
+//! assert_eq!(jd, vec![2459215.5]);
+//!
+//! // JD back to MJD
+//! let mjd2 = jd_to_mjd(&jd);
+//! assert_eq!(mjd2, vec![59215.0]);
+//!
+//! // Fractional date (UTC) to MJD (TT)
+//! let mjd_tt = frac_date_to_mjd("1976 09 20.93878").unwrap();
+//! assert_eq!(mjd_tt, 43041.93932611111);
+//!
+//! // Compute GMST at a given UT1 MJD
+//! let gmst_angle = gmst(57028.478514610404);
+//! assert!((gmst_angle - 4.851925725092499).abs() < 1e-12);
+//! ```
+//!
+//! ## References
+//!
+//! - IAU 1982, IERS Conventions 1996/2000.  
+//! - *Explanatory Supplement to the Astronomical Almanac* (1992).  
+//! - Vallado, *Fundamentals of Astrodynamics and Applications* (2007).
+//!
+//! ## See also
+//! -------------
+//! * [`hifitime::Epoch`] — core epoch type for parsing and conversions.
+//! * [`gmst`](crate::time::gmst) — Greenwich Mean Sidereal Time in radians.
+//! * [`date_to_mjd`](crate::time::date_to_mjd) / [`mjd_to_jd`](crate::time::mjd_to_jd) / [`jd_to_mjd`](crate::time::jd_to_mjd) — conversions between calendar, JD, and MJD.
+//! * [`frac_date_to_mjd`](crate::time::frac_date_to_mjd) — parser for fractional day date format.
 use hifitime::{Epoch, TimeScale};
 use std::str::FromStr;
 
