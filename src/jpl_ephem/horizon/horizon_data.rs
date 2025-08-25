@@ -303,15 +303,33 @@ fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     Ok((input_remaining, (ipt, numde)))
 }
 
-/// Parse the remaining part of the IPT table
+/// Decode the trailing IPT rows for entries 13 and 14 (libration & TT–TDB).
+///
+/// This helper reads two consecutive 3×`u32` triplets from the given byte slice,
+/// corresponding to `IPT[13]` and `IPT[14]`. Each triplet follows the usual IPT
+/// convention: `[offset, n_coeff, n_sub]`.
 ///
 /// Arguments
-/// ---------
-/// * `input` : Input buffer containing the remaining IPT table in bytes to decode
+/// -----------------
+/// * `input` — Raw byte slice containing the remaining IPT bytes to decode
+///   (must hold exactly 24 bytes: 2 × 3 × 4).
 ///
-/// Returns
-/// -------
-/// * A tuple containing the remaining input and the IPT 13 and 14 elements
+/// Return
+/// ----------
+/// * An [`IResult`] with:
+///   - the remaining unparsed input slice,
+///   - a `[[u32; 3]; 2]` array where:
+///     - index `0` is `IPT[13]` (lunar Euler angle rates / related set),
+///     - index `1` is `IPT[14]` (TT–TDB offset series).
+///
+/// Errors
+/// ----------
+/// * Returns a nom error if the input does not contain enough bytes.
+///
+/// See also
+/// ------------
+/// * [`IPT`] – main 15×3 IPT table used by the ephemeris layout.
+/// * [`parse_ipt`] – parses the leading IPT rows and `numde`.
 fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
     fn parse_three(mut input: &[u8]) -> IResult<&[u8], [u32; 3]> {
         let mut result = [0u32; 3];
@@ -325,28 +343,49 @@ fn parse_ipt_13_14(input: &[u8]) -> IResult<&[u8], [[u32; 3]; 2]> {
 
     let (input, ipt_13) = parse_three(input)?;
     let (input, ipt_14) = parse_three(input)?;
-
     Ok((input, [ipt_13, ipt_14]))
 }
 
-/// Read the IPT\[13\] and IPT\[14\] elements from the file
+/// Read `IPT[13]` and `IPT[14]` from the constants area of a DE binary (DE440+).
+///
+/// For DE versions ≥ DE440 and when the constants count `ncon` exceeds 400,
+/// the two extra IPT rows (13, 14) are stored in the constants section after
+/// the 400‑th constant name. This function seeks to that location and decodes
+/// the two triplets.
 ///
 /// Arguments
-/// ---------
-/// * `file` : File to read from
-/// * `ncon` : Number of constants in the jpl file
-/// * `de_version` : JPL Horizon version
+/// -----------------
+/// * `file` — Buffered file reader positioned anywhere (seek is performed).
+/// * `ncon` — Number of constants present in the ephemeris file.
+/// * `de_version` — Parsed DE version (e.g., `DE440`).
 ///
-/// Returns
-/// -------
-/// * IPT\[13\] and IPT\[14\] elements
+/// Return
+/// ----------
+/// * `Ok(Some([[u32; 3]; 2]))` containing the decoded `IPT[13]` and `IPT[14]`
+///   triplets when available; `Ok(None)` if the DE version is older than DE440
+///   or `ncon <= 400`.
+///
+/// Errors
+/// ----------
+/// * I/O errors on seek/read,
+/// * `InvalidData` if the trailing IPT rows cannot be parsed.
+///
+/// Notes
+/// ----------
+/// * The read offset is computed from the start of the 400‑th constant name,
+///   then advanced by `(ncon - 400) * 6` bytes to reach the IPT rows area.
+///
+/// See also
+/// ------------
+/// * [`parse_ipt_13_14`] – decoder for the 24‑byte trailing IPT payload.
+/// * [`IPT`] – ephemeris layout table used across the module.
 fn read_ipt_13_14(
     file: &mut BufReader<File>,
     ncon: u32,
     de_version: &JPLHorizonVersion,
 ) -> std::io::Result<Option<[[u32; 3]; 2]>> {
     if *de_version < JPLHorizonVersion::DE440 || ncon <= 400 {
-        return Ok(None); // IPT[13] and IPT[14] are not used in version earlier than DE440 or for ncon <= 400
+        return Ok(None); // Not present prior to DE440 or when ncon <= 400.
     }
 
     const START_400TH_CONSTANT_NAME: u64 = 2856;
@@ -362,19 +401,34 @@ fn read_ipt_13_14(
             "Failed to parse ipt[13][14]",
         )
     })?;
-
     Ok(Some(ipt_extra))
 }
 
-/// Parse a block of data from the binary file
+/// Parse a block of `ncoeff` f64 values from the input (Chebyshev kernel slice).
+///
+/// This utility reads a contiguous sequence of `ncoeff` little‑endian `f64`
+/// values, which typically represent the Chebyshev coefficients for a given
+/// body, component, and sub‑interval inside a DATA RECORD.
 ///
 /// Arguments
-/// ---------
-/// * `input` : Input buffer containing the block in bytes to decode
+/// -----------------
+/// * `input` — Raw byte slice containing at least `8 * ncoeff` bytes.
+/// * `ncoeff` — Number of `f64` values to decode.
 ///
-/// Returns
-/// -------
-/// * A tuple containing the remaining input and the block data
+/// Return
+/// ----------
+/// * An [`IResult`] with:
+///   - the remaining unparsed input slice,
+///   - a `Vec<f64>` of length `ncoeff` containing the decoded coefficients.
+///
+/// Errors
+/// ----------
+/// * Returns a nom error if fewer than `ncoeff` doubles are available.
+///
+/// See also
+/// ------------
+/// * [`HorizonRecord`] – holds the per‑segment Chebyshev coefficients.
+/// * [`IPT`] – provides `n_coeff` and `n_sub` used to size such blocks.
 fn parse_block(input: &[u8], ncoeff: usize) -> IResult<&[u8], Vec<f64>> {
     count(le_f64, ncoeff).parse(input)
 }
