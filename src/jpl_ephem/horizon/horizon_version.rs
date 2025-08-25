@@ -1,5 +1,45 @@
+//! Version helpers for JPL Horizons DE ephemerides.
+//!
+//! This module defines [`JPLHorizonVersion`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion), an enum covering commonly used
+//! JPL DE solutions (e.g., DE430, DE440, DE441) and provides utilities to map
+//! those labels to:
+//! - the **legacy Horizons Linux distribution path fragments**
+//!   (as served under `.../eph/planets/Linux/`), via
+//!   [`JPLHorizonVersion::get_filename`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion::get_filename),
+//! - the **canonical NAIF SPK kernel filenames** (`*.bsp`), via
+//!   [`JPLHorizonVersion::to_filename`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion::to_filename) and
+//!   [`JPLHorizonVersion::from_filename`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion::from_filename).
+//!
+//! Typical use
+//! -----------------
+//! ```rust
+//! use std::str::FromStr;
+//! use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+//!
+//! let v = JPLHorizonVersion::from_str("DE440").unwrap();
+//! assert_eq!(v.get_filename(), "de440/linux_p1550p2650.440");
+//! assert_eq!(v.to_filename(), "DE440.bsp");
+//! assert_eq!(JPLHorizonVersion::from_filename("DE440.bsp"), Some(JPLHorizonVersion::DE440));
+//! ```
+//!
+//! See also
+//! ------------
+//! * [`crate::jpl_ephem::horizon::horizon_data::HorizonData`] – parsing & interpolation entry point.
+//! * JPL Horizons FTP layout (legacy `planets/Linux/`) if you need the base URL handling.
 use std::str::FromStr;
 
+/// Enumerates supported JPL DE ephemeris solutions.
+///
+/// Variants correspond to public JPL solutions distributed through Horizons
+/// and/or NAIF. Some have a `t` suffix (e.g. `DE430t`, `DE440t`), which
+/// denotes a **trimmed/variant** distribution provided by JPL; choose the one
+/// required by your pipeline or data source.
+///
+/// See also
+/// ------------
+/// * [`JPLHorizonVersion::get_filename`] – legacy Horizons path fragment.
+/// * [`JPLHorizonVersion::to_filename`] – NAIF SPK kernel filename.
+/// * [`JPLHorizonVersion::from_filename`] – parse an SPK filename back to a version.
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum JPLHorizonVersion {
     DE102,
@@ -24,6 +64,26 @@ pub enum JPLHorizonVersion {
 }
 
 impl JPLHorizonVersion {
+    /// Return the **legacy Horizons path fragment** for this DE version.
+    ///
+    /// This is the relative path used under the Horizons Linux directory
+    /// tree (e.g., `de440/linux_p1550p2650.440`). It is not a full URL or
+    /// filesystem path; prepend your base location accordingly.
+    ///
+    /// Return
+    /// ----------
+    /// * A `&str` path fragment suitable for building download or lookup paths.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust, no_run
+    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// assert_eq!(JPLHorizonVersion::DE430.get_filename(), "de430/linux_p1550p2650.430");
+    /// ```
+    ///
+    /// See also
+    /// ------------
+    /// * [`JPLHorizonVersion::to_filename`] – SPK filename if you are using NAIF kernels.
     pub fn get_filename(&self) -> &str {
         match self {
             JPLHorizonVersion::DE102 => "de102/lnxm1410p3002.102",
@@ -73,6 +133,25 @@ impl JPLHorizonVersion {
         }
     }
 
+    /// Return the canonical **NAIF SPK kernel filename** for this DE version.
+    ///
+    /// This is the standard filename (e.g., `DE440.bsp`) as used by NAIF
+    /// SPICE kernels. It is useful when integrating with an SPK/DAF backend.
+    ///
+    /// Return
+    /// ----------
+    /// * A `&str` filename ending in `.bsp`.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust, no_run
+    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// assert_eq!(JPLHorizonVersion::DE441.to_filename(), "DE441.bsp");
+    /// ```
+    ///
+    /// See also
+    /// ------------
+    /// * [`JPLHorizonVersion::from_filename`] – parse back from an SPK filename.
     pub fn to_filename(&self) -> &str {
         match self {
             JPLHorizonVersion::DE102 => "DE102.bsp",
@@ -97,6 +176,24 @@ impl JPLHorizonVersion {
         }
     }
 
+    /// Parse a `JPLHorizonVersion` from a canonical SPK filename.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `filename` — A kernel filename like `DE440.bsp`.
+    ///
+    /// Return
+    /// ----------
+    /// * `Some(JPLHorizonVersion)` if the filename matches a known kernel;
+    ///   otherwise `None`.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust, no_run
+    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// assert_eq!(JPLHorizonVersion::from_filename("DE430t.bsp"), Some(JPLHorizonVersion::DE430t));
+    /// assert!(JPLHorizonVersion::from_filename("UNKNOWN.bsp").is_none());
+    /// ```
     pub fn from_filename(filename: &str) -> Option<Self> {
         match filename {
             "DE102.bsp" => Some(JPLHorizonVersion::DE102),
@@ -123,6 +220,24 @@ impl JPLHorizonVersion {
     }
 }
 
+/// Parse a [`JPLHorizonVersion`] from its textual label (e.g., `"DE440"`).
+///
+/// Implements standard `FromStr` so you can do:
+/// ```rust, no_run
+/// use std::str::FromStr;
+/// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+/// let v = JPLHorizonVersion::from_str("DE431").unwrap();
+/// assert_eq!(v.to_filename(), "DE431.bsp");
+/// ```
+///
+/// Errors
+/// ----------
+/// * Returns an error string if the label does not match a known version.
+///
+/// See also
+/// ------------
+/// * [`JPLHorizonVersion::from_filename`] – parse from an SPK filename.
+/// * [`JPLHorizonVersion::get_filename`] – legacy Horizons path fragment.
 impl FromStr for JPLHorizonVersion {
     type Err = String;
 
