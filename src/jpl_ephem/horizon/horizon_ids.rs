@@ -1,3 +1,33 @@
+/// Identifier for bodies and reference points in JPL Horizons ephemeris files.
+///
+/// Horizons binary ephemerides index data blocks by an integer ID (`0..=14`).
+/// This enum provides a typed mapping between those raw integers and their
+/// corresponding physical meaning (planet, barycenter, etc.).
+///
+/// Conversions
+/// -----------
+/// * Use [`TryFrom<u8>`] to convert from a raw Horizons integer ID to a
+///   `HorizonID` enum value. Invalid values return an error.
+/// * Use [`From<HorizonID>`] to recover the integer index (`u8`) for storage
+///   or file access.
+///
+/// Examples
+/// --------
+/// ```rust, no_run
+/// use crate::jpl_ephem::horizon::horizon_ids::HorizonID;
+/// use std::convert::TryFrom;
+///
+/// let id = HorizonID::try_from(4).unwrap();
+/// assert_eq!(id, HorizonID::Jupiter);
+///
+/// let raw: u8 = HorizonID::Mars.into();
+/// assert_eq!(raw, 3);
+/// ```
+///
+/// See also
+/// --------
+/// * [`HorizonRecord`](crate::jpl_ephem::horizon::horizon_records::HorizonRecord) – per-body ephemeris segments keyed by `HorizonID`.
+/// * [`HorizonData`](crate::jpl_ephem::horizon::horizon_data::HorizonData) – container holding header and all per-body records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HorizonID {
     Mercury = 0,

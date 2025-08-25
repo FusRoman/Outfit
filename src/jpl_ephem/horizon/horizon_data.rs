@@ -178,35 +178,64 @@ pub struct HorizonData {
     records: HorizonRecords,
 }
 
-/// Dimension for each record body
+/// Return the dimensionality of the data vector for a given Horizons body.
+///
+/// Each entry in the ephemeris has a fixed number of components
+/// (e.g. 3 for Cartesian position, 1 for time offset, etc.).
 ///
 /// Arguments
-/// ---------
-/// * `index` : Index of the body
+/// -----------------
+/// * `index` — Horizons integer ID (`0..=14`).
 ///
-/// Returns
-/// -------
-/// * Dimension of the body
+/// Return
+/// ----------
+/// * Number of components (`usize`) for the given body:
+///   - `0..=10` → 3 (planets + Sun, Cartesian x/y/z),
+///   - `11` → 2 (Earth–Moon barycenter, 2D offset),
+///   - `12` → 3 (lunar libration angles),
+///   - `13` → 3 (lunar Euler angle rates),
+///   - `14` → 1 (TT–TDB offset),
+///   - otherwise `0` (invalid / unused).
+///
+/// See also
+/// ------------
+/// * [`IPT`] – table that, together with this dimensionality,
+///   defines the structure of each record.
 fn dimension(index: usize) -> usize {
     match index {
-        0..=10 => 3, // planètes + Soleil
-        11 => 2,     // Earth-Moon barycenter
+        0..=10 => 3, // Planets + Sun
+        11 => 2,     // Earth–Moon barycenter
         12 => 3,     // Lunar librations
         13 => 3,     // Lunar Euler angle rates
-        14 => 1,     // TT-TDB offsets
-        _ => 0,      // par sécurité
+        14 => 1,     // TT–TDB offsets
+        _ => 0,      // Safety fallback
     }
 }
 
-/// Compute the size of the record in bytes
+/// Compute the total size (in bytes) of a binary record block.
+///
+/// This scans the IPT table and sums the contributions of each body:
+/// number of sub-intervals × number of coefficients × dimensionality,
+/// doubled (for position and velocity), then scaled to bytes.
 ///
 /// Arguments
-/// ---------
-/// * `ipt` : IPT table
+/// -----------------
+/// * `ipt` — IPT table describing the layout of coefficients for each body.
 ///
-/// Returns
-/// -------
-/// * Size of the record in bytes
+/// Return
+/// ----------
+/// * Total size of one binary record (in bytes).
+///
+/// Notes
+/// ----------
+/// * The factor `4` corresponds to 4-byte words in the original
+///   Fortran binary representation.
+/// * This value should match the `recsize` field in [`HorizonHeader`].
+///
+/// See also
+/// ------------
+/// * [`dimension`] – per-body dimensionality.
+/// * [`HorizonHeader::recsize`] – stored record size.
 fn compute_recsize(ipt: IPT) -> usize {
     let kernel_size: usize = 4
         + (0..15)
@@ -221,22 +250,43 @@ fn compute_recsize(ipt: IPT) -> usize {
     kernel_size * 4
 }
 
-/// Parse the IPT table from the binary file
+/// Parse the IPT (Index Pointer Table) section from a Horizons binary file.
+///
+/// The IPT table is a 15×3 matrix of unsigned 32-bit integers, giving
+/// the layout of Chebyshev coefficients for each body:
+/// - column 0 → offset inside the block,
+/// - column 1 → number of coefficients,
+/// - column 2 → number of sub-intervals.
+///
+/// In addition, this function extracts the `numde` identifier and
+/// handles a special case for row 12 (libration data).
 ///
 /// Arguments
-/// ---------
-/// * `input` : Input buffer containing the IPT table in bytes to decode
+/// -----------------
+/// * `input` — Raw byte slice containing the IPT table to decode.
 ///
-/// Returns
-/// -------
-/// * A tuple containing the remaining input and the IPT table
+/// Return
+/// ----------
+/// * An [`IResult`] containing:
+///   - the remaining unparsed input slice,
+///   - a tuple `(IPT, numde)` where:
+///     - `IPT` is the 15×3 coefficient layout table,
+///     - `numde` is the ephemeris number (e.g. 440 for DE440).
+///
+/// Panics
+/// ----------
+/// * If the libration row (`lpt`) does not contain exactly 3 elements.
+///
+/// See also
+/// ------------
+/// * [`IPT`] – per-body coefficient layout.
+/// * [`HorizonHeader`] – stores the parsed IPT table for later use.
 fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     let mut ipt: IPT = [[0; 3]; 15];
 
     let mut input_remaining = input;
     for i in 0..36 {
         let (rest, val) = le_u32(input_remaining)?;
-
         input_remaining = rest;
         let row = i / 3;
         let col = i % 3;
@@ -244,7 +294,6 @@ fn parse_ipt(input: &[u8]) -> IResult<&[u8], (IPT, u32)> {
     }
 
     let (remaining_input, numde) = le_u32(input_remaining)?;
-
     let (input_remaining, lpt) = count(le_u32, 3).parse(remaining_input)?;
 
     ipt[12] = lpt
