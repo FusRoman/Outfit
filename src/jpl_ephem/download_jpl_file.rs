@@ -56,11 +56,13 @@ use crate::outfit_errors::OutfitError;
 /// This enum encodes **what** file we want, independent from **where** it lives
 /// on disk. Use [`EphemFilePath::get_ephemeris_file`] to resolve it.
 ///
-/// # Variants
+/// Variants
+/// --------
 /// - [`EphemFileSource::JPLHorizon`] — Legacy JPL DE binaries (e.g. `DE440`).
 /// - [`EphemFileSource::Naif`] — NAIF SPK/DAF kernels (e.g. `DE440`).
 ///
-/// # See also
+/// See also
+/// --------
 /// * [`JPLHorizonVersion`] — Maps DE labels to official legacy filenames.
 /// * [`NaifVersion`] — Maps DE labels to official SPK filenames.
 #[derive(Debug, Clone)]
@@ -73,11 +75,13 @@ pub enum EphemFileSource {
 ///
 /// Expected format: `"{source}:{version}"`.
 ///
-/// # Errors
+/// Errors
+/// ------
 /// Returns [`OutfitError`] when the string does not match the expected format,
 /// or when the version token is unknown for the specified source.
 ///
-/// # Examples
+/// Examples
+/// --------
 /// ```
 /// use outfit::jpl::download_jpl_file::EphemFileSource;
 /// let src: EphemFileSource = "naif:DE440".try_into().unwrap();
@@ -132,7 +136,8 @@ impl EphemFileSource {
     /// NAIF SPK kernels live under:
     /// `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/`
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`EphemFileSource::get_version_url`]
     #[cfg(feature = "jpl-download")]
     fn get_baseurl(&self) -> &str {
@@ -148,7 +153,8 @@ impl EphemFileSource {
     ///
     /// This uses the backend‑specific filename returned by the version enums.
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`JPLHorizonVersion::get_filename`]
     /// * [`NaifVersion::get_filename`]
     #[cfg(feature = "jpl-download")]
@@ -175,7 +181,8 @@ impl EphemFileSource {
 
     /// Canonical filename for the requested version (backend‑specific).
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`JPLHorizonVersion::to_filename`]
     /// * [`NaifVersion::get_filename`]
     fn filename(&self) -> &str {
@@ -191,14 +198,17 @@ impl EphemFileSource {
 /// Uses `reqwest` to stream the HTTP body in chunks and writes it asynchronously
 /// with Tokio's `File` implementation.
 ///
-/// # Parameters
+/// Parameters
+/// ----------
 /// * `url` — Remote file URL (HTTPS).
 /// * `path` — Destination file path.
 ///
-/// # Errors
+/// Errors
+/// ------
 /// Returns [`OutfitError`] if the HTTP request, stream, or file I/O fails.
 ///
-/// # See also
+/// See also
+/// --------
 /// * [`EphemFileSource::get_version_url`] — Compose the URL for a versioned file.
 #[cfg(feature = "jpl-download")]
 pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
@@ -222,11 +232,13 @@ pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitE
 ///
 /// This is what the low‑level readers (`horizon` / `naif`) expect to open.
 ///
-/// # Variants
+/// Variants
+/// --------
 /// - [`EphemFilePath::JPLHorizon`] — legacy DE binary file.
 /// - [`EphemFilePath::Naif`] — NAIF SPK/DAF file.
 ///
-/// # See also
+/// See also
+/// --------
 /// * [`EphemFilePath::get_ephemeris_file`] — Resolve and (optionally) download.
 /// * [`EphemFileSource`] — User‑facing selection.
 pub enum EphemFilePath {
@@ -258,12 +270,14 @@ impl EphemFilePath {
     ///    - with feature `jpl-download`: download it to the cache and return the path,
     ///    - otherwise: return an error.
     ///
-    /// # Errors
+    /// Errors
+    /// ------
     /// Returns [`OutfitError`] if the base directory cannot be created/resolved,
     /// if the path cannot be represented as UTF‑8, or if the file is missing and
     /// downloads are disabled (or the download fails).
     ///
-    /// # Examples
+    /// Examples
+    /// --------
     /// ```no_run
     /// use outfit::jpl::download_jpl_file::{EphemFilePath, EphemFileSource};
     /// let source: EphemFileSource = "horizon:DE440".try_into().unwrap();
@@ -272,7 +286,8 @@ impl EphemFilePath {
     /// # Ok::<(), outfit::outfit_errors::OutfitError>(())
     /// ```
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`EphemFileSource`] — Backend + version selector.
     /// * [`download_big_file`] — Async downloader (gated by `jpl-download`).
     pub fn get_ephemeris_file(file_source: &EphemFileSource) -> Result<EphemFilePath, OutfitError> {

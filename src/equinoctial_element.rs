@@ -130,7 +130,8 @@ pub struct EquinoctialElements {
 impl EquinoctialElements {
     /// Compute the squared orbital eccentricity from the equinoctial parameters `h` and `k`.
     ///
-    /// # Details
+    /// Details
+    /// -------
     ///
     /// In the equinoctial element formulation:
     ///
@@ -146,7 +147,8 @@ impl EquinoctialElements {
     /// e² = h² + k²
     /// ```
     ///
-    /// # Returns
+    /// Returns
+    /// -------
     /// * The value of `e²` (dimensionless).
     pub fn squared_eccentricity(&self) -> f64 {
         self.eccentricity_sin_lon.powi(2) + self.eccentricity_cos_lon.powi(2)
@@ -154,7 +156,8 @@ impl EquinoctialElements {
 
     /// Compute the orbital eccentricity from the equinoctial parameters `h` and `k`.
     ///
-    /// # Details
+    /// Details
+    /// -------
     ///
     /// The eccentricity `e` is obtained from:
     ///
@@ -164,10 +167,12 @@ impl EquinoctialElements {
     ///
     /// See also [`EquinoctialElements::squared_eccentricity`] for the squared value.
     ///
-    /// # Returns
+    /// Returns
+    /// -------
     /// * The eccentricity `e` (dimensionless).
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`EquinoctialElements::squared_eccentricity`] – Returns `e²` directly.
     pub fn eccentricity(&self) -> f64 {
         self.squared_eccentricity().sqrt()
