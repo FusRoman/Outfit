@@ -140,12 +140,12 @@
 //!
 //! ## License
 //!
-//! Outfit is distributed under the MIT license. See the [LICENSE](https://github.com/FusRoman/Outfit)
+//! Outfit is distributed under the CeCILL-C license. See the [LICENSE](https://github.com/FusRoman/Outfit/blob/main/LICENSE)
 //! file for details.
 //!
 //! ## Authors
 //!
-//! Roman and contributors
+//! FusRoman and contributors
 //!
 //! ## Links
 //!
