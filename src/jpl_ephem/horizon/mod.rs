@@ -39,8 +39,13 @@
 //! * [`crate::jpl::naif`](crate::jpl_ephem::naif) — Alternative backend for NAIF SPK/DAF kernels.
 //! * JPL Horizons FTP: <https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/>
 
+/// High-level API: load DE binaries, manage records, query state vectors.
 pub mod horizon_data;
+/// Body/center identifiers (HorizonID) mapped to official JPL numbering.
 pub mod horizon_ids;
+/// Low-level Chebyshev coefficient records extracted from the binary file.
 pub mod horizon_records;
+/// Version management: DE labels to official filenames and metadata.
 pub mod horizon_version;
+/// Interpolation outputs (position, velocity, acceleration) with unit conversions.
 pub mod interpolation_result;

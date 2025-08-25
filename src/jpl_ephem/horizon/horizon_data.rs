@@ -1,3 +1,32 @@
+/// Internal representation of the JPL Horizon ephemeris binary file.
+///
+/// The Horizons ephemeris files (e.g. DE440) are structured as a sequence of blocks.
+/// Each block covers a fixed time span and contains Chebyshev polynomial coefficients
+/// used to interpolate the position and velocity of Solar System bodies.
+///
+/// This module provides:
+/// - [`HorizonHeader`] describing the global properties of the file (time coverage, record size,
+///   Earth–Moon mass ratio, etc.),
+/// - [`HorizonRecords`], a collection of parsed data blocks indexed by body identifier,
+/// - [`HorizonData`], the main container holding both header and records.
+///
+/// Bodies are indexed with IDs from 0 to 14 (consistent with the JPL Horizon conventions).
+/// For each body, the ephemeris data is represented as a sequence of [`HorizonRecord`] entries,
+/// each of which contains:
+/// - the validity interval (start/end Julian Date),
+/// - the Chebyshev coefficients for interpolation.
+///
+/// Typical usage flow:
+/// 1. Load a binary ephemeris file (see [`EphemFilePath`]),
+/// 2. Parse its header to extract metadata and IPT table,
+/// 3. Read and store all blocks into [`HorizonRecords`],
+/// 4. Perform interpolation using the stored coefficients via [`InterpResult`].
+///
+/// See also
+/// --------
+/// * [`JPLHorizonVersion`] – versioning information for Horizons files.
+/// * [`HorizonID`] – mapping between integer body IDs and their symbolic identifiers.
+/// * [`HorizonRecord`] – single record containing Chebyshev coefficients.
 use nom::{
     bytes::complete::take,
     multi::count,
@@ -17,38 +46,132 @@ use std::{
     io::{BufReader, Read, Seek},
 };
 
-/// Type for the JPL ephemeris file
-/// The file is a binary file containing the ephemeris data
-/// The file is divided into blocks, each block contains the data for a specific time interval
-/// Each block is in the following vec type and can be accessed by the index
-/// The HashMap contains the body number (0-14) as the key
-/// and a vector of HorizonRecord as the value
+/// Collection of parsed Horizons ephemeris records.
+///
+/// The binary ephemeris is organized as a sequence of time-ordered **blocks**.
+/// For each block (outer `Vec` index), the data for every supported body is
+/// grouped in a `HashMap` keyed by its Horizons integer ID (`0..=14`).
+///
+/// Concretely, the structure is:
+/// - `Vec< … >` — chronological list of blocks,
+/// - `HashMap<u8, Vec<HorizonRecord>>` — within each block, ephemeris series per body,
+/// - `Vec<HorizonRecord>` — one or more Chebyshev segments covering sub-intervals
+///   inside the block.
+///
+/// Notes
+/// -----
+/// * This layout preserves fast sequential access by time while keeping per‑body
+///   lookups ergonomic.
+/// * `HorizonRecord` holds the validity interval and Chebyshev coefficients needed
+///   for interpolation.
+///
+/// See also
+/// -----------
+/// * [`HorizonRecord`] – single time segment with Chebyshev coefficients.
+/// * [`HorizonHeader`] – global file metadata (time coverage, record size, IPT).
 type HorizonRecords = Vec<HashMap<u8, Vec<HorizonRecord>>>;
 
-/// Header containing informations for each solar system body
-/// The first index is the body number (0-14)
-/// The second index is a three element array
-/// The first element is the offset in the block corresponding to the body
-/// The second element is the number of Tchebyshev coefficients
-/// The third element is the number of subintervals
+/// IPT table describing how coefficients for each body are laid out inside a block.
+///
+/// `IPT[b] == [offset, n_coeff, n_sub]` where:
+/// - `offset` — byte (or word) offset to the body’s coefficients within a block,
+/// - `n_coeff` — number of Chebyshev coefficients per component,
+/// - `n_sub` — number of sub‑intervals the block is split into for that body.
+///
+/// The table has a fixed size of 15 entries, one per Horizons body ID (`0..=14`).
+///
+/// See also
+/// --------
+/// * [`HorizonRecord`] – per‑sub‑interval data constructed using IPT metadata.
 pub type IPT = [[u32; 3]; 15];
 
+/// Header metadata extracted from a JPL Horizons binary ephemeris.
+///
+/// This structure summarizes the global properties of the ephemeris file:
+/// the version tag (e.g. `DE440`), the IPT table that describes how each
+/// body's coefficients are laid out inside a block, the overall time
+/// coverage of the file, the fixed block duration used for interpolation,
+/// the raw record size on disk, and the Earth–Moon mass ratio (EMRAT).
+///
+/// Semantics
+/// ---------
+/// * Times are expressed in Julian Date on the TDB time scale.
+/// * The ephemeris is partitioned into fixed‑length blocks (`period_lenght`),
+///   and each block may be subdivided into `n_sub` sub‑intervals per body
+///   according to the IPT entry.
+/// * `recsize` indicates how many bytes compose one raw record as stored
+///   in the binary; it is needed to seek precisely to a given block.
+///
+/// Invariants
+/// ----------
+/// * `start_period < end_period`
+/// * `period_lenght > 0`
+/// * `recsize > 0`
+///
+/// Typical usage
+/// -------------
+/// The parser fills this header first, then uses `ipt` to locate, decode,
+/// and assemble per‑body [`HorizonRecord`] segments across all blocks.
+///
+/// See also
+/// ------------
+/// * [`IPT`] – per‑body layout within a block: `[offset, n_coeff, n_sub]`.
+/// * [`HorizonRecord`] – atomic segment with Chebyshev coefficients.
+/// * [`HorizonData`] – full ephemeris container (header + records).
+/// * [`JPLHorizonVersion`] – helpers for Horizons version handling.
 #[derive(Debug, PartialEq, Clone)]
 pub struct HorizonHeader {
+    /// JPL/Horizons version label (e.g., `DE440`, `DE441`).
     jpl_version: String,
+
+    /// IPT metadata table that indexes where and how to read coefficients per body.
     ipt: IPT,
+
+    /// Start of the ephemeris coverage (Julian Date, TDB).
     start_period: f64,
+
+    /// End of the ephemeris coverage (Julian Date, TDB).
     end_period: f64,
-    period_lenght: f64,
+
+    /// Duration of a single block/record (days).
+    ///
+    /// Interpolation is performed within these fixed-length blocks, potentially
+    /// split in `n_sub` sub‑intervals according to the IPT entry for each body.
+    period_lenght: f64, // NOTE: consider renaming to `period_length`.
+
+    /// Size of a raw record (in bytes) as stored in the binary file.
     recsize: usize,
+
+    /// Earth–Moon mass ratio (EMRAT) used by the ephemeris.
     earth_moon_mass_ratio: f64,
 }
 
-/// Structure to hold the data from the JPL ephemeris file
-/// The header contains the JPL version and the IPT table
-/// The records are stored in a vector of hashmaps
-/// where the key is the body number (0-14) and the value is a vector of HorizonRecord
-/// Each HorizonRecord contains the start and end JD, and the coefficients for the Tchebyshev polynomial
+/// Parsed Horizons ephemeris: header + time‑ordered records.
+///
+/// This is the main container returned by the parser. It bundles the global
+/// metadata (file coverage, IPT layout, record sizing) together with all
+/// the time‑ordered data blocks for quick access and interpolation.
+///
+/// Fields
+/// ------
+/// * `header` — Global metadata extracted from the file header.
+/// * `records` — Time-ordered sequence of per‑body Chebyshev segments.
+///
+/// Typical usage
+/// -------------
+/// 1. Open an ephemeris file via [`EphemFilePath`],
+/// 2. Parse the header to obtain coverage and IPT,
+/// 3. Stream/parse the blocks to populate `records`,
+/// 4. Interpolate state vectors for a given `JD` using the right block and sub‑interval,
+///    returning an [`InterpResult`].
+///
+/// See also
+/// -----------
+/// * [`HorizonHeader`] – global properties and IPT table.
+/// * [`HorizonRecord`] – atomic interpolation segment (Chebyshev coefficients).
+/// * [`InterpResult`] – output of an interpolation at a given epoch.
+/// * [`JPLHorizonVersion`] – helper for version/compatibility checks.
+/// * [`HorizonID`] – mapping between numeric IDs and named bodies.
 #[derive(Debug, Clone)]
 pub struct HorizonData {
     header: HorizonHeader,
