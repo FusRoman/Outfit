@@ -1,3 +1,33 @@
+//! Ephemeris record decoding and Chebyshev interpolation.
+//!
+//! This module defines [`EphemerisRecord`], a compact container for a single
+//! SPK/DAF *ephemeris record* composed of the record midpoint `mid` (ET seconds),
+//! the half‑interval `radius` (seconds), and three arrays of Chebyshev
+//! coefficients (`x`, `y`, `z`) for position (km). It also provides:
+//!
+//! * a binary parser that reads contiguous records from a DAF segment, and
+//! * an interpolation routine that evaluates position and velocity at an ET epoch.
+//!
+//! ## Record layout (per axis)
+//! Each record contains, in little‑endian `f64`:
+//! 1. `mid` (ET seconds from J2000 TDB),
+//! 2. `radius` (seconds),
+//! 3. `ncoeff` Chebyshev coefficients for X (km),
+//! 4. `ncoeff` for Y (km),
+//! 5. `ncoeff` for Z (km).
+//!
+//! The normalized time is `t = (et - mid) / radius`, clamped to `[-1, 1]`.
+//! Position uses `T_n(t)`; velocity uses `T'_n(t)` scaled by `2/radius`.
+//!
+//! ## Units & time scales
+//! * `mid` and `radius` are in **seconds** of ET/TDB (consistent with SPK).
+//! * Interpolated **position** is in **kilometers**; **velocity** in **km/s**.
+//!
+//! ## See also
+//! ------------
+//! * `daf_header` – header and ND/NI info needed to size records.
+//! * `directory` – directory/footer providing `rsize` and `n_records`.
+//! * NAIF SPK Required Reading – authoritative spec for record structure.
 use std::{
     fmt,
     fs::File,
@@ -7,25 +37,57 @@ use std::{
 use hifitime::{Duration, Epoch};
 use nalgebra::Vector3;
 
+/// One SPK ephemeris record (midpoint, half‑width, and Chebyshev coefficients).
+///
+/// The `x`, `y`, and `z` arrays hold Chebyshev coefficients for the position
+/// (in kilometers). `mid` is the center ET epoch of the record; `radius` is
+/// the half‑interval length in seconds.
+///
+/// See also
+/// ------------
+/// * [`EphemerisRecord::parse`] – Bulk reader for contiguous records in a segment.
+/// * [`EphemerisRecord::interpolate`] – Evaluate position and velocity at a given ET.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EphemerisRecord {
+    /// Midpoint of the record time span (ET seconds from J2000 TDB).
     pub mid: f64,
+    /// Half‑width of the record interval (seconds).
     pub radius: f64,
+    /// Chebyshev coefficients for X (km).
     pub x: Vec<f64>,
+    /// Chebyshev coefficients for Y (km).
     pub y: Vec<f64>,
+    /// Chebyshev coefficients for Z (km).
     pub z: Vec<f64>,
 }
 
 impl EphemerisRecord {
+    /// Decode one ephemeris record from a raw byte slice.
+    ///
+    /// The slice **must** contain exactly the serialized layout:
+    /// `mid`, `radius`, then `ncoeff` `f64` for each axis X, Y, Z (little‑endian).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Byte slice positioned at the start of the record.
+    /// * `ncoeff`: Number of Chebyshev coefficients per axis.
+    ///
+    /// Return
+    /// ----------
+    /// * `Result<EphemerisRecord, Box<dyn std::error::Error>>` with the decoded record.
+    ///
+    /// See also
+    /// ------------
+    /// * [`EphemerisRecord::parse`] – Reads many records directly from a file segment.
+    /// * NAIF SPK docs – Record/segment sizes and addressing rules.
     fn parse_ephemeris_record(
         input: &[u8],
         ncoeff: usize,
     ) -> Result<EphemerisRecord, Box<dyn std::error::Error>> {
         let mut offset = 0;
 
-        // Helper closure pour lire un f64 et avancer dans le buffer
+        // Helper to read one LE f64 and advance the cursor
         let mut read_f64 = || -> Result<f64, Box<dyn std::error::Error>> {
-            // optimisation avec chunk_exacts(8)
             let val = f64::from_le_bytes(input[offset..offset + 8].try_into().unwrap());
             offset += 8;
             Ok(val)
@@ -57,6 +119,27 @@ impl EphemerisRecord {
         })
     }
 
+    /// Read `n_records` contiguous records from a DAF segment.
+    ///
+    /// Records are assumed to be tightly packed, starting at
+    /// `segment_start_addr` (DAF address in double‑precision words, 1‑based),
+    /// with a fixed record size `rsize` (in double‑precision words).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `file`: Buffered file reader to seek and read from.
+    /// * `segment_start_addr`: Start address of the segment in **DP-words** (1‑based).
+    /// * `rsize`: Record size in **DP-words** (each word = 8 bytes).
+    /// * `n_records`: Number of records to read.
+    ///
+    /// Return
+    /// ----------
+    /// * `Vec<EphemerisRecord>` containing the decoded records in order.
+    ///
+    /// See also
+    /// ------------
+    /// * `directory` module – Provides `rsize` and `n_records` from the footer.
+    /// * `daf_header` – For ND/NI and navigation across summary records.
     pub fn parse(
         file: &mut BufReader<File>,
         segment_start_addr: usize,
@@ -68,9 +151,10 @@ impl EphemerisRecord {
         let record_byte_size = rsize * 8;
         let mut buf = vec![0u8; record_byte_size];
 
-        // L'offset du premier record
+        // Byte offset of first record: (DAF address is 1‑based DP-words)
         let start_byte_offset = (segment_start_addr - 1) * 8;
 
+        // Two header scalars (mid, radius), then 3 * ncoeff coefficients.
         let n_coeffs = (rsize - 2) / 3;
 
         for i in 0..n_records {
@@ -82,33 +166,32 @@ impl EphemerisRecord {
 
             let input = buf.as_slice();
 
-            // MID, RADIUS
             let record = Self::parse_ephemeris_record(input, n_coeffs).unwrap();
-
             records.push(record);
         }
 
         records
     }
 
-    /// Interpolate the position and velocity at a given ephemeris time.
+    /// Interpolate Cartesian **position** and **velocity** at an ET epoch.
+    ///
+    /// The time is first normalized to `t = (et - mid) / radius` and clamped to
+    /// `[-1, 1]`. Position uses Chebyshev polynomials `T_n(t)`. Velocity uses
+    /// the derivatives `T'_n(t)` and is scaled by `2 / radius`.
     ///
     /// Arguments
-    /// ---------
-    /// * `ephem_time` - Ephemeris time at which compute the position and the velocity. The reference time frame is BDT (Barycentric Dynamical Time).
+    /// -----------------
+    /// * `ephem_time`: Target epoch in ET seconds (TDB) at which to interpolate.
     ///
-    /// Returns
-    /// -------
-    /// * A tuple containing the position and velocity vectors.
+    /// Return
+    /// ----------
+    /// * `(Vector3<f64>, Vector3<f64>)` where the first vector is **position [km]**
+    ///   and the second is **velocity [km/s]**.
     ///
-    /// The position and velocity are computed using Chebyshev polynomials.
-    /// The Chebyshev coefficients are stored in the `x`, `y`, and `z` fields of the struct.
-    /// The interpolation is done in the range [-1, 1].
-    /// where `T_n(t)` is the Chebyshev polynomial of degree `n` and `t` is the normalized time.
-    /// The velocity is computed using the derivative of the Chebyshev polynomial
-    /// The position is in kilometers and the velocity is in kilometers per second.
-    /// The Chebyshev coefficients are assumed to be in the order of decreasing degree.
-    /// The Chebyshev polynomials are evaluated using Horner's method for efficiency.
+    /// See also
+    /// ------------
+    /// * [`Self::parse`] – To load records before interpolation.
+    /// * NAIF SPK docs – Chebyshev series for states and the `2/radius` factor.
     pub fn interpolate(&self, ephem_time: f64) -> (Vector3<f64>, Vector3<f64>) {
         let normalized_time = (ephem_time - self.mid) / self.radius;
         let clamped_time = normalized_time.clamp(-1.0, 1.0);
@@ -117,42 +200,36 @@ impl EphemerisRecord {
         let mut chebyshev_polynomials = vec![0.0; num_coefficients];
         chebyshev_polynomials[0] = 1.0;
 
-        // Chebyshev polynomials are defined for n >= 0
-        // T_0(t) = 1
+        // T_0(t) = 1, T_1(t) = t, T_n(t) = 2 t T_{n-1}(t) - T_{n-2}(t)
         if num_coefficients > 1 {
             chebyshev_polynomials[1] = clamped_time;
             for degree in 2..num_coefficients {
-                // T_n(t) = 2 * t * T_(n-1)(t) - T_(n-2)(t)
-                // Horner's method for Chebyshev polynomials
                 chebyshev_polynomials[degree] =
                     2.0 * clamped_time * chebyshev_polynomials[degree - 1]
                         - chebyshev_polynomials[degree - 2];
             }
         }
 
-        // Compute the position using the Chebyshev coefficients
-        // The position is a linear combination of the Chebyshev polynomials
-        // The coefficients are the Chebyshev coefficients for each axis
+        // Position as linear combination of T_n(t)
         let position = Vector3::new(
             self.x
                 .iter()
                 .zip(&chebyshev_polynomials)
-                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .map(|(c, p)| c * p)
                 .sum(),
             self.y
                 .iter()
                 .zip(&chebyshev_polynomials)
-                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .map(|(c, p)| c * p)
                 .sum(),
             self.z
                 .iter()
                 .zip(&chebyshev_polynomials)
-                .map(|(coefficient, polynomial)| coefficient * polynomial)
+                .map(|(c, p)| c * p)
                 .sum(),
         );
 
-        // Compute the velocity using the Chebyshev derivatives
-        // The velocity is a linear combination of the Chebyshev derivatives
+        // Velocity using T'_n(t) and scale 2/radius
         let mut velocity = Vector3::zeros();
         if num_coefficients > 1 {
             let mut chebyshev_derivatives = vec![0.0; num_coefficients];
@@ -161,8 +238,8 @@ impl EphemerisRecord {
             if num_coefficients > 2 {
                 chebyshev_derivatives[2] = 4.0 * clamped_time;
                 for degree in 3..num_coefficients {
-                    // T'_n(t) = 2 * T'_(n-1)(t) + 2 * t * T_(n-1)(t) - T'_(n-2)(t)
-                    // Horner's method for Chebyshev derivatives
+                    // Recurrence for derivatives:
+                    // T'_n = 2 t T'_{n-1} + 2 T_{n-1} - T'_{n-2}
                     chebyshev_derivatives[degree] =
                         2.0 * clamped_time * chebyshev_derivatives[degree - 1]
                             + 2.0 * chebyshev_polynomials[degree - 1]
@@ -170,9 +247,6 @@ impl EphemerisRecord {
                 }
             }
 
-            // The velocity is scaled by a factor of 2 / (b - a) = 2 / radius
-            // where b and a are the bounds of the interval [-1, 1]
-            // The radius is the length of the interval
             let velocity_scaling_factor = 2.0 / self.radius;
 
             velocity[0] = self
@@ -180,7 +254,7 @@ impl EphemerisRecord {
                 .iter()
                 .zip(&chebyshev_derivatives)
                 .skip(1)
-                .map(|(coefficient, derivative)| coefficient * derivative)
+                .map(|(c, d)| c * d)
                 .sum::<f64>()
                 * velocity_scaling_factor;
             velocity[1] = self
@@ -188,7 +262,7 @@ impl EphemerisRecord {
                 .iter()
                 .zip(&chebyshev_derivatives)
                 .skip(1)
-                .map(|(coefficient, derivative)| coefficient * derivative)
+                .map(|(c, d)| c * d)
                 .sum::<f64>()
                 * velocity_scaling_factor;
             velocity[2] = self
@@ -196,7 +270,7 @@ impl EphemerisRecord {
                 .iter()
                 .zip(&chebyshev_derivatives)
                 .skip(1)
-                .map(|(coefficient, derivative)| coefficient * derivative)
+                .map(|(c, d)| c * d)
                 .sum::<f64>()
                 * velocity_scaling_factor;
         }
@@ -206,15 +280,28 @@ impl EphemerisRecord {
 }
 
 impl fmt::Display for EphemerisRecord {
+    /// Pretty‑print a record with midpoint/radius and formatted coefficients.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `f`: Output formatter sink.
+    ///
+    /// Return
+    /// ----------
+    /// * A [`fmt::Result`] indicating success or failure.
+    ///
+    /// See also
+    /// ------------
+    /// * [`EphemerisRecord::parse`] – Produces the values displayed here.
+    /// * `hifitime::Epoch`/`Duration` – Formatting of ET epochs and durations.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mid = Epoch::from_et_seconds(self.mid);
         let radius = Duration::from_seconds(self.radius);
 
-        // Conversion des champs complexes en String pour mesurer leur largeur
+        // Pre-format for consistent column widths
         let mid_str = format!("{mid}");
         let radius_str = format!("{radius}");
 
-        // Détermination de la largeur max pour les valeurs à gauche et droite
         let label_width = 16;
         let value_width = mid_str.len().max(radius_str.len()).max(55);
 
@@ -254,7 +341,7 @@ impl fmt::Display for EphemerisRecord {
 
         writeln!(f, "{border_header}")?;
 
-        // Affichage des coefficients Chebyshev
+        // Coefficients section
         writeln!(
             f,
             "| {:<label$} | {:<value$} |",
