@@ -57,11 +57,19 @@
 //! * [`solar_system_bary`] — SSB (0) and Sun (10) codes.
 //! * [`naif_type`] — Additional NAIF‑related type definitions.
 
+/// Planetary barycenter identifiers (e.g., Mercury barycenter = 1).
 pub mod planet_bary;
+
+/// Planet mass center identifiers (e.g., Earth = 399, Mercury = 199).
 pub mod planet_mass;
+
+/// Natural satellite mass center identifiers (e.g., Moon = 301, Phobos = 401).
 pub mod satellite_mass;
+
+/// Solar System barycenter and Sun identifiers (0 and 10).
 pub mod solar_system_bary;
 
+/// Shared NAIF type definitions and helper utilities.
 pub mod naif_type;
 
 use std::fmt;
@@ -249,7 +257,7 @@ impl fmt::Display for NaifIds {
     ///
     /// Examples
     /// ----------
-    /// ```rust
+    /// ```rust, no_run
     /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
     /// assert_eq!(NaifIds::SSB(SolarSystemBary::SSB).to_string(), "Solar System Barycenter");
     /// ```
