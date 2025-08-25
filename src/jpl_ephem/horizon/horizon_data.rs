@@ -565,15 +565,36 @@ fn parse_all_blocks(
 }
 
 impl HorizonData {
-    /// Read the JPL ephemeris file and parse the data
+    /// Read and parse a JPL Horizons legacy ephemeris binary file.
+    ///
+    /// This function:
+    /// 1. Opens the ephemeris file at the given path,
+    /// 2. Parses the header sections (TTL banner, CNAM constants, SS array),
+    /// 3. Reads the IPT (Index Pointer Table) and, if available, the extended
+    ///    IPT rows (13 and 14 for librations and TT–TDB),
+    /// 4. Computes the record size (`recsize`) and number of coefficients,
+    /// 5. Parses all DATA RECORD blocks into [`HorizonRecord`]s.
     ///
     /// Arguments
-    /// ---------
-    /// * `ephem_path` : Path to the JPL ephemeris file
+    /// -----------------
+    /// * `ephem_path` — Path to the Horizons DE binary file
+    ///   (e.g. DE440, DE441) wrapped in [`EphemFilePath`].
     ///
-    /// Returns
-    /// -------
-    /// * A HorizonData struct containing the header and records
+    /// Return
+    /// ----------
+    /// * A fully constructed [`HorizonData`] containing:
+    ///   - [`HorizonHeader`] metadata (version, IPT, coverage, EMRAT, etc.),
+    ///   - All time-ordered [`HorizonRecord`]s grouped by body ID.
+    ///
+    /// Panics
+    /// ----------
+    /// * If the file cannot be opened or read,
+    /// * If any parsing step (TTL, CNAM, SS, IPT, blocks) fails.
+    ///
+    /// See also
+    /// ------------
+    /// * [`HorizonHeader`] – global header extracted from the file.
+    /// * [`HorizonRecord`] – container for one sub-interval’s coefficients.
     pub fn read_horizon_file(ephem_path: &EphemFilePath) -> Self {
         let version = match ephem_path {
             EphemFilePath::JPLHorizon(_, version) => version,
@@ -662,17 +683,31 @@ impl HorizonData {
         }
     }
 
-    /// Get the index of the record corresponding to the given ephemeris time
-    /// The index nr is the number of the block in the file corresponding the the requested time.
-    /// The tau value is the time fraction in the block.
+    /// Locate the DATA RECORD index and normalized time fraction (`tau`)
+    /// for a given ephemeris time.
+    ///
+    /// The Horizons binary is divided into fixed-length blocks of duration
+    /// `header.period_length`. This method finds which block contains the
+    /// requested Modified Julian Date (MJD) and computes the normalized
+    /// Chebyshev parameter `tau ∈ [0,1]` inside that block.
     ///
     /// Arguments
-    /// ---------
-    /// * `et` : Ephemeris time (MJD)
+    /// -----------------
+    /// * `et` — Ephemeris time (Modified Julian Date, TDB).
     ///
-    /// Returns
-    /// -------
-    /// * A tuple containing the index of the record and the tau value
+    /// Return
+    /// ----------
+    /// * `(nr, tau)` where:
+    ///   - `nr`: zero-based index of the block inside `records`,
+    ///   - `tau`: normalized fractional time within that block.
+    ///
+    /// Panics
+    /// ----------
+    /// * If `et` lies outside the coverage of the ephemeris file.
+    ///
+    /// See also
+    /// ------------
+    /// * [`HorizonData::get_record_horizon`] – retrieves the actual record for a body.
     fn get_record_index(&self, et: MJD) -> (usize, f64) {
         // ephem_start and ephem_end are in JD
         let (ephem_start, ephem_end, ephem_step) = (
@@ -699,16 +734,32 @@ impl HorizonData {
         (nr, tau)
     }
 
-    /// Get the record corresponding to the given ephemeris time and body
+    /// Retrieve the [`HorizonRecord`] and time fraction for a given body and epoch.
+    ///
+    /// This function:
+    /// 1. Determines the block index and normalized time fraction with
+    ///    [`get_record_index`],
+    /// 2. Looks up the list of [`HorizonRecord`]s for the requested body,
+    /// 3. Chooses the correct sub-interval based on `tau`.
     ///
     /// Arguments
-    /// ---------
-    /// * `body` : Body number (0-14)
-    /// * `et` : Ephemeris time (MJD)
+    /// -----------------
+    /// * `body` — Horizons body ID (`0..=14`).
+    /// * `et` — Ephemeris time (Modified Julian Date, TDB).
     ///
-    /// Returns
-    /// -------
-    /// * A tuple containing the record and the tau value
+    /// Return
+    /// ----------
+    /// * `Some((&HorizonRecord, tau))` where:
+    ///   - `&HorizonRecord` — record covering the corresponding sub-interval,
+    ///   - `tau` — normalized time fraction inside the parent block.
+    ///
+    /// Panics
+    /// ----------
+    /// * If the requested body or block is not present in `records`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`HorizonRecord::interpolate`] – evaluate Chebyshev polynomials.
     fn get_record_horizon(&self, body: u8, et: MJD) -> Option<(&HorizonRecord, f64)> {
         let (nr, tau) = self.get_record_index(et);
 
@@ -725,26 +776,36 @@ impl HorizonData {
         Some((&record_body[sub_index], tau))
     }
 
-    /// Get the ephemeris data for a given target and center body at a given ephemeris time
-    /// The target and center bodies are specified by their IDs (0-14).
-    /// The ephemeris data is computed by interpolating the records for the target and center bodies
-    /// at the given ephemeris time.
-    /// The result is the difference between the target and center ephemeris data.
+    /// Interpolate the state vector of a target body relative to a center body.
+    ///
+    /// This is the main high-level query function. It retrieves the records
+    /// for both `target` and `center`, evaluates their Chebyshev polynomials
+    /// at the requested time, and returns the difference.
+    ///
+    /// Special handling:
+    /// * If `target == Earth`, the Moon’s contribution is removed using the
+    ///   Earth–Moon mass ratio (EMRAT).
     ///
     /// Arguments
-    /// ---------
-    /// * `target` : Target body number (0-14)
-    /// * `center` : Center body number (0-14)
-    /// * `et` : Ephemeris time (MJD)
-    /// * `compute_velocity` : Flag to compute velocity
-    /// * `compute_acceleration` : Flag to compute acceleration
+    /// -----------------
+    /// * `target` — Target body as [`HorizonID`].
+    /// * `center` — Center body as [`HorizonID`].
+    /// * `et` — Ephemeris time (Modified Julian Date, TDB).
+    /// * `compute_velocity` — If `true`, also compute velocity.
+    /// * `compute_acceleration` — If `true`, also compute acceleration.
     ///
-    /// Returns
-    /// -------
-    /// * An InterpResult struct containing the position, velocity, and acceleration
-    ///   of the target body relative to the center body at the given ephemeris time.
-    ///   The position is in Km, velocity in Km/day, and acceleration in Km/day^2.
-    /// * The velocity and acceleration are optional, depending on the user request.
+    /// Return
+    /// ----------
+    /// * An [`InterpResult`] containing:
+    ///   - `position` \[km\],
+    ///   - `velocity` \[km/day\] (if requested),
+    ///   - `acceleration` \[km/day²\] (if requested),
+    ///     all expressed relative to the center body.
+    ///
+    /// See also
+    /// ------------
+    /// * [`InterpResult::to_au`] – convert to AU / AU/day.
+    /// * [`HorizonRecord::interpolate`] – polynomial evaluation.
     pub fn ephemeris(
         &self,
         target: HorizonID,
