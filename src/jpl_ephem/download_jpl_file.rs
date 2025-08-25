@@ -1,3 +1,44 @@
+//! Ephemeris file resolution, caching, and (optional) download.
+//!
+//! This module determines where to find the JPL ephemeris file required by the
+//! `jpl` layer, placing a unified cache in the user's OS cache directory and,
+//! when the `jpl-download` feature is enabled, downloading the missing file
+//! from the official JPL locations (Horizons legacy DE binaries and NAIF SPK/DAF).
+//!
+//! # What this module does
+//! - Parse a high-level ephemeris source specification (backend + version).
+//! - Resolve a **cache path** under the OS cache directory (via `directories`).
+//! - Materialize a typed handle [`EphemFilePath`] used by readers (`horizon`, `naif`).
+//! - Optionally **download** the file if it is not present (feature `jpl-download`).
+//!
+//! # Cache layout
+//! Cache root: `<os-cache>/outfit_cache/jpl_ephem`
+//!
+//! Subdirectories:
+//! - `jpl_horizon/` — legacy JPL DE binaries (TTL/CNAM/IPT layout).
+//! - `naif/`       — NAIF SPK/DAF kernels.
+//!
+//! File names are provided by the version enums
+//! ([`crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion::to_filename`],
+//!  [`crate::jpl_ephem::naif::naif_version::NaifVersion::get_filename`]) and match official names.
+//!
+//! # String parsing
+//! You can create a source from a string with `TryFrom<&str>`:
+//!
+//! - `horizon:DE440`  → legacy DE binary
+//! - `naif:DE440`     → NAIF SPK/DAF
+//!
+//! # Platform paths (examples)
+//! - **Linux:** `~/.cache/outfit_cache/jpl_ephem/...`
+//! - **Windows:** `C:\Users\<user>\AppData\Local\outfit_cache\jpl_ephem\...`
+//! - **macOS:** `~/Library/Caches/outfit_cache/jpl_ephem/...`
+//!
+//! # See also
+//! * [`crate::jpl_ephem::horizon`] — Legacy DE binary reader.
+//! * [`crate::jpl_ephem::naif`] — NAIF SPK/DAF reader.
+//! * [`EphemFileSource`] — User-facing source specification.
+//! * [`EphemFilePath`] — Resolved on-disk path and version.
+
 use camino::{Utf8Path, Utf8PathBuf};
 use directories::BaseDirs;
 use std::{fs, str::FromStr};
@@ -10,12 +51,37 @@ use tokio_stream::StreamExt;
 use super::{horizon::horizon_version::JPLHorizonVersion, naif::naif_version::NaifVersion};
 use crate::outfit_errors::OutfitError;
 
+/// Ephemeris file source selector (backend + version).
+///
+/// This enum encodes **what** file we want, independent from **where** it lives
+/// on disk. Use [`EphemFilePath::get_ephemeris_file`] to resolve it.
+///
+/// # Variants
+/// - [`EphemFileSource::JPLHorizon`] — Legacy JPL DE binaries (e.g. `DE440`).
+/// - [`EphemFileSource::Naif`] — NAIF SPK/DAF kernels (e.g. `DE440`).
+///
+/// # See also
+/// * [`JPLHorizonVersion`] — Maps DE labels to official legacy filenames.
+/// * [`NaifVersion`] — Maps DE labels to official SPK filenames.
 #[derive(Debug, Clone)]
 pub enum EphemFileSource {
     JPLHorizon(JPLHorizonVersion),
     Naif(NaifVersion),
 }
 
+/// Parse a source string like `"horizon:DE440"` or `"naif:DE442"`.
+///
+/// Expected format: `"{source}:{version}"`.
+///
+/// # Errors
+/// Returns [`OutfitError`] when the string does not match the expected format,
+/// or when the version token is unknown for the specified source.
+///
+/// # Examples
+/// ```
+/// use outfit::jpl::download_jpl_file::EphemFileSource;
+/// let src: EphemFileSource = "naif:DE440".try_into().unwrap();
+/// ```
 impl TryFrom<&str> for EphemFileSource {
     type Error = OutfitError;
 
@@ -58,6 +124,16 @@ impl TryFrom<&str> for EphemFileSource {
 }
 
 impl EphemFileSource {
+    /// Return the official base URL for the given backend (only with `jpl-download`).
+    ///
+    /// Horizons legacy binaries live under:
+    /// `https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/`
+    ///
+    /// NAIF SPK kernels live under:
+    /// `https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/`
+    ///
+    /// # See also
+    /// * [`EphemFileSource::get_version_url`]
     #[cfg(feature = "jpl-download")]
     fn get_baseurl(&self) -> &str {
         match self {
@@ -68,8 +144,15 @@ impl EphemFileSource {
         }
     }
 
+    /// Compose the full URL for the concrete version file (only with `jpl-download`).
+    ///
+    /// This uses the backend‑specific filename returned by the version enums.
+    ///
+    /// # See also
+    /// * [`JPLHorizonVersion::get_filename`]
+    /// * [`NaifVersion::get_filename`]
     #[cfg(feature = "jpl-download")]
-    fn get_version_url(&self) -> String {
+    pub fn get_version_url(&self) -> String {
         let base_url = self.get_baseurl();
         match self {
             EphemFileSource::JPLHorizon(jpl_version) => {
@@ -79,6 +162,10 @@ impl EphemFileSource {
         }
     }
 
+    /// Name of the subdirectory under the cache root for this backend.
+    ///
+    /// - `jpl_horizon/` for legacy binaries
+    /// - `naif/` for SPK/DAF files
     fn get_cache_dir(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "jpl_horizon",
@@ -86,6 +173,11 @@ impl EphemFileSource {
         }
     }
 
+    /// Canonical filename for the requested version (backend‑specific).
+    ///
+    /// # See also
+    /// * [`JPLHorizonVersion::to_filename`]
+    /// * [`NaifVersion::get_filename`]
     fn filename(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(version) => version.to_filename(),
@@ -94,20 +186,20 @@ impl EphemFileSource {
     }
 }
 
-/// Download a large file from a URL
-/// Uses reqwest to download the file in chunks
-/// and saves it to the specified path using tokio's async file I/O
-/// and stream processing.
+/// Download a (potentially large) file to `path` (feature `jpl-download`).
 ///
-/// Arguments
-/// ---------
-/// * `url`: the URL of the file to download
-/// * `path`: the path to save the downloaded file
+/// Uses `reqwest` to stream the HTTP body in chunks and writes it asynchronously
+/// with Tokio's `File` implementation.
 ///
-/// Return
-/// ------
-/// * An error if the download fails
-/// * Ok(()) if the download is successful
+/// # Parameters
+/// * `url` — Remote file URL (HTTPS).
+/// * `path` — Destination file path.
+///
+/// # Errors
+/// Returns [`OutfitError`] if the HTTP request, stream, or file I/O fails.
+///
+/// # See also
+/// * [`EphemFileSource::get_version_url`] — Compose the URL for a versioned file.
 #[cfg(feature = "jpl-download")]
 pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
     let mut file = File::create(path).await?;
@@ -126,6 +218,17 @@ pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitE
     Ok(())
 }
 
+/// A typed path to a concrete ephemeris file on disk (plus its version).
+///
+/// This is what the low‑level readers (`horizon` / `naif`) expect to open.
+///
+/// # Variants
+/// - [`EphemFilePath::JPLHorizon`] — legacy DE binary file.
+/// - [`EphemFilePath::Naif`] — NAIF SPK/DAF file.
+///
+/// # See also
+/// * [`EphemFilePath::get_ephemeris_file`] — Resolve and (optionally) download.
+/// * [`EphemFileSource`] — User‑facing selection.
 pub enum EphemFilePath {
     JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
     Naif(Utf8PathBuf, NaifVersion),
@@ -145,27 +248,33 @@ impl std::fmt::Display for EphemFilePath {
 }
 
 impl EphemFilePath {
-    /// Get the path of the ephemeris file.
-    /// The file should be located in the OS cache directory.
-    /// On linux, the cache directory is ~/.cache/outfit_cache/jpl_ephem
-    /// On windows, the cache directory is C:\Users\<username>\AppData\Local\outfit_cache\jpl_ephem
+    /// Resolve the on‑disk path for a given [`EphemFileSource`].
     ///
-    /// The full path after jpl_ephem should be:
-    /// * `jpl_horizon/<filename>` for JPL Horizon files
-    /// * `naif/<filename>` for NAIF files
+    /// Behavior:
+    /// 1. Build the cache directory under the OS cache root if needed.
+    /// 2. Compose the full local filename for the requested version.
+    /// 3. If the file **exists**, return its typed path.
+    /// 4. If the file is **missing**:
+    ///    - with feature `jpl-download`: download it to the cache and return the path,
+    ///    - otherwise: return an error.
     ///
-    /// If the file does not exist and the feature 'jpl-download' is activated,
-    /// the file will be downloaded from the JPL website.
-    /// Otherwise, an error will be returned.
+    /// # Errors
+    /// Returns [`OutfitError`] if the base directory cannot be created/resolved,
+    /// if the path cannot be represented as UTF‑8, or if the file is missing and
+    /// downloads are disabled (or the download fails).
     ///
-    /// Arguments
-    /// ---------
-    /// * `file_source`: the source of the ephemeris file
+    /// # Examples
+    /// ```no_run
+    /// use outfit::jpl::download_jpl_file::{EphemFilePath, EphemFileSource};
+    /// let source: EphemFileSource = "horizon:DE440".try_into().unwrap();
+    /// let handle = EphemFilePath::get_ephemeris_file(&source)?;
+    /// println!("Using ephemeris: {}", handle);
+    /// # Ok::<(), outfit::outfit_errors::OutfitError>(())
+    /// ```
     ///
-    /// Return
-    /// ------
-    /// * The path to the ephemeris file
-    /// * An error if the file does not exist and the feature 'jpl-download' is not activated
+    /// # See also
+    /// * [`EphemFileSource`] — Backend + version selector.
+    /// * [`download_big_file`] — Async downloader (gated by `jpl-download`).
     pub fn get_ephemeris_file(file_source: &EphemFileSource) -> Result<EphemFilePath, OutfitError> {
         let local_file = EphemFilePath::try_from(file_source.clone())?;
 
@@ -176,6 +285,9 @@ impl EphemFilePath {
             {
                 let url = file_source.get_version_url();
 
+                // Note: since this is a sync API, we spin a Tokio runtime here.
+                // If you already run Tokio, consider moving downloads outside
+                // or providing an async variant to avoid nested runtimes.
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
                 rt.block_on(async { download_big_file(&url, local_file.path()).await })?;
 
@@ -188,6 +300,7 @@ impl EphemFilePath {
         }
     }
 
+    /// Whether the concrete file exists on disk.
     pub fn exists(&self) -> bool {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.exists(),
@@ -195,6 +308,7 @@ impl EphemFilePath {
         }
     }
 
+    /// Borrow the OS path of the file.
     pub fn path(&self) -> &Utf8Path {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path,
@@ -202,6 +316,7 @@ impl EphemFilePath {
         }
     }
 
+    /// The last path component (file name), if any.
     pub fn file_name(&self) -> Option<&str> {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.file_name(),
@@ -209,6 +324,7 @@ impl EphemFilePath {
         }
     }
 
+    /// The file extension (e.g., `bsp`, `bsp.gz`, …), if any.
     pub fn extension(&self) -> Option<&str> {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.extension(),
@@ -217,6 +333,20 @@ impl EphemFilePath {
     }
 }
 
+/// Build a typed local file path for the requested source, creating the cache dir.
+///
+/// This `TryFrom` only sets up the directory structure and returns the
+/// **intended** file path. It does **not** check for existence beyond
+/// creating the parent directories. Use [`EphemFilePath::get_ephemeris_file`]
+/// if you need existence + optional download.
+///
+/// # Errors
+/// Returns [`OutfitError`] if the OS cache directory cannot be resolved or
+/// converted to a UTF‑8 path, or if creating directories fails.
+///
+/// # See also
+/// * [`directories::BaseDirs`] — Cross‑platform cache dir discovery.
+/// * [`EphemFileSource`] — Which backend and version to materialize.
 impl TryFrom<EphemFileSource> for EphemFilePath {
     type Error = OutfitError;
 
@@ -248,7 +378,7 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
 
 #[cfg(test)]
 mod jpl_reader_test {
-
+    /// If `jpl-download` is **not** enabled, requesting a missing file must error.
     #[test]
     #[cfg(not(feature = "jpl-download"))]
     fn test_no_feature_download_jpl_ephem() {

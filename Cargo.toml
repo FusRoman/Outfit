@@ -65,3 +65,7 @@ debug = true
 
 [profile.dev.package."*"]
 debug = false
+
+[package.metadata.docs.rs]
+features = ["jpl-download"]
+rustdoc-args = ["--cfg", "docsrs"]
