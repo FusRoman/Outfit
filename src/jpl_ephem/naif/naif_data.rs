@@ -1,3 +1,27 @@
+//! High‑level loader for NAIF/JPL SPK ephemerides.
+//!
+//! This module ties together the low‑level DAF header, the ASCII JPL header,
+//! the summary records, the directory footer, and the per‑record Chebyshev
+//! coefficients to expose a convenient API for ephemeris interpolation.
+//!
+//! # What this module does
+//! 1. Reads the **DAF header** to discover the binary layout (`ND`, `NI`, pointers).
+//! 2. Parses the **ASCII JPL header** (version, coverage in calendar & JD).
+//! 3. Iterates over **summary records** to discover segments (`target`, `center`,
+//!    addressing, time span).
+//! 4. Uses the **directory/footer** to obtain `rsize` and `n_records`.
+//! 5. Loads all **ephemeris records** (Chebyshev coefficients) for each pair
+//!    `(target, center)` and caches them in memory.
+//!
+//! The resulting [`NaifData`] provides structured accessors to:
+//!
+//! * list available target/center pairs and their epochs (`info`),
+//! * fetch the record covering an ET epoch (`get_record`),
+//! * interpolate position/velocity directly (`ephemeris`).
+//!
+//! # Units & time scales
+//! * Times are **ET/TDB seconds from J2000** (consistent with SPK).
+//! * Positions are **kilometers**, velocities are **km/s**.
 use nom::{bytes::complete::take, number::complete::le_f64};
 use std::{
     collections::HashMap,
@@ -14,49 +38,65 @@ use super::{
     jpl_ephem_header::JPLEphemHeader, naif_ids::NaifIds, summary_record::Summary,
 };
 
-type DafRecords = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>;
-
+/// In‑memory bundle of a loaded NAIF/JPL SPK kernel.
+///
+/// Internally, this maps `(target, center)` NAIF IDs to the segment
+/// \[`Summary`\], all decoded \[`EphemerisRecord`\]s of that segment, and the
+/// segment \[`DirectoryData`\].
+///
+/// See also
+/// ------------
+/// * [`NaifData::read_naif_file`] – Build this structure from an SPK file.
+/// * [`NaifData::ephemeris`] – Interpolate state vectors at ET epochs.
 #[derive(Debug, Clone)]
 pub struct NaifData {
-    daf_header: DAFHeader,
-    header: JPLEphemHeader,
-    jpl_data: DafRecords,
+    pub(crate) daf_header: DAFHeader,
+    pub(crate) header: JPLEphemHeader,
+    pub(crate) jpl_data: DafRecords,
 }
 
+// (target_id, center_id) -> (summary, records, directory)
+type DafRecords = HashMap<(i32, i32), (Summary, Vec<EphemerisRecord>, DirectoryData)>;
+
 impl NaifData {
-    /// Reads the JPL ephemeris file and parses the DAF header, JPL header, and ephemeris records.
+    /// Load and decode a NAIF/JPL SPK file into a [`NaifData`] container.
+    ///
+    /// This performs the full parsing pipeline:
+    /// DAF header → ASCII JPL header → summaries → directory → ephemeris records.
     ///
     /// Arguments
-    /// ---------
-    /// * `file_path`: The path to the JPL ephemeris file.
+    /// -----------------
+    /// * `file_path`: Filesystem location of the SPK kernel.
     ///
-    /// Returns
-    /// -------
-    /// * A `NaifData` instance containing the parsed data.
+    /// Return
+    /// ----------
+    /// * A fully populated [`NaifData`] with all segments indexed by `(target, center)`.
     pub fn read_naif_file(file_path: &EphemFilePath) -> Self {
         let mut file = BufReader::new(
             File::open(file_path.path())
                 .unwrap_or_else(|_| panic!("Failed to open the JPL ephemeris file: {file_path}")),
         );
 
+        // --- DAF header (first 1024 bytes)
         let mut buffer = [0u8; 1 << 10];
         file.read_exact(&mut buffer)
             .expect("Failed to read the DAF header. (first 1024 bytes)");
-
         let (_, daf_header) =
             DAFHeader::parse(&buffer).expect("Failed to parse the DAF header with nom !");
 
+        // --- ASCII comment area up to the first summary record
         let end_ascii_comment = (daf_header.fward as usize - 1) * 1024;
         let mut ascii_buffer = vec![0u8; end_ascii_comment];
         file.read_exact(&mut ascii_buffer)
             .expect("Failed to read the ASCII comment area.");
-
         let binding = String::from_utf8_lossy(&ascii_buffer).replace('\0', "\n");
         let ascii_comment = binding.as_str();
 
+        // --- JPL textual header
         let (_, jpl_header) = JPLEphemHeader::parse(ascii_comment)
             .expect("Failed to parse the JPL header with nom !");
 
+        // --- Move to first summary record
         let offset_bytes = (daf_header.fward as usize - 1) * 1024;
         file.seek(std::io::SeekFrom::Start(offset_bytes as u64))
             .unwrap();
@@ -64,24 +104,22 @@ impl NaifData {
         let mut buffer = [0u8; 1 << 10];
         file.read_exact(&mut buffer).unwrap();
 
+        // Skip initial 16 bytes (DAF control words) and read NSUM
         let (input, _) =
             take::<_, _, nom::error::Error<&[u8]>>(16usize)(buffer.as_slice()).unwrap();
-
-        // nsum is the number of summary records
         let (_, nsum) = le_f64::<_, nom::error::Error<_>>(input).unwrap();
 
-        // ss is the size of the summary record
+        // Summary size in DP-words: ND + ceil(NI/2)
         let ss = daf_header.nd as usize + (daf_header.ni as usize).div_ceil(2);
 
         let mut jpl_data: DafRecords = HashMap::new();
 
-        // Read the summary records and the element records
+        // --- Iterate segment summaries and load their records
         for i in 0..(nsum as usize) {
             let start = 24 + i * ss * 8;
             let end = start + ss * 8;
 
             let summary_bytes = &buffer[start..end];
-
             let (_, summary) =
                 Summary::parse(summary_bytes).expect("Failed to parse the summary with nom !");
 
@@ -93,11 +131,13 @@ impl NaifData {
                 dir_data.rsize,
                 dir_data.n_records,
             );
+
             jpl_data.insert(
                 (summary.target, summary.center),
                 (summary, records, dir_data),
             );
         }
+
         NaifData {
             daf_header,
             header: jpl_header,
@@ -105,17 +145,22 @@ impl NaifData {
         }
     }
 
-    /// Retrieves the ephemeris records for the given target and center NAIF IDs.
+    /// Retrieve all decoded data for a `(target, center)` pair.
     ///
     /// Arguments
-    /// ---------
-    /// * `target`: The target NAIF ID.
-    /// * `center`: The center NAIF ID.
+    /// -----------------
+    /// * `target`: NAIF ID of the target body.
+    /// * `center`: NAIF ID of the center (e.g., SSB).
     ///
-    /// Returns
-    /// -------
-    /// * An `Option` containing a tuple of the summary, ephemeris records, and directory data.
-    ///   If the target and center combination is not found, it returns `None`.
+    /// Return
+    /// ----------
+    /// * `Option<(&Summary, &Vec<EphemerisRecord>, &DirectoryData)>` with the segment
+    ///   descriptor, all records, and the directory/footer; `None` if not present.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::get_record`] – Locate the single record containing a given epoch.
+    /// * [`Self::ephemeris`] – One‑shot position/velocity interpolation.
     fn get_records(
         &self,
         target: NaifIds,
@@ -126,19 +171,26 @@ impl NaifData {
             .map(|(summary, records, dir_data)| (summary, records, dir_data))
     }
 
-    /// Retrieves the ephemeris record for the given target and center at the specified epoch.
+    /// Find the ephemeris record covering a given ET epoch (in seconds).
+    ///
+    /// This uses the segment `init` and `intlen` (from the directory) to compute
+    /// the 0‑based record index and returns that record if it exists.
     ///
     /// Arguments
-    /// ---------
-    /// * `target`: The target NAIF ID.
-    /// * `center`: The center NAIF ID.
-    /// * `et_seconds`: The epoch in seconds since the J2000 epoch.
+    /// -----------------
+    /// * `target`: NAIF ID of the target body.
+    /// * `center`: NAIF ID of the center (e.g., SSB).
+    /// * `et_seconds`: Epoch in **ET seconds from J2000**.
     ///
-    /// Returns
-    /// -------
-    /// * An `Option` containing a reference to the ephemeris record.
-    ///   If the target and center combination is not found, or if the epoch is out of range,
-    ///   it returns `None`.
+    /// Return
+    /// ----------
+    /// * `Option<&EphemerisRecord>` that contains the epoch; `None` if the pair
+    ///   is unknown or if the epoch is outside the segment’s coverage.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::get_records`] – Segment‑level access (summary + records).
+    /// * [`Self::ephemeris`] – Interpolation using the found record.
     fn get_record(
         &self,
         target: NaifIds,
@@ -151,22 +203,23 @@ impl NaifData {
         }
 
         let idx = ((et_seconds - directory.init) / directory.intlen as f64).floor() as usize;
-
         records.get(idx)
     }
 
-    /// Interpolates the ephemeris record for the given target and center at the specified epoch.
+    /// Interpolate **position** and **velocity** for a `(target, center)` at an ET epoch.
+    ///
+    /// This fetches the covering record and evaluates Chebyshev polynomials to
+    /// return a Cartesian state vector in the J2000 frame.
     ///
     /// Arguments
-    /// ---------
-    /// * `target`: The target NAIF ID.
-    /// * `center`: The center NAIF ID.
-    /// * `et_seconds`: The epoch in seconds since the J2000 epoch.
+    /// -----------------
+    /// * `target`: NAIF ID of the target body.
+    /// * `center`: NAIF ID of the center (e.g., SSB).
+    /// * `et_seconds`: Epoch in **ET seconds from J2000**.
     ///
-    /// Returns
-    /// --------
-    /// * A tuple containing the position and velocity vectors in the J2000 frame.
-    ///   The position and velocity vectors are in kilometers and kilometers per second, respectively.
+    /// Return
+    /// ----------
+    /// * [`InterpResult`]: position in **km**, velocity in **km/s** (acceleration is `None`).
     pub fn ephemeris(&self, target: NaifIds, center: NaifIds, et_seconds: f64) -> InterpResult {
         let record = self
             .get_record(target, center, et_seconds)
@@ -184,7 +237,20 @@ impl NaifData {
         }
     }
 
-    /// Prints information about the available targets, centers, and epoch ranges in the ephemeris file.
+    /// Print a human‑readable summary of the loaded kernel and segments.
+    ///
+    /// This includes:
+    /// * DAF header table,
+    /// * ASCII JPL header table,
+    /// * one block per `(target, center)` with summary and directory data.
+    ///
+    /// Arguments
+    /// -----------------
+    /// *(none)*
+    ///
+    /// Return
+    /// ----------
+    /// * `()`; the function writes to `stdout`.
     pub fn info(&self) {
         println!("+{:-^78}+", " Ephemeris File Information ");
         println!("{}", self.daf_header); // Use `Display` for `DAFHeader`
