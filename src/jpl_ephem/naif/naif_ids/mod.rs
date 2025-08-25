@@ -1,3 +1,62 @@
+//! NAIF identifier model for solar‑system bodies.
+//!
+//! This module provides a strongly‑typed interface to the NAIF/SPICE
+//! integer identifier space used to address solar‑system objects such as the
+//! Solar System Barycenter (SSB), planetary barycenters, planetary mass centers,
+//! and natural satellites.
+//!
+//! # Overview
+//! NAIF IDs are compact `i32` codes. This module groups them into safe enums
+//! with conversions in both directions (`try_from<i32>` ⇄ `NaifIds`, and
+//! `From<NaifIds> for i32`). It exposes four categories:
+//!
+//! * `SolarSystemBary` — e.g. `0` for SSB, `10` for the Sun.
+//! * `PlanetaryBary` — planetary barycenters (e.g. `1` Mercury barycenter, …).
+//! * `PlanetMassCenter` — mass centers (e.g. `199` Mercury, `399` Earth).
+//! * `SatelliteMassCenter` — natural satellites (e.g. `301` Moon, `401` Phobos).
+//!
+//! The exact mapping tables live in the submodules of this namespace
+//! (`planet_bary`, `planet_mass`, `satellite_mass`, …). This `mod.rs`
+//! concentrates the *dispatching* logic and the ergonomic `NaifIds` enum.
+//!
+//! # Typical usage
+//! ```rust, no_run
+//! use crate::jpl_ephem::naif::NaifIds;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Parse an integer NAIF code coming from a file or API:
+//! let code = 399_i32; // Earth mass center
+//! let id = NaifIds::try_from(code)?;
+//! assert!(matches!(id, NaifIds::PMC(_)));
+//!
+//! // Convert back to the raw i32 code (lossless):
+//! let roundtrip: i32 = id.into();
+//! assert_eq!(roundtrip, 399);
+//!
+//! // Human‑readable label (Display impl):
+//! assert_eq!(id.to_string(), "Earth");
+//! # Ok(()) }
+//! ```
+//!
+//! # Error handling
+//! Parsing invalid or out‑of‑range integers returns a descriptive `ErrorId`
+//! variant. Errors are granular enough to distinguish whether a number failed
+//! to match a planetary barycenter, a mass center, or a satellite mass center.
+//!
+//! # Design notes
+//! * The public `NaifIds` enum is a *sum type* that preserves the category
+//!   of the ID, which is often semantically useful downstream (e.g. when
+//!   formatting, routing to different kernels, or resolving ephemerides).
+//! * Submodules own their respective mapping tables and their own error types;
+//!   this module lifts them into a unified error surface (`ErrorId`).
+//!
+//! # See also
+//! -------------
+//! * [`planet_bary`] — Planetary barycenter mapping table.
+//! * [`planet_mass`] — Planet mass‑center mapping table (e.g. 199, 299, …).
+//! * [`satellite_mass`] — Natural satellite mapping table (e.g. 301, 401, …).
+//! * [`solar_system_bary`] — SSB (0) and Sun (10) codes.
+//! * [`naif_type`] — Additional NAIF‑related type definitions.
+
 pub mod planet_bary;
 pub mod planet_mass;
 pub mod satellite_mass;
@@ -13,6 +72,15 @@ use satellite_mass::SatelliteMassCenter;
 use solar_system_bary::SolarSystemBary;
 use thiserror::Error;
 
+/// Error variants produced when converting raw integers into NAIF identifiers.
+///
+/// These errors are specific enough to signal which *category* the conversion
+/// failed to match, and include the offending integer.
+///
+/// /// See also
+/// ------------
+/// * [`NaifIds::from_id`] – Fallible constructor from `i32`.
+/// * Submodule errors in [`planet_bary`], [`planet_mass`], [`satellite_mass`].
 #[derive(Debug, Clone, Copy, Error)]
 pub enum ErrorId {
     #[error("Invalid Planetary Barycenter ID: {0}")]
@@ -27,6 +95,23 @@ pub enum ErrorId {
     InvalidNaifId(i32),
 }
 
+/// Discriminated union over the main NAIF ID families.
+///
+/// This type preserves the semantic category of the code, which is useful
+/// for routing, formatting, or applying category‑specific logic downstream.
+///
+/// Examples
+/// ----------
+/// ```rust
+/// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+/// assert_eq!(NaifIds::SSB(SolarSystemBary::SSB).to_string(), "Solar System Barycenter");
+/// ```
+///
+/// /// See also
+/// ------------
+/// * [`NaifIds::from_id`] – Parse a raw integer into a typed ID.
+/// * [`NaifIds::to_id`] – Convert back to the raw integer form.
+/// * [`TryFrom<i32>`] and [`From<NaifIds> for i32`] – Idiomatic conversions.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NaifIds {
     SSB(SolarSystemBary),
@@ -36,6 +121,36 @@ pub enum NaifIds {
 }
 
 impl NaifIds {
+    /// Build a [`NaifIds`] from a raw NAIF integer code.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `id`: The raw NAIF integer identifier.
+    ///
+    /// Return
+    /// ----------
+    /// * `Ok(NaifIds)` if the code matches one of the supported families.
+    /// * `Err(ErrorId)` if the code does not map to a known identifier.
+    ///
+    /// Notes
+    /// -------
+    /// * Special‑case handling for `0` (SSB) and `10` (Sun).
+    /// * For `1..=999`, this function attempts, in order:
+    ///   planetary barycenter → planet mass center → satellite mass center.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust, no_run
+    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// let ssb = NaifIds::from_id(0).unwrap();
+    /// assert!(matches!(ssb, NaifIds::SSB(SolarSystemBary::SSB)));
+    /// assert!(NaifIds::from_id(1000).is_err());
+    /// ```
+    ///
+    /// See also
+    /// ------------
+    /// * [`TryFrom<i32>`] – Idiomatic conversion from integers.
+    /// * [`NaifIds::to_id`] – The inverse of this function.
     pub fn from_id(id: i32) -> Result<Self, ErrorId> {
         match id {
             0 => Ok(NaifIds::SSB(SolarSystemBary::SSB)),
@@ -55,6 +170,28 @@ impl NaifIds {
         }
     }
 
+    /// Convert a typed [`NaifIds`] back to its raw integer code.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `&self`: The typed NAIF identifier.
+    ///
+    /// Return
+    /// ----------
+    /// * The corresponding `i32` NAIF code.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust, no_run
+    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// let code = NaifIds::SSB(SolarSystemBary::Sun).to_id();
+    /// assert_eq!(code, 10);
+    /// ```
+    ///
+    /// /// See also
+    /// ------------
+    /// * [`From<NaifIds> for i32`] – Idiomatic conversion to integers.
+    /// * [`NaifIds::from_id`] – Parsing from integers.
     pub fn to_id(&self) -> i32 {
         match self {
             NaifIds::SSB(solar_system_bary) => match solar_system_bary {
@@ -69,6 +206,11 @@ impl NaifIds {
 }
 
 impl From<NaifIds> for i32 {
+    /// Lossless conversion from a typed NAIF ID into its raw integer code.
+    ///
+    /// See also
+    /// ------------
+    /// * [`NaifIds::to_id`] – Underlying implementation.
     fn from(naif_id: NaifIds) -> Self {
         match naif_id {
             NaifIds::SSB(solar_system_bary) => solar_system_bary.to_id(),
@@ -82,12 +224,39 @@ impl From<NaifIds> for i32 {
 impl TryFrom<i32> for NaifIds {
     type Error = ErrorId;
 
+    /// Fallible conversion from raw integer to typed NAIF ID.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `id`: The raw NAIF code to parse.
+    ///
+    /// Return
+    /// ----------
+    /// * `Result<NaifIds, ErrorId>` with a category‑aware error on failure.
+    ///
+    /// See also
+    /// ------------
+    /// * [`NaifIds::from_id`] – Same logic in inherent form.
     fn try_from(id: i32) -> Result<Self, Self::Error> {
         NaifIds::from_id(id)
     }
 }
 
 impl fmt::Display for NaifIds {
+    /// Human‑readable label for NAIF IDs.
+    ///
+    /// Planet and satellite names come from the corresponding submodule tables.
+    ///
+    /// Examples
+    /// ----------
+    /// ```rust
+    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// assert_eq!(NaifIds::SSB(SolarSystemBary::SSB).to_string(), "Solar System Barycenter");
+    /// ```
+    ///
+    /// See also
+    /// ------------
+    /// * [`planet_bary`], [`planet_mass`], [`satellite_mass`].
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NaifIds::SSB(solar_system_bary) => match solar_system_bary {
