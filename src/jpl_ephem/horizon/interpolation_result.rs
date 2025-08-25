@@ -1,14 +1,61 @@
-use std::ops::{Add, Div, Sub};
-
-use nalgebra::Vector3;
+//! Interpolation result type for Horizons state evaluation.
+//!
+//! Overview
+//! -----------------
+//! `InterpResult` is the unified container returned by interpolation routines
+//! in the Horizons backend. It always carries a **position** vector, and
+//! may optionally include **velocity** and **acceleration** depending on the
+//! caller’s request.
+//!
+//! Units
+//! -----------------
+//! * `position`: kilometers (km)  
+//! * `velocity`: kilometers per day (km/day)  
+//! * `acceleration`: kilometers per day² (km/day²)  
+//! Use [`InterpResult::to_au`](crate::jpl_ephem::horizon::interpolation_result::InterpResult::to_au) to convert all present fields to AU-based units
+//! (AU, AU/day, AU/day²).
+//!
+//! Arithmetic semantics
+//! -----------------
+//! Addition/subtraction are defined component-wise. Optional fields propagate
+//! **only when present on both operands**; otherwise they are dropped (remain
+//! `None`) to avoid silently mixing partial information.
+//!
+//! Typical workflow
+//! -----------------
+//! 1. Query ephemerides via
+//!    [`HorizonData::ephemeris`](crate::jpl_ephem::horizon::horizon_data::HorizonData::ephemeris).
+//! 2. Optionally convert to AU with [`InterpResult::to_au`](crate::jpl_ephem::horizon::interpolation_result::InterpResult::to_au).
+//! 3. Combine results with `+`/`-` if needed (e.g., frame changes).
+//!
+//! See also
+//! -----------------
+//! * [`crate::jpl_ephem::horizon::horizon_records::HorizonRecord::interpolate`]
+//!   – low-level interpolator producing an `InterpResult`.
+//! * [`crate::jpl_ephem::horizon::horizon_data::HorizonData::ephemeris`]
+//!   – high-level query returning an `InterpResult`.
 
 use crate::constants::AU;
+use nalgebra::Vector3;
+use std::ops::{Add, Div, Sub};
 
-/// Interplation result for celestial objects.
-/// This struct contains the interpolated position, velocity, and acceleration
-/// of a celestial object at a given time.
-/// The position is always present, while velocity and acceleration are
-/// optional, depending on the user request.
+/// Interpolation result for a celestial body state.
+///
+/// Holds position and, optionally, velocity and acceleration for a given
+/// evaluation time. Returned by high-level queries and low-level record
+/// interpolation.
+///
+/// Fields
+/// -----------------
+/// * `position` — Cartesian position (km).
+/// * `velocity` — Optional Cartesian velocity (km/day).
+/// * `acceleration` — Optional Cartesian acceleration (km/day²).
+///
+/// See also
+/// -----------------
+/// * [`Self::to_au`] – convert present fields to AU units.
+/// * [`crate::jpl_ephem::horizon::horizon_data::HorizonData::ephemeris`] – high-level source.
+/// * [`crate::jpl_ephem::horizon::horizon_records::HorizonRecord::interpolate`] – low-level source.
 #[derive(Debug, PartialEq, Clone)]
 pub struct InterpResult {
     pub position: Vector3<f64>,
@@ -17,6 +64,21 @@ pub struct InterpResult {
 }
 
 impl InterpResult {
+    /// Convert the result to AU-based units.
+    ///
+    /// Scales all present vectors by `1 / AU`:
+    /// * `position`: km → AU,
+    /// * `velocity`: km/day → AU/day (if present),
+    /// * `acceleration`: km/day² → AU/day² (if present).
+    ///
+    /// Return
+    /// -----------------
+    /// * A new `InterpResult` expressed in AU units.
+    ///
+    /// See also
+    /// -----------------
+    /// * [`AU`] – astronomical unit constant used for scaling.
+    #[must_use = "`.to_au()` returns a new InterpResult; assign or use it"]
     pub fn to_au(&self) -> Self {
         self / AU
     }
@@ -25,11 +87,30 @@ impl InterpResult {
 impl Add for InterpResult {
     type Output = Self;
 
-    /// Adds two InterpResult instances together.
-    /// The position is added directly, while velocity and acceleration are
-    /// added only if both instances have them.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Component-wise addition of two `InterpResult`s.
+    ///
+    /// Semantics
+    /// -----------------
+    /// * `position` is always added.
+    /// * `velocity`/`acceleration` are added **only if present on both**;
+    ///   otherwise they remain `None` in the result.
+    ///
+    /// Return
+    /// -----------------
+    /// * A new `InterpResult` combining both operands.
+    ///
+    /// Examples
+    /// -----------------
+    /// ```rust
+    /// use nalgebra::Vector3;
+    /// use crate::jpl_ephem::horizon::interpolation_result::InterpResult;
+    ///
+    /// let a = InterpResult { position: Vector3::new(1.0, 0.0, 0.0), velocity: None, acceleration: None };
+    /// let b = InterpResult { position: Vector3::new(2.0, 0.0, 0.0), velocity: None, acceleration: None };
+    /// let c = a + b;
+    /// assert_eq!(c.position.x, 3.0);
+    /// assert!(c.velocity.is_none());
+    /// ```
     fn add(self, other: Self) -> Self::Output {
         InterpResult {
             position: self.position + other.position,
@@ -48,11 +129,9 @@ impl Add for InterpResult {
 impl Add for &InterpResult {
     type Output = InterpResult;
 
-    /// Adds a reference to an InterpResult instance to another InterpResult.
-    /// The position is added directly, while velocity and acceleration are
-    /// added only if both instances have them.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Component-wise addition for borrowed operands.
+    ///
+    /// Semantics identical to [`InterpResult::add`], but does not consume the inputs.
     fn add(self, other: Self) -> Self::Output {
         InterpResult {
             position: self.position + other.position,
@@ -71,11 +150,13 @@ impl Add for &InterpResult {
 impl Sub for InterpResult {
     type Output = Self;
 
-    /// Subtracts two InterpResult instances.
-    /// The position is subtracted directly, while velocity and acceleration are
-    /// subtracted only if both instances have them.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Component-wise subtraction of two `InterpResult`s.
+    ///
+    /// Semantics
+    /// -----------------
+    /// * `position` is always subtracted.
+    /// * `velocity`/`acceleration` are subtracted **only if present on both**;
+    ///   otherwise they remain `None` in the result.
     fn sub(self, other: Self) -> Self::Output {
         InterpResult {
             position: self.position - other.position,
@@ -94,11 +175,9 @@ impl Sub for InterpResult {
 impl Sub for &InterpResult {
     type Output = InterpResult;
 
-    /// Subtracts a reference to an InterpResult instance from another InterpResult.
-    /// The position is subtracted directly, while velocity and acceleration are
-    /// subtracted only if both instances have them.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Component-wise subtraction for borrowed operands.
+    ///
+    /// Semantics identical to [`InterpResult::sub`], but does not consume the inputs.
     fn sub(self, other: Self) -> Self::Output {
         InterpResult {
             position: self.position - other.position,
@@ -117,16 +196,17 @@ impl Sub for &InterpResult {
 impl Div<f64> for InterpResult {
     type Output = Self;
 
-    /// Divides the InterpResult instance by a scalar value.
-    /// The position is divided directly, while velocity and acceleration are
-    /// divided only if they are present.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Divide all present fields by a scalar.
+    ///
+    /// Semantics
+    /// -----------------
+    /// * Scales `position`, and scales `velocity`/`acceleration` if present.
+    /// * Leaves absent optional fields as `None`.
     fn div(self, rhs: f64) -> Self::Output {
         InterpResult {
-            position: self.position.div(rhs),
-            velocity: self.velocity.map(|v| v.div(rhs)),
-            acceleration: self.acceleration.map(|a| a.div(rhs)),
+            position: self.position / rhs,
+            velocity: self.velocity.map(|v| v / rhs),
+            acceleration: self.acceleration.map(|a| a / rhs),
         }
     }
 }
@@ -134,16 +214,14 @@ impl Div<f64> for InterpResult {
 impl Div<f64> for &InterpResult {
     type Output = InterpResult;
 
-    /// Divides a reference to an InterpResult instance by a scalar value.
-    /// The position is divided directly, while velocity and acceleration are
-    /// divided only if they are present.
-    /// If either instance does not have velocity or acceleration, the result
-    /// will not have them either.
+    /// Divide all present fields by a scalar (borrowed).
+    ///
+    /// Semantics identical to [`InterpResult::div`], but does not consume `self`.
     fn div(self, rhs: f64) -> Self::Output {
         InterpResult {
-            position: self.position.div(rhs),
-            velocity: self.velocity.map(|v| v.div(rhs)),
-            acceleration: self.acceleration.map(|a| a.div(rhs)),
+            position: self.position / rhs,
+            velocity: self.velocity.map(|v| v / rhs),
+            acceleration: self.acceleration.map(|a| a / rhs),
         }
     }
 }
