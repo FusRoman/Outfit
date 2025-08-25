@@ -54,10 +54,10 @@
 //! // let hd: HorizonData = ...;
 //!
 //! // Interpolate Earth wrt Solar System Barycenter at an epoch:
-//! // let et = MJD(60200.0); // example MJD
-//! // let res = hd.ephemeris(HorizonID::Earth, HorizonID::SolarSystemBarycenter, et, true, true);
-//! // println!("r[km] = {:?}", res.position);
-//! // println!("v[km/day] = {:?}", res.velocity);
+//! let et = MJD(60200.0); // example MJD
+//! let res = hd.ephemeris(HorizonID::Earth, HorizonID::SolarSystemBarycenter, et, true, true);
+//! println!("r[km] = {:?}", res.position);
+//! println!("v[km/day] = {:?}", res.velocity);
 //! ```
 //!
 //! See also
