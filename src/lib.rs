@@ -9,7 +9,7 @@
 //! # Outfit
 //!
 //! **Outfit** is a modern Rust library for orbit determination and propagation
-//! of small Solar System bodies.  
+//! of small Solar System bodies.
 //! It is inspired by and validated against the [OrbFit](http://adams.dm.unipi.it/orbfit/)
 //! Fortran package, but rewritten from scratch with a modern, safe architecture.
 //!
@@ -17,7 +17,7 @@
 //!
 //! Outfit provides algorithms and data structures to transform raw astrometric
 //! observations into preliminary orbits, refine those orbits, and propagate them
-//! through time.  
+//! through time.
 //!
 //! Key features currently include:
 //!
