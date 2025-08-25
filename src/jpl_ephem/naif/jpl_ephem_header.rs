@@ -1,3 +1,39 @@
+//! Text header parser for JPL planetary & lunar ephemerides (e.g., DE440).
+//!
+//! This module extracts the human‑readable header embedded in JPL ephemeris
+//! distribution files (typically `header.440`, `ascp*.440`, etc.). It parses:
+//!
+//! * the **version** line (`"JPL planetary and lunar ephemeris DE440"`),
+//! * the **creation date** line (`"Integrated 25 June 2020 ..."`) and
+//! * the **coverage** block (time span, both in calendar form and Julian dates).
+//!
+//! The result is exposed via [`JPLEphemHeader`]. A pretty `Display` formatter
+//! renders a compact, fixed‑width summary table.
+//!
+//! # Example
+//! ```rust, no_run
+//! use outfit::jpl_ephem::jpl_ephem_header::JPLEphemHeader; // adjust path
+//!
+//! let text = r#"JPL planetary and lunar ephemeris DE440
+//! Integrated 25 June 2020    <more text>
+//!
+//! Time span covered by ephemeris:
+//!
+//! 31-DEC-1549 00:00 to   25-JAN-2650 00:00
+//! JD   2287184.5   to   JD   2688976.5
+//! "#;
+//!
+//! let (_rest, hdr) = JPLEphemHeader::parse(text).expect("header parse");
+//! assert_eq!(hdr.version, "DE440");
+//! assert_eq!(hdr.start_jd, 2287184.5);
+//! println!("{hdr}");
+//! ```
+//!
+//! # See also
+//! ------------
+//! * `daf_header` and `directory` modules — for the binary DAF parts.
+//! * NAIF/JPL ephemeris release notes — canonical header format references.
+
 use nom::{
     bytes::complete::{tag, take_until},
     character::complete::{line_ending, not_line_ending},
@@ -5,6 +41,18 @@ use nom::{
     IResult, Parser,
 };
 
+/// Structured, typed representation of the JPL ephemeris textual header.
+///
+/// Fields mirror the canonical header layout found in JPL distributions:
+/// * `version`: ephemeris identifier (e.g., `"DE440"`),
+/// * `creation_date`: free text creation/integration date line,
+/// * `start_ephem` / `end_ephem`: human‑readable coverage (`DD-MON-YYYY HH:MM`),
+/// * `start_jd` / `end_jd`: coverage in Julian days (as `f64`).
+///
+/// See also
+/// ------------
+/// * [`JPLEphemHeader::parse`] – Top‑level parser that calls the line parsers below.
+/// * NAIF/JPL release notes — authoritative header format description.
 #[derive(Debug, PartialEq, Clone)]
 pub struct JPLEphemHeader {
     pub version: String,
@@ -16,34 +64,95 @@ pub struct JPLEphemHeader {
 }
 
 impl JPLEphemHeader {
+    /// Parse the **version** line: `JPL planetary and lunar ephemeris <VER>`.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Full text slice containing the header.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&str, &str>` where the value is the trimmed version token (e.g., `"DE440"`).
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::parse`] – Orchestrates the complete header parsing sequence.
     fn parse_version(input: &str) -> IResult<&str, &str> {
         let (input, _) = take_until("JPL planetary and lunar ephemeris")(input)?;
         let (input, _) = tag("JPL planetary and lunar ephemeris ")(input)?;
         let (input, version) = not_line_ending(input)?;
         let (input, _) = line_ending(input)?;
-
         Ok((input, version.trim()))
     }
 
+    /// Parse the **creation date** line starting with `Integrated `.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Remaining text after the version line.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&str, &str>` with the trimmed creation/integration date line.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::parse`] – Full header parse that includes this step.
     fn parse_creation_date(input: &str) -> IResult<&str, &str> {
         let (input, _) = take_until("Integrated ")(input)?;
         let (input, _) = tag("Integrated ")(input)?;
         let (input, creation_date) = not_line_ending(input)?;
         let (input, _) = line_ending(input)?;
-
         Ok((input, creation_date.trim()))
     }
 
+    /// Parse the **calendar date coverage** block.
+    ///
+    /// This targets:
+    /// ```text
+    /// Time span covered by ephemeris:
+    ///
+    /// 31-DEC-1549 00:00 to   25-JAN-2650 00:00
+    /// ```
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Remaining text after the creation date line.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&str, (&str, &str)>` with `(start_ephem, end_ephem)` trimmed.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::parse_jd_range`] – Numeric JD coverage that follows this block.
     fn parse_date_range(input: &str) -> IResult<&str, (&str, &str)> {
         let (input, _) = take_until("Time span covered by ephemeris:")(input)?;
         let (input, _) = tag("Time span covered by ephemeris:")(input)?;
         let (input, _) = (line_ending, line_ending).parse(input)?;
         let (input, (start_ephem, _, end_ephem)) =
             (take_until("to"), tag("to   "), not_line_ending).parse(input)?;
-
         Ok((input, (start_ephem.trim(), end_ephem.trim())))
     }
 
+    /// Parse the **Julian Date coverage** line.
+    ///
+    /// This targets:
+    /// ```text
+    /// JD   2287184.5   to   JD   2688976.5
+    /// ```
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Remaining text after the calendar coverage line.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&str, (f64, f64)>` with `(start_jd, end_jd)`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::parse_date_range`] – Calendar representation parsed just before.
     fn parse_jd_range(input: &str) -> IResult<&str, (f64, f64)> {
         let (input, (_, _, start_jd, _, end_jd)) = (
             line_ending,
@@ -53,14 +162,26 @@ impl JPLEphemHeader {
             |s| double(s),
         )
             .parse(input)?;
-
         Ok((input, (start_jd, end_jd)))
     }
 
+    /// Parse the full JPL ephemeris text header into a [`JPLEphemHeader`].
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Entire header text block.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&str, JPLEphemHeader>` with a populated header and the remaining input.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Self::parse_version`], [`Self::parse_creation_date`],
+    ///   [`Self::parse_date_range`], [`Self::parse_jd_range`].
     pub fn parse(input: &str) -> IResult<&str, Self> {
         let (input, version) = Self::parse_version(input)?;
         let (input, creation_date) = Self::parse_creation_date(input)?;
-
         let (input, (start_ephem, end_ephem)) = Self::parse_date_range(input)?;
         let (input, (start_jd, end_jd)) = Self::parse_jd_range(input)?;
         Ok((
@@ -80,6 +201,19 @@ impl JPLEphemHeader {
 use std::fmt;
 
 impl fmt::Display for JPLEphemHeader {
+    /// Render a fixed‑width summary table of the parsed header fields.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `f`: Standard Rust formatter sink.
+    ///
+    /// Return
+    /// ----------
+    /// * A [`fmt::Result`] indicating whether writing to the formatter succeeded.
+    ///
+    /// See also
+    /// ------------
+    /// * [`JPLEphemHeader::parse`] – Produces the data displayed here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const LABEL_WIDTH: usize = 20;
         const VALUE_WIDTH: usize = 30;
