@@ -1,3 +1,70 @@
+//! Chebyshev record segments for legacy JPL Horizons DATA RECORDS.
+//!
+//! Overview
+//! -----------------
+//! This module defines [`HorizonRecord`](crate::jpl_ephem::horizon::horizon_records::HorizonRecord), a compact container holding the
+//! Chebyshev coefficients for a **single sub-interval** inside a Horizons
+//! DATA RECORD. Each record can evaluate the body state at any normalized
+//! time `tau ∈ [0, 1]` within its interval, returning position and optionally
+//! velocity and acceleration via [`InterpResult`](crate::jpl_ephem::horizon::interpolation_result::InterpResult).
+//!
+//! Data layout
+//! -----------------
+//! A `HorizonRecord` stores three coefficient vectors (`x`, `y`, `z`) used to
+//! evaluate the Chebyshev series for each Cartesian component. Records are
+//! built internally from the binary ephemeris using the IPT metadata
+//! (`offset`, `n_coeffs`, `n_subs`) that defines how coefficients are packed
+//! within each DATA RECORD.
+//!
+//! Interpolation semantics
+//! -----------------
+//! * Time normalization: `tau = 0` maps to `start_jd`, `tau = 1` to `end_jd`.
+//! * Position is evaluated from the Chebyshev basis up to `n_coeffs`.
+//! * Velocity and acceleration are obtained by evaluating derivative bases,
+//!   scaled by factors depending on the sub-interval duration and
+//!   the number of sub-intervals in the parent block.
+//!
+//! Units
+//! -----------------
+//! * `position`: kilometers (km)
+//! * `velocity`: kilometers per day (km/day)
+//! * `acceleration`: kilometers per day² (km/day²)
+//!
+//! Typical usage
+//! -----------------
+//! Most users do not create `HorizonRecord` directly. Instead, they:
+//! 1. Load and parse the ephemeris with
+//!    [`HorizonData`](crate::jpl_ephem::horizon::horizon_data::HorizonData).
+//! 2. Query a target/center state with
+//!    [`HorizonData::ephemeris`](crate::jpl_ephem::horizon::horizon_data::HorizonData::ephemeris),
+//!    which selects the right sub-interval and performs interpolation.
+//! 3. (Advanced) If you already have a record and `tau`, call
+//!    [`HorizonRecord::interpolate`](crate::jpl_ephem::horizon::horizon_records::HorizonRecord::interpolate) directly.
+//!
+//! Examples
+//! -----------------
+//! ```rust, no_run
+//! use crate::jpl_ephem::horizon::{
+//!     horizon_data::HorizonData,
+//!     horizon_ids::HorizonID,
+//! };
+//! use crate::constants::MJD;
+//!
+//! // Load the binary and build HorizonData (details omitted here).
+//! // let hd: HorizonData = ...;
+//!
+//! // Interpolate Earth wrt Solar System Barycenter at an epoch:
+//! // let et = MJD(60200.0); // example MJD
+//! // let res = hd.ephemeris(HorizonID::Earth, HorizonID::SolarSystemBarycenter, et, true, true);
+//! // println!("r[km] = {:?}", res.position);
+//! // println!("v[km/day] = {:?}", res.velocity);
+//! ```
+//!
+//! See also
+//! -----------------
+//! * [`HorizonData`](crate::jpl_ephem::horizon::horizon_data::HorizonData) – file parsing and high-level queries.
+//! * [`InterpResult`](crate::jpl_ephem::horizon::interpolation_result::InterpResult) – evaluated state container.
+//! * [`HorizonID`](crate::jpl_ephem::horizon::horizon_ids::HorizonID) – body identifiers.
 use nalgebra::Vector3;
 
 use super::interpolation_result::InterpResult;
