@@ -185,7 +185,7 @@ impl EphemerisRecord {
     ///
     /// Return
     /// ----------
-    /// * `(Vector3<f64>, Vector3<f64>)` where the first vector is **position [km]**
+    /// * `(Vector3<f64>, Vector3<f64>)` where the first vector is **position \[km\]**
     ///   and the second is **velocity [km/s]**.
     ///
     /// See also

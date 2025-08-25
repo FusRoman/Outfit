@@ -738,7 +738,7 @@ impl HorizonData {
     ///
     /// This function:
     /// 1. Determines the block index and normalized time fraction with
-    ///    [`get_record_index`],
+    ///    \[`get_record_index`\],
     /// 2. Looks up the list of [`HorizonRecord`]s for the requested body,
     /// 3. Chooses the correct sub-interval based on `tau`.
     ///
