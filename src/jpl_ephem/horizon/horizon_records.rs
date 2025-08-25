@@ -51,7 +51,7 @@
 //! use crate::constants::MJD;
 //!
 //! // Load the binary and build HorizonData (details omitted here).
-//! // let hd: HorizonData = ...;
+//! let hd: HorizonData = ...;
 //!
 //! // Interpolate Earth wrt Solar System Barycenter at an epoch:
 //! let et = MJD(60200.0); // example MJD
