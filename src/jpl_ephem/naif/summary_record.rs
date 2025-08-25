@@ -1,3 +1,15 @@
+//! DAF/SPK summary record decoding and display utilities.
+//!
+//! This module defines the `Summary` struct, which mirrors a single SPK segment
+//! summary as stored in a DAF summary record. A summary groups together:
+//! * coverage start/end epochs (ET seconds from J2000 TDB),
+//! * target and center NAIF IDs,
+//! * frame identifier,
+//! * SPK data type (e.g., Chebyshev position or position+velocity),
+//! * initial and final DAF addresses delimiting the segment.
+//!
+//! The binary layout is read in little‑endian for integers and `f64` for epochs,
+//! consistent with common `"LTL-IEEE"` kernels.
 use std::fmt;
 
 use hifitime::Epoch;
@@ -8,6 +20,19 @@ use nom::{
 
 use crate::jpl_ephem::naif::naif_ids::{naif_type::SpkDataType, NaifIds};
 
+/// SPK segment summary extracted from a DAF summary record.
+///
+/// The fields map directly to the NAIF layout. `start_epoch`/`end_epoch` are ET
+/// seconds from J2000 TDB. `initial_addr`/`final_addr` are DAF addresses in
+/// double‑precision words (1‑based).
+///
+/// Arguments
+/// -----------------
+/// *(struct data only)*
+///
+/// Return
+/// ----------
+/// *(n/a — this is a data structure)*
 #[derive(Debug, PartialEq, Clone)]
 pub struct Summary {
     pub start_epoch: f64,
@@ -21,6 +46,20 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// Parse a `Summary` from a raw DAF summary slice.
+    ///
+    /// The expected binary order is:
+    /// `start_epoch(f64)`, `end_epoch(f64)`,
+    /// `target(i32)`, `center(i32)`, `frame_id(i32)`, `data_type(i32)`,
+    /// `initial_addr(i32)`, `final_addr(i32)`.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `input`: Byte slice positioned at the start of a summary entry.
+    ///
+    /// Return
+    /// ----------
+    /// * `IResult<&[u8], Summary>` with the remaining input and the decoded summary.
     pub fn parse(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, start_epoch) = le_f64(input)?;
         let (input, end_epoch) = le_f64(input)?;
@@ -48,6 +87,15 @@ impl Summary {
 }
 
 impl fmt::Display for Summary {
+    /// Pretty‑print the summary as a compact, two‑column table.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `f`: Standard formatter sink.
+    ///
+    /// Return
+    /// ----------
+    /// * `fmt::Result` indicating success or failure when writing the table.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let start = Epoch::from_et_seconds(self.start_epoch);
         let end = Epoch::from_et_seconds(self.end_epoch);
