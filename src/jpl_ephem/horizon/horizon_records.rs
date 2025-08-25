@@ -2,8 +2,30 @@ use nalgebra::Vector3;
 
 use super::interpolation_result::InterpResult;
 
-/// The HorizonRecord struct represents a record of Tchebycheff coefficients
-/// to derive a celestial object's position over a specified time interval.
+/// One interpolation segment from a Horizons DATA RECORD.
+///
+/// A `HorizonRecord` stores the Chebyshev coefficients needed to compute
+/// the position (and optionally velocity and acceleration) of a body over
+/// a **single sub-interval** of a DATA RECORD. The interval is defined
+/// by `start_jd` and `end_jd` (Julian Dates, TDB).
+///
+/// Fields
+/// --------
+/// * `start_jd` — Julian Date (TDB) marking the beginning of the sub-interval.
+/// * `end_jd` — Julian Date (TDB) marking the end of the sub-interval.
+/// * `x`, `y`, `z` — Vectors of Chebyshev coefficients for each spatial
+///   component of the body’s state.
+///
+/// Notes
+/// --------
+/// * Coefficients are parsed from the raw Horizons binary using the
+///   IPT table (`offset`, `n_coeffs`, `n_subs`).
+/// * A `HorizonRecord` is never constructed directly by users; it is
+///   built internally by \[`extract_body_records`\] when parsing DATA RECORDS.
+///
+/// See also
+/// --------
+/// * [`InterpResult`] — container for evaluated position/velocity/acceleration.
 #[derive(Debug, PartialEq, Clone)]
 pub struct HorizonRecord {
     pub start_jd: f64,
@@ -14,22 +36,32 @@ pub struct HorizonRecord {
 }
 
 impl HorizonRecord {
-    /// Create a new HorizonRecord instance.
+    /// Construct a new [`HorizonRecord`] from the raw coefficients of a DATA RECORD.
     ///
     /// Arguments
-    /// ---------
-    /// * `start_jd`: The Julian date at the start of the time interval.
-    /// * `end_jd`: The Julian date at the end of the time interval.
-    /// * `coeffs`: A slice of Tchebycheff coefficients for the x, y, and z
-    ///   coordinates.
-    /// * `offset`: The offset in the coefficients array where the Tchebycheff
-    ///   coefficients for this record start.
-    /// * `n_subintervals`: The number of subintervals in this record.
-    /// * `n_coeffs`: The number of Tchebycheff coefficients for each coordinate.
+    /// -----------------
+    /// * `start_jd` — Julian Date at the start of the sub-interval.
+    /// * `end_jd` — Julian Date at the end of the sub-interval.
+    /// * `coeffs` — Slice of Chebyshev coefficients extracted from the DATA RECORD.
+    /// * `offset` — Offset in `coeffs` to the start of this body’s coefficients.
+    /// * `n_subintervals` — Total number of sub-intervals in the parent DATA RECORD.
+    /// * `n_coeffs` — Number of Chebyshev coefficients per coordinate axis.
     ///
-    /// Returns
-    /// -------
-    /// * A new HorizonRecord instance.
+    /// Return
+    /// ----------
+    /// * A new `HorizonRecord` instance containing the three coefficient arrays
+    ///   (`x`, `y`, `z`) for this sub-interval.
+    ///
+    /// Panics
+    /// ----------
+    /// * If the computed index range exceeds the bounds of `coeffs`.
+    ///
+    /// Notes
+    /// ----------
+    /// * The indexing formula `offset - 3 + n_subintervals * n_coeffs * 3`
+    ///   accounts for the fact that the first two values in each block are
+    ///   `[JD_start, JD_end]` and the coefficients are stored contiguously
+    ///   per body, per component.
     pub fn new(
         start_jd: f64,
         end_jd: f64,
@@ -71,25 +103,37 @@ impl HorizonRecord {
         }
     }
 
-    /// Compute the position, velocity, and acceleration of a celestial object
-    /// at a given time (tau) using Tchebycheff coefficients.
+    /// Interpolate the state of the body within this sub-interval.
+    ///
+    /// Evaluates the Chebyshev polynomial series at normalized time `tau`,
+    /// returning position and optionally velocity and acceleration vectors.
     ///
     /// Arguments
-    /// ---------
-    /// * `tau`: A normalized time value between 0 and 1, representing the
-    ///   position within the time interval defined by `start_jd` and `end_jd`.
-    /// * `compute_velocity`: A boolean flag indicating whether to compute
-    ///   the velocity of the object.
-    /// * `compute_acceleration`: A boolean flag indicating whether to compute
-    ///   the acceleration of the object.
-    /// * `n_subintervals`: The number of subintervals to use for the
-    ///   interpolation. This affects the scaling of the velocity and
-    ///   acceleration calculations.
+    /// -----------------
+    /// * `tau` — Normalized time ∈ \[0,1\], relative to [`start_jd`, `end_jd`].
+    /// * `compute_velocity` — If `true`, compute the velocity vector.
+    /// * `compute_acceleration` — If `true`, compute the acceleration vector.
+    /// * `n_subintervals` — Number of sub-intervals in the parent DATA RECORD,
+    ///   used for scaling derivatives.
     ///
-    /// Returns
-    /// -------
-    /// * An `InterpResult` struct containing the computed position,
-    ///   velocity, and acceleration of the celestial object.
+    /// Return
+    /// ----------
+    /// * An [`InterpResult`] containing:
+    ///   - `position` (`Vector3<f64>` in km),
+    ///   - `velocity` (`Option<Vector3<f64>>`, km/day),
+    ///   - `acceleration` (`Option<Vector3<f64>>`, km/day²).
+    ///
+    /// Notes
+    /// ----------
+    /// * The Chebyshev basis functions are generated up to `n_coeffs`.
+    /// * Velocity and acceleration are scaled by factors derived from
+    ///   the interval length and number of sub-intervals.
+    /// * This method is low-level: most users will prefer
+    ///   [`HorizonData::ephemeris`](super::horizon_data::HorizonData::ephemeris).
+    ///
+    /// See also
+    /// --------
+    /// * [`InterpResult`] — evaluated result container.
     pub fn interpolate(
         &self,
         tau: f64,
