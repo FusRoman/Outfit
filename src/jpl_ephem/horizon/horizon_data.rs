@@ -433,16 +433,38 @@ fn parse_block(input: &[u8], ncoeff: usize) -> IResult<&[u8], Vec<f64>> {
     count(le_f64, ncoeff).parse(input)
 }
 
-/// Extract the body records from a block of data
+/// Extract all sub-records for a given body from one DATA RECORD block.
+///
+/// Each Horizons DATA RECORD contains Chebyshev coefficients for all bodies,
+/// arranged according to the IPT entry. This function slices out the coefficients
+/// corresponding to a single body and produces a list of [`HorizonRecord`]s,
+/// one per sub-interval.
 ///
 /// Arguments
-/// ---------
-/// * `block` : Block of data containing the coefficients
-/// * `ipt` : IPT table for the body
+/// -----------------
+/// * `block` — Full decoded block (vector of `f64`), including leading JD start/end
+///   followed by concatenated coefficients for all bodies.
+/// * `ipt` — IPT entry `[offset, n_coeff, n_sub]` for this body:
+///   - `offset`: starting index (in 4-byte words) to the body’s coefficients,
+///   - `n_coeff`: number of Chebyshev coefficients per component,
+///   - `n_sub`: number of sub-intervals within the block.
 ///
-/// Returns
-/// -------
-/// * A vector of HorizonRecord containing the coefficients for the body
+/// Return
+/// ----------
+/// * A `Vec<HorizonRecord>` with length equal to `n_sub`. Each record holds:
+///   - block start/end epoch (`jd_start`, `jd_end`),
+///   - the slice of Chebyshev coefficients for that sub-interval.
+///
+/// Notes
+/// ----------
+/// * The first two entries of `block` are reserved for `[jd_start, jd_end]`
+///   and are skipped.
+/// * The returned [`HorizonRecord`]s share references into the same `block` slice.
+///
+/// See also
+/// ------------
+/// * [`parse_all_blocks`] – drives this extraction for all bodies and all records.
+/// * [`HorizonRecord`] – container for one sub-interval’s coefficients.
 fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
     let offset = ipt[0] as usize;
     let n_coeffs = ipt[1] as usize;
@@ -463,25 +485,45 @@ fn extract_body_records(block: &[f64], ipt: [u32; 3]) -> Vec<HorizonRecord> {
             subinterval_number,
             n_coeffs,
         );
-
         records.push(record);
     }
-
     records
 }
 
-/// Parse all blocks from the binary file
+/// Parse and decode all DATA RECORD blocks from a Horizons binary file.
+///
+/// This routine seeks past the first two header records, then reads the
+/// remaining file contents into memory. It partitions the file into fixed-size
+/// DATA RECORD blocks and decodes each block into a set of body records
+/// using [`extract_body_records`].
 ///
 /// Arguments
-/// ---------
-/// * `file` : File to read from
-/// * `recsize` : Size of each record in bytes
-/// * `ncoeff` : Number of coefficients in each record
-/// * `ipt` : IPT table
+/// -----------------
+/// * `file` — Opened `BufReader<File>` pointing to the Horizons binary.
+/// * `recsize` — Size of each DATA RECORD in **bytes** (see `HorizonHeader::recsize`).
+/// * `ncoeff` — Number of `f64` coefficients to parse per block (sum over bodies).
+/// * `ipt` — Full IPT table describing the offset/size/sub-intervals per body.
 ///
-/// Returns
-/// -------
-/// * A vector of hashmaps containing the records for each body
+/// Return
+/// ----------
+/// * `Ok(HorizonRecords)` – Vector of hashmaps, one per block:
+///   - outer index = block index (time-ordered),
+///   - inner key = `u8` body ID (`0..=14`),
+///   - value = `Vec<HorizonRecord>` (all sub-intervals for that body in this block).
+/// * `Err(std::io::Error)` if a block cannot be read or parsed.
+///
+/// Notes
+/// ----------
+/// * Skips the first two header records (`2 * recsize` bytes) before reading.
+/// * Currently extracts bodies `0..11` (planets + Sun + EMB); extension may
+///   be needed for libration, nutation, TT–TDB.
+/// * Uses [`parse_block`] to decode raw `f64` values from each slice.
+///
+/// See also
+/// ------------
+/// * [`extract_body_records`] – builds the per-body records within a block.
+/// * [`HorizonRecord`] – container for one sub-interval’s coefficients.
+/// * [`IPT`] – index pointer table giving offsets and sizes.
 fn parse_all_blocks(
     file: &mut BufReader<File>,
     recsize: usize,
