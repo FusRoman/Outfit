@@ -270,22 +270,26 @@ pub trait ObservationsExt {
 ///
 /// ## Typical usage
 ///
-/// ```rust,ignore
-/// let params = IODParams {
-///     n_noise_realizations: 50,
-///     noise_scale: 1.0,
-///     extf: 1.5,
-///     dtmax: 30.0,
-///     dt_min: Some(0.03),
-///     dt_max_triplet: Some(150.0),
-///     optimal_interval_time: Some(20.0),
-///     max_obs_for_triplets: Some(10),
-///     max_triplets: None,
-///     gap_max: 0.5,
-/// };
+/// ```rust, no_run
+/// use rand::{rngs::StdRng, SeedableRng};
+/// use outfit::initial_orbit_determination::IODParams;
+/// use outfit::constants::Observations;
+/// use outfit::observations::observations_ext::ObservationIOD;
 ///
-/// let (best_orbit, rms) = observations
-///     .estimate_best_orbit(&state, &error_model, &mut rng, &params)?;
+/// let params = IODParams::builder()
+///     .n_noise_realizations(100)
+///     .noise_scale(1.0)
+///     .dtmax(30.0)
+///     .max_triplets(50)
+///     .build().unwrap();
+///
+/// let observations: Observations = unimplemented!(); // Your observations here
+/// let state = unimplemented!(); // Your state here
+/// let error_model = unimplemented!(); // Your error model here
+/// let mut rng = StdRng::seed_from_u64(42);
+///
+/// let (best_orbit, rms) = observations.estimate_best_orbit(
+///     &state, &error_model, &mut rng, &params).unwrap();
 ///
 /// if let Some(orbit) = best_orbit {
 ///     println!("Best preliminary orbit RMS = {rms}");
