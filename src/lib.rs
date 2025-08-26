@@ -8,71 +8,86 @@
 //!
 //! # Outfit
 //!
-//! **Outfit** is a modern Rust library for orbit determination and propagation
-//! of small Solar System bodies.
-//! It is inspired by and validated against the [OrbFit](http://adams.dm.unipi.it/orbfit/)
-//! Fortran package, but rewritten from scratch with a modern, safe architecture.
+//! **Outfit** is a modern **Rust library for orbit determination and propagation**
+//! of small Solar System bodies.  
 //!
-//! ## Overview
+//! It provides a **memory-safe, modular, and extensible** implementation of
+//! algorithms that transform raw astrometric observations into orbital solutions,
+//! and propagate them reliably through time.  
 //!
-//! Outfit provides algorithms and data structures to transform raw astrometric
-//! observations into preliminary orbits, refine those orbits, and propagate them
-//! through time.
+//! ## Why Outfit?
 //!
-//! Key features currently include:
+//! Outfit is designed to provide a **modern, reliable, and extensible toolkit**
+//! for orbit determination and propagation.  
+//!
+//! Its core principles are:
+//!
+//! - A **safe Rust implementation**, leveraging strong typing and memory safety,
+//! - A **modular design**, allowing interchangeable ephemerides, error models, and IOD algorithms,
+//! - A **scientifically validated foundation**, consistent with established astronomical standards,
+//! - Built-in support for **scalable and reproducible workflows**, suitable for survey-scale processing
+//!   and long-term research pipelines.
+//!
+//! ## Features
+//!
+//! Outfit currently provides:
 //!
 //! - **Initial Orbit Determination (IOD):**
-//!   - Classical **Gauss method** for 3 observations
-//! - **Keplerian orbital elements** output
+//!   - Classical **Gauss method** for 3 observations.
+//! - **Orbital elements:**
+//!   - Classical Keplerian elements,
+//!   - Non-singular equinoctial elements (planned).
 //! - **Reference frame transformations:**
-//!   - Precession, nutation, aberration, light-time correction
-//!   - Ecliptic/equatorial conversions
+//!   - Precession, nutation, aberration, and light-time correction,
+//!   - Conversions between ecliptic and equatorial frames.
 //! - **Ephemerides handling:**
-//!   - Built-in support for JPL DE440 data, both NAIF kernels and Horizons files
+//!   - Built-in support for **JPL DE440** (both NAIF kernels and Horizons-format files).
 //! - **Astrometric preprocessing:**
-//!   - Parsing RA/DEC, time conversions, observatory geodetic location
-//! - **Extensible framework** for error models and RMS residual filtering
+//!   - RA/DEC parsing, time system conversions, and observatory geodetic coordinates.
+//! - **Residual filtering framework:**
+//!   - Extensible error models, preliminary RMS computation.
 //!
-//! ### Planned features
-//! - **Vaisala method** for short observational arcs
-//! - Advanced RMS residual filtering and orbit refinement
-//! - Full hyperbolic orbit support
+//! ### Planned extensions
 //!
-//! ## Typical Workflow
+//! - **Vaisala method** for short arcs,  
+//! - Advanced RMS residual filtering and iterative orbit refinement,  
+//! - Full support for **hyperbolic trajectories** (e.g., ‘Oumuamua),  
+//! - Batch and parallelized pipelines for large surveys.  
 //!
-//! 1. **Load your observational data** (RA, DEC, time, observatory position).
-//! 2. **Initialize** an [`Outfit`](crate::outfit::Outfit) environment with a JPL ephemeris.
-//! 3. **Generate triplets** and use the Gauss method for preliminary orbit determination.
-//! 4. **Optionally refine** the orbit using residual filtering and RMS computation.
-//! 5. **Propagate** the resulting orbit forward or backward in time.
+//! ## Workflow at a Glance
 //!
-//! ## Example: Orbit Determination from MPC 80-column files
+//! 1. **Load observational data** (RA, DEC, times, observatory position).
+//! 2. **Initialize** an [`Outfit`](crate::outfit::Outfit) environment with JPL ephemerides.
+//! 3. **Form triplets** of observations and run the Gauss IOD solver.
+//! 4. **Evaluate residuals** and optionally refine the orbit.
+//! 5. **Propagate** forward/backward in time using Keplerian dynamics.
+//!
+//! ## Example: Orbit Determination from MPC 80-column Files
 //!
 //! ```rust, ignore
 //! use camino::Utf8Path;
-//! use rand::SeedableRng;
-//! use rand::rngs::StdRng;
+//! use rand::{SeedableRng, rngs::StdRng};
 //! use outfit::outfit::Outfit;
 //! use outfit::constants::{TrajectorySet, ObjectNumber};
 //! use outfit::error_models::ErrorModel;
-//! use outfit::initial_orbit_determination::{IODParams, gauss_result::GaussResult};
+//! use outfit::initial_orbit_determination::IODParams;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Initialize environment with JPL Horizons ephemerides (DE440).
+//!     // Initialize environment with DE440 ephemerides.
 //!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
 //!
-//!     // Load astrometric observations from MPC 80-column formatted files.
+//!     // Load astrometric observations.
 //!     let mut traj_set = TrajectorySet::new_from_80col(
 //!         &mut env,
 //!         Utf8Path::new("tests/data/2015AB.obs"),
 //!     );
 //!     traj_set.add_from_80col(&mut env, Utf8Path::new("tests/data/8467.obs"));
 //!
-//!     // Select the object of interest by its MPC designation.
+//!     // Select an object by its MPC designation.
 //!     let object_id = ObjectNumber::String("K09R05F".into());
-//!
-//!     // Configure IOD parameters (triplets, noise model, etc.).
 //!     let obs = traj_set.get_mut(&object_id).unwrap();
+//!
+//!     // Configure IOD parameters.
 //!     let params = IODParams::builder()
 //!         .n_noise_realizations(10)
 //!         .noise_scale(1.1)
@@ -82,8 +97,13 @@
 //!
 //!     let mut rng = StdRng::seed_from_u64(42);
 //!
-//!     // Estimate the best preliminary orbit using the Gauss method.
-//!     let (best_orbit, best_rms) = obs.estimate_best_orbit(&mut env, &ErrorModel::FCCT14, &mut rng, &params)?;
+//!     // Estimate the preliminary orbit.
+//!     let (best_orbit, best_rms) = obs.estimate_best_orbit(
+//!         &mut env,
+//!         &ErrorModel::FCCT14,
+//!         &mut rng,
+//!         &params,
+//!     )?;
 //!
 //!     println!("Best orbit: {:?}", best_orbit);
 //!     println!("RMS residuals: {}", best_rms);
@@ -92,25 +112,15 @@
 //! }
 //! ```
 //!
-//! This example demonstrates how to:
-//! - Set up an environment (`Outfit`) with a JPL ephemeris.
-//! - Load observations from MPC 80-column files.
-//! - Run the Gauss IOD algorithm to obtain a preliminary orbit and RMS residuals.
+//! ## Cargo Features
 //!
-//! ## Optional features
+//! Outfit supports optional extensions via Cargo features:
 //!
-//! The following Cargo feature can be enabled to extend Outfit's functionality:
+//! - **`jpl-download`**  
+//!   Automatically download JPL ephemerides (NAIF/Horizons) into a local cache.  
+//!   If not enabled, files must be placed manually.  
 //!
-//! - **`jpl-download`**: Enables automatic downloading of JPL ephemeris files (NAIF/Horizons) when needed, including for unit and integration tests. If this feature is not enabled, you must manually place the required ephemeris file in the cache directory on your computer.
-//!
-//!   - **On Linux:** `~/.cache/outfit_cache/jpl_ephem/`
-//!   - **On Windows:** The standard user cache directory (e.g., `C:\Users\<username>\AppData\Local\outfit_cache\jpl_ephem\`)
-//!
-//!   The cache directory contains two subfolders:
-//!   - `jpl_horizon/` for Horizon-format files (e.g., `DE440.bsp`)
-//!   - `naif/` for NAIF/SPICE files (e.g., `de440.bsp`)
-//!
-//!   Example structure:
+//!   Cache directory structure (Linux example):
 //!   ```text
 //!   ~/.cache/outfit_cache/jpl_ephem/
 //!   ├── jpl_horizon/
@@ -119,11 +129,7 @@
 //!       └── de440.bsp
 //!   ```
 //!
-//!   For more details about the cache structure and ephemeris file handling, see [`src/jpl_ephem/download_jpl_file.rs`](src/jpl_ephem/download_jpl_file.rs).
-//!
-//!   This feature pulls in the `reqwest`, `tokio`, and `tokio-stream` dependencies and is required for some integration tests and for the `unit_test_global` module.
-//!
-//! Enable the feature in your `Cargo.toml`:
+//!   This feature enables some integration tests and pulls in `reqwest`, `tokio`, and `tokio-stream`.
 //!
 //! ```toml
 //! [dependencies]
@@ -132,26 +138,25 @@
 //!
 //! ## Scientific Background
 //!
-//! The algorithms implemented are based on:
+//! Outfit’s algorithms follow the formalism of:
 //!
 //! - Milani, A. & Gronchi, G. F. (2010), *Theory of Orbit Determination*,
 //!   Cambridge University Press.
-//! - The open-source [OrbFit](http://adams.dm.unipi.it/orbfit/) software suite.
+//! - The [OrbFit](http://adams.dm.unipi.it/orbfit/) software suite (open-source).
 //!
 //! ## License
 //!
-//! Outfit is distributed under the CeCILL-C license. See the [LICENSE](https://github.com/FusRoman/Outfit/blob/main/LICENSE)
-//! file for details.
+//! Distributed under the **CeCILL-C** license. See [LICENSE](https://github.com/FusRoman/Outfit/blob/main/LICENSE).
 //!
 //! ## Authors
 //!
-//! FusRoman and contributors
+//! Developed by **FusRoman** and contributors.
 //!
 //! ## Links
 //!
 //! - [Documentation](https://docs.rs/outfit)
 //! - [Source code](https://github.com/FusRoman/Outfit)
-//!
+
 /// Constants and astronomical unit conversions.
 pub mod constants;
 
