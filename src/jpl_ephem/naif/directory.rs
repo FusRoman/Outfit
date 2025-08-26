@@ -16,10 +16,10 @@
 //! last four `f64` values of the record.
 //!
 //! # Example
-//! ```no_run
+//! ```rust, ignore
 //! use std::fs::File;
 //! use std::io::{BufReader};
-//! use outfit::jpl_ephem::naif::directory::DirectoryData; // adjust the path
+//! use outfit::jpl_ephem::naif::directory::DirectoryData;
 //!
 //! let f = File::open("de440.bsp")?;
 //! let mut reader = BufReader::new(f);

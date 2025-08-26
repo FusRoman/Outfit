@@ -21,7 +21,7 @@
 //!
 //! # Typical usage
 //! ```rust, no_run
-//! use crate::jpl_ephem::naif::NaifIds;
+//! use outfit::jpl_ephem::naif::naif_ids::NaifIds;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Parse an integer NAIF code coming from a file or API:
 //! let code = 399_i32; // Earth mass center
@@ -111,7 +111,7 @@ pub enum ErrorId {
 /// Examples
 /// ----------
 /// ```rust
-/// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+/// # use outfit::jpl_ephem::naif::naif_ids::{NaifIds, solar_system_bary::SolarSystemBary};
 /// assert_eq!(NaifIds::SSB(SolarSystemBary::SSB).to_string(), "Solar System Barycenter");
 /// ```
 ///
@@ -149,7 +149,7 @@ impl NaifIds {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// # use outfit::jpl_ephem::naif::naif_ids::{NaifIds, solar_system_bary::SolarSystemBary};
     /// let ssb = NaifIds::from_id(0).unwrap();
     /// assert!(matches!(ssb, NaifIds::SSB(SolarSystemBary::SSB)));
     /// assert!(NaifIds::from_id(1000).is_err());
@@ -191,7 +191,7 @@ impl NaifIds {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// # use outfit::jpl_ephem::naif::naif_ids::{NaifIds, solar_system_bary::SolarSystemBary};
     /// let code = NaifIds::SSB(SolarSystemBary::Sun).to_id();
     /// assert_eq!(code, 10);
     /// ```
@@ -258,7 +258,7 @@ impl fmt::Display for NaifIds {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// # use crate::jpl_ephem::naif::{NaifIds, SolarSystemBary};
+    /// # use outfit::jpl_ephem::naif::naif_ids::{NaifIds, solar_system_bary::SolarSystemBary};
     /// assert_eq!(NaifIds::SSB(SolarSystemBary::SSB).to_string(), "Solar System Barycenter");
     /// ```
     ///

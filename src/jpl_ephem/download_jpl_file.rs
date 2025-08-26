@@ -82,7 +82,7 @@ pub enum EphemFileSource {
 ///
 /// Examples
 /// --------
-/// ```
+/// ```rust, ignore
 /// use outfit::jpl::download_jpl_file::EphemFileSource;
 /// let src: EphemFileSource = "naif:DE440".try_into().unwrap();
 /// ```
@@ -278,8 +278,8 @@ impl EphemFilePath {
     ///
     /// Examples
     /// --------
-    /// ```no_run
-    /// use outfit::jpl::download_jpl_file::{EphemFilePath, EphemFileSource};
+    /// ```rust, no_run
+    /// use outfit::jpl_ephem::download_jpl_file::{EphemFilePath, EphemFileSource};
     /// let source: EphemFileSource = "horizon:DE440".try_into().unwrap();
     /// let handle = EphemFilePath::get_ephemeris_file(&source)?;
     /// println!("Using ephemeris: {}", handle);

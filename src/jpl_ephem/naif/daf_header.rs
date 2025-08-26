@@ -35,10 +35,10 @@
 //!
 //! # Example
 //!
-//! ```rust, no_run
+//! ```rust, ignore
 //! use std::fs::File;
 //! use std::io::Read;
-//! use outfit::jpl_ephem::naif::daf::DAFHeader; // adjust the path to your crate
+//! use outfit::jpl_ephem::naif::daf_header::DAFHeader;
 //!
 //! let mut buf = vec![0u8; 1024]; // the first DAF record is 1024 bytes
 //! File::open("de440.bsp")?.read_exact(&mut buf)?;

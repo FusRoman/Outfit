@@ -103,7 +103,7 @@ impl Add for InterpResult {
     /// -----------------
     /// ```rust
     /// use nalgebra::Vector3;
-    /// use crate::jpl_ephem::horizon::interpolation_result::InterpResult;
+    /// use outfit::jpl_ephem::horizon::interpolation_result::InterpResult;
     ///
     /// let a = InterpResult { position: Vector3::new(1.0, 0.0, 0.0), velocity: None, acceleration: None };
     /// let b = InterpResult { position: Vector3::new(2.0, 0.0, 0.0), velocity: None, acceleration: None };

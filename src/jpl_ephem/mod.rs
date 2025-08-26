@@ -47,11 +47,11 @@
 //!   * [`naif::naif_version::NaifVersion`](crate::jpl_ephem::naif::naif_version::NaifVersion) — SPK file names by official DE label.
 //!
 //! # Example
-//! ```no_run
-//! use outfit::jpl::{download_jpl_file::EphemFileSource, JPLEphem};
+//! ```rust, no_run
+//! use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem, horizon::horizon_version::JPLHorizonVersion};
 //! use hifitime::Epoch;
 //!
-//! let eph = JPLEphem::new(&EphemFileSource::Auto)?;
+//! let eph = JPLEphem::new(&EphemFileSource::JPLHorizon(JPLHorizonVersion::DE440))?;
 //! let t = Epoch::from_tai_seconds(1_700_000_000.0);
 //!
 //! // Position always in AU. Velocity is AU/day (legacy DE) or AU/s (SPK/DAF).

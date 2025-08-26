@@ -14,7 +14,7 @@
 /// Examples
 /// --------
 /// ```rust, no_run
-/// use crate::jpl_ephem::horizon::horizon_ids::HorizonID;
+/// use outfit::jpl_ephem::horizon::horizon_ids::HorizonID;
 /// use std::convert::TryFrom;
 ///
 /// let id = HorizonID::try_from(4).unwrap();

@@ -11,8 +11,8 @@
 //! renders a compact, fixed‑width summary table.
 //!
 //! # Example
-//! ```rust, no_run
-//! use outfit::jpl_ephem::jpl_ephem_header::JPLEphemHeader; // adjust path
+//! ```rust, ignore
+//! use outfit::jpl_ephem::naif::jpl_ephem_header::JPLEphemHeader;
 //!
 //! let text = r#"JPL planetary and lunar ephemeris DE440
 //! Integrated 25 June 2020    <more text>

@@ -28,10 +28,10 @@
 //! use outfit::error_models::ErrorModel;
 //!
 //! // Instantiate the context with a JPL source and an error model
-//! let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//! let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
 //! // On-demand: the ephemeris is opened only once and cached
-//! let jpl = outfit.get_jpl_ephem()?;
+//! let jpl = outfit.get_jpl_ephem().unwrap();
 //!
 //! // Resolve an observer by MPC code
 //! let haleakala = outfit.get_observer_from_mpc_code(&"F51".into());

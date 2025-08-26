@@ -14,7 +14,7 @@
 //! -----------------
 //! ```rust
 //! use std::str::FromStr;
-//! use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+//! use outfit::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
 //!
 //! let v = JPLHorizonVersion::from_str("DE440").unwrap();
 //! assert_eq!(v.get_filename(), "de440/linux_p1550p2650.440");
@@ -77,7 +77,7 @@ impl JPLHorizonVersion {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// use outfit::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
     /// assert_eq!(JPLHorizonVersion::DE430.get_filename(), "de430/linux_p1550p2650.430");
     /// ```
     ///
@@ -145,7 +145,7 @@ impl JPLHorizonVersion {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// use outfit::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
     /// assert_eq!(JPLHorizonVersion::DE441.to_filename(), "DE441.bsp");
     /// ```
     ///
@@ -190,7 +190,7 @@ impl JPLHorizonVersion {
     /// Examples
     /// ----------
     /// ```rust, no_run
-    /// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+    /// use outfit::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
     /// assert_eq!(JPLHorizonVersion::from_filename("DE430t.bsp"), Some(JPLHorizonVersion::DE430t));
     /// assert!(JPLHorizonVersion::from_filename("UNKNOWN.bsp").is_none());
     /// ```
@@ -225,7 +225,7 @@ impl JPLHorizonVersion {
 /// Implements standard `FromStr` so you can do:
 /// ```rust, no_run
 /// use std::str::FromStr;
-/// use crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
+/// use outfit::jpl_ephem::horizon::horizon_version::JPLHorizonVersion;
 /// let v = JPLHorizonVersion::from_str("DE431").unwrap();
 /// assert_eq!(v.to_filename(), "DE431.bsp");
 /// ```
