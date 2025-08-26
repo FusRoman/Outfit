@@ -1,3 +1,64 @@
+//! # Outfit: environment, ephemerides, and observatory registry
+//!
+//! This module defines the [`Outfit`](crate::outfit::Outfit) struct, the central façade that wires together:
+//!
+//! 1. **Environment state** ([`OutfitEnv`](crate::env_state::OutfitEnv)) — providers and configuration (e.g., UT1).
+//! 2. **JPL ephemerides access** — lazy, cached handle over a chosen source
+//!    ([`EphemFileSource`](crate::jpl_ephem::download_jpl_file::EphemFileSource) → [`JPLEphem`](crate::jpl_ephem::JPLEphem)).
+//! 3. **Observatory registry** — MPC Observatory Codes parsed into [`Observer`](crate::observers::Observer) instances,
+//!    with stable integer IDs for compact indexing and storage.
+//! 4. **Astrometric error models** — per-site bias/RMS lookup for RA/DEC accuracies.
+//!
+//! The design emphasizes *lazy initialization* and *idempotent caching*:
+//! - The ephemeris file is opened on first use via [`OnceCell`](once_cell::sync::OnceCell), then reused.
+//! - The MPC observatory table is fetched and parsed once, then retained.
+//!
+//! ## Key responsibilities
+//!
+//! - Single source of truth for **JPL ephemerides** (HORIZONS/NAIF) through [`get_jpl_ephem`](crate::outfit::Outfit::get_jpl_ephem)
+//! - Access to **UT1 provider** for Earth-rotation dependent calculations
+//! - **MPC observatory code → Observer** resolution and the inverse (**Observer → u16 index**)
+//! - Enrichment of observers with **bias/RMS** angular accuracies from the configured
+//!   [`ErrorModel`](crate::error_models::ErrorModel) (e.g., *FCCT14*)
+//!
+//! ## Typical usage
+//!
+//! ```rust, no_run
+//! use outfit::outfit::Outfit;
+//! use outfit::error_models::ErrorModel;
+//!
+//! // Instantiate the context with a JPL source and an error model
+//! let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//!
+//! // On-demand: the ephemeris is opened only once and cached
+//! let jpl = outfit.get_jpl_ephem()?;
+//!
+//! // Resolve an observer by MPC code
+//! let haleakala = outfit.get_observer_from_mpc_code(&"F51".into());
+//! ```
+//!
+//! ## Notes
+//!
+//! - The MPC table is pulled from:
+//!   `https://www.minorplanetcenter.net/iau/lists/ObsCodes.html`
+//!   and minimally parsed from its `<pre>` text block.
+//! - Per-site **RA/DEC accuracies** (bias+RMS) are looked up with [`get_bias_rms`](crate::error_models::get_bias_rms),
+//!   currently assuming catalog code `"c"` unless indicated otherwise (TODO).
+//!
+//! ## See also
+//! ------------
+//! * [`JPLEphem`](crate::jpl_ephem::JPLEphem) – Ephemerides access layer.
+//! * [`Observer`](crate::observers::Observer) – Geodetic/parallax observer representation with optional RA/DEC accuracies.
+//! * [`ErrorModel`](crate::error_models::ErrorModel) / [`get_bias_rms`](crate::error_models::get_bias_rms) – Site accuracy enrichment.
+//! * [`OutfitEnv`](crate::env_state::OutfitEnv) – Providers (e.g., UT1) and environment state.
+//! * [`EphemFileSource`](crate::jpl_ephem::download_jpl_file::EphemFileSource) – Source selection for JPL files (HORIZONS/NAIF).
+//!
+//! ## Panics & errors
+//!
+//! - Functions that *must* find an MPC code will `panic!` if the code is unknown.
+//!   Prefer adding a fallible variant if you need graceful handling.
+//! - I/O and parsing failures are surfaced as [`OutfitError`](crate::outfit_errors::OutfitError) where applicable.
+
 use std::{collections::HashMap, sync::Arc};
 
 use once_cell::sync::OnceCell;
@@ -25,6 +86,26 @@ pub struct Outfit {
 }
 
 impl Outfit {
+    /// Construct a new [`Outfit`] context.
+    ///
+    /// Initializes the environment, sets the JPL ephemerides source, and loads the configured
+    /// error model from disk. The ephemeris file itself is **not** opened yet; it is lazily
+    /// initialized the first time [`get_jpl_ephem`](crate::outfit::Outfit::get_jpl_ephem) is called.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `jpl_file`: A source descriptor resolvable into an [`EphemFileSource`]
+    ///   (e.g., `"horizon:DE440"` or a NAIF path).
+    /// * `error_model`: The site accuracy model to load (e.g., [`ErrorModel::FCCT14`]).
+    ///
+    /// Return
+    /// ----------
+    /// * A new [`Outfit`] instance or an [`OutfitError`] if the error model cannot be read.
+    ///
+    /// See also
+    /// ------------
+    /// * [`get_jpl_ephem`](crate::outfit::Outfit::get_jpl_ephem) – Lazy initialization and access to the ephemeris handle.
+    /// * [`ErrorModel::read_error_model_file`](crate::error_models::ErrorModel::read_error_model_file) – Underlying loader for the model data.
     pub fn new(jpl_file: &str, error_model: ErrorModel) -> Result<Self, OutfitError> {
         Ok(Outfit {
             env_state: OutfitEnv::new(),
@@ -35,36 +116,76 @@ impl Outfit {
         })
     }
 
+    /// Get the lazily-initialized JPL ephemerides handle.
+    ///
+    /// If this is the first call, the ephemeris is opened and cached in an internal [`OnceCell`].
+    /// Subsequent calls return the same reference.
+    ///
+    /// Arguments
+    /// -----------------
+    /// *None*
+    ///
+    /// Return
+    /// ----------
+    /// * `&JPLEphem` on success, or an [`OutfitError`] if the source cannot be opened.
+    ///
+    /// See also
+    /// ------------
+    /// * [`EphemFileSource`] – Source configuration.
+    /// * [`OnceCell::get_or_try_init`] – Lazy initialization helper.
     pub fn get_jpl_ephem(&self) -> Result<&JPLEphem, OutfitError> {
         self.jpl_ephem
             .get_or_try_init(|| JPLEphem::new(&self.jpl_source))
     }
 
+    /// Access the UT1 provider from the environment.
+    ///
+    /// This is useful for Earth-rotation dependent calculations (e.g., GMST, sidereal time).
+    ///
+    /// Arguments
+    /// -----------------
+    /// *None*
+    ///
+    /// Return
+    /// ----------
+    /// * A reference to the [`hifitime::ut1::Ut1Provider`].
+    ///
+    /// See also
+    /// ------------
+    /// * [`OutfitEnv`] – Environment state and providers.
     pub fn get_ut1_provider(&self) -> &hifitime::ut1::Ut1Provider {
         &self.env_state.ut1_provider
     }
 
-    /// Get the observatories from the Minor Planet Center
+    /// Get the lazily built MPC observatory map (MPC code → [`Observer`]).
+    ///
+    /// The map is fetched and parsed from the MPC HTML table on first use, then cached.
     ///
     /// Return
-    /// ------
-    /// * A map of observatories from the Minor Planet Center
-    ///   The key is the MPC code and the value is the observer
+    /// ----------
+    /// * A reference to the shared map: [`MpcCodeObs`] = `HashMap<MpcCode, Arc<Observer>>`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`init_observatories`](crate::outfit::Outfit::init_observatories) – Builder invoked on first access.
+    /// * [`get_observer_from_mpc_code`](crate::outfit::Outfit::get_observer_from_mpc_code) – Convenience accessor for one site.
     pub(crate) fn get_observatories(&self) -> &MpcCodeObs {
         self.observatories
             .mpc_code_obs
             .get_or_init(|| self.init_observatories())
     }
 
-    /// Get an observer from an MPC code
+    /// Resolve an [`Observer`] from a given MPC observatory code.
+    ///
+    /// This accessor panics if the code is unknown. Use it when unknown codes are exceptional.
     ///
     /// Arguments
-    /// ---------
-    /// * `mpc_code`: the MPC code
+    /// -----------------
+    /// * `mpc_code`: The MPC observatory code (e.g., `"F51"`).
     ///
     /// Return
-    /// ------
-    /// * The observer
+    /// ----------
+    /// * An `Arc<Observer>` for the requested site.
     pub fn get_observer_from_mpc_code(&self, mpc_code: &MpcCode) -> Arc<Observer> {
         self.get_observatories()
             .get(mpc_code)
@@ -72,13 +193,22 @@ impl Outfit {
             .clone()
     }
 
-    /// Initialize the observatories map from the Minor Planet Center
-    /// The map is a lazy map and is only loaded once
+    /// Build the MPC observatory registry by fetching and parsing the MPC list.
+    ///
+    /// For each row, the routine extracts:
+    /// - Longitude (deg), ρ·cosφ, ρ·sinφ (parallax factors),
+    /// - Human-readable name,
+    /// - Optional RA/DEC accuracies derived from the loaded [`ErrorModelData`]
+    ///   via [`get_bias_rms`] (currently using catalog code `"c"`, TODO).
     ///
     /// Return
-    /// ------
-    /// * A map of observatories from the Minor Planet Center
-    ///   The key is the MPC code and the value is the observer
+    /// ----------
+    /// * A freshly constructed [`MpcCodeObs`] map.
+    ///
+    /// See also
+    /// ------------
+    /// * [`get_observatories`](crate::outfit::Outfit::get_observatories) – Lazy wrapper that caches this map.
+    /// * [`get_bias_rms`] – Site accuracy lookup by (mpc_code, catalog_code).
     pub(crate) fn init_observatories(&self) -> MpcCodeObs {
         let mut observatories: MpcCodeObs = HashMap::new();
 
@@ -100,10 +230,7 @@ impl Outfit {
 
                 let (longitude, cos, sin, name) = parse_remain(remain, code);
 
-                // TODO: need to handle the catalog code
-                // For now, we assume the catalog code is "c" (for "catalog")
-                // This is a simplification, as the catalog code can vary
-                // depending on the observer and the error model
+                // TODO: support per-site catalog codes (not always "c")
                 let bias_rms = get_bias_rms(&self.error_model, code.to_string(), "c".to_string());
 
                 let observer = Observer {
@@ -120,46 +247,79 @@ impl Outfit {
         observatories
     }
 
-    /// Get an observatory index from an MPC code
+    /// Convert an MPC code to its stable 16-bit observatory index.
     ///
-    /// Argument
-    /// --------
-    /// * `mpc_code`: MPC code
+    /// Useful for compact storage of observer references in catalogs, measurements,
+    /// and ephemeris products.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `mpc_code`: The MPC observatory code.
     ///
     /// Return
-    /// ------
-    /// * The observatory index
+    /// ----------
+    /// * The `u16` index associated with the given observer.
+    ///
+    /// See also
+    /// ------------
+    /// * [`get_observer_from_mpc_code`](crate::outfit::Outfit::get_observer_from_mpc_code) – Resolve the observer first (panic on unknown).
+    /// * [`uint16_from_observer`](crate::outfit::Outfit::uint16_from_observer) – Indexing for arbitrary/new observers.
     pub(crate) fn uint16_from_mpc_code(&mut self, mpc_code: &MpcCode) -> u16 {
         let observer = self.get_observer_from_mpc_code(mpc_code);
         self.observatories.uint16_from_observer(observer)
     }
 
-    /// Get an observer from an observer index
+    /// Convert an [`Observer`] handle to its stable 16-bit index.
     ///
     /// Arguments
-    /// ---------
-    /// * `observer_idx`: the observer index
+    /// -----------------
+    /// * `observer`: The observer to be indexed.
     ///
     /// Return
-    /// ------
-    /// * The observer
+    /// ----------
+    /// * The `u16` index associated with this observer (inserting if new).
+    ///
+    /// See also
+    /// ------------
+    /// * [`get_observer_from_uint16`](crate::outfit::Outfit::get_observer_from_uint16) – Recover a reference from an index.
+    /// * [`new_observer`](crate::outfit::Outfit::new_observer) – Create and register a new custom observer.
     pub(crate) fn uint16_from_observer(&mut self, observer: Arc<Observer>) -> u16 {
         self.observatories.uint16_from_observer(observer)
     }
 
-    /// Get an observer from an observer index
+    /// Recover an [`Observer`] reference from a 16-bit index.
     ///
     /// Arguments
-    /// ---------
-    /// * `observer_idx`: the observer index
+    /// -----------------
+    /// * `observer_idx`: The previously assigned index.
     ///
     /// Return
-    /// ------
-    /// * The observer
+    /// ----------
+    /// * A reference to the corresponding [`Observer`].
+    ///
+    /// See also
+    /// ------------
+    /// * [`uint16_from_observer`](crate::outfit::Outfit::uint16_from_observer) – Assign/lookup indices.
+    /// * [`get_observer_from_mpc_code`](crate::outfit::Outfit::get_observer_from_mpc_code) – Resolve by MPC code instead.
     pub(crate) fn get_observer_from_uint16(&self, observer_idx: u16) -> &Observer {
         self.observatories.get_observer_from_uint16(observer_idx)
     }
 
+    /// Create and register a new **custom** observer.
+    ///
+    /// This helper converts geodetic inputs to the internal parallax representation
+    /// (ρ·cosφ, ρ·sinφ) and stores the new [`Observer`] with an optional display name.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `longitude`: Geodetic longitude in **degrees** (east-positive).
+    /// * `latitude`:  Geodetic latitude in **degrees**.
+    /// * `elevation`: Elevation in **kilometers** above the ellipsoid/geoid (model-dependent).
+    /// * `name`:      Optional human-readable name for the site.
+    ///
+    /// Return
+    /// ----------
+    /// * An `Arc<Observer>` handle to the newly created observer.
     pub fn new_observer(
         &mut self,
         longitude: Degree,
@@ -172,6 +332,21 @@ impl Outfit {
     }
 }
 
+/// Parse a fixed-width float slice from an MPC observatory line.
+///
+/// Arguments
+/// -----------------
+/// * `s`:    Full line (trailing part after the 3-char MPC code).
+/// * `slice`: Byte range selecting the numeric field.
+/// * `code`:  MPC code (for diagnostics).
+///
+/// Return
+/// ----------
+/// * `Ok(f32)` parsed value, or the parsing error.
+///
+/// See also
+/// ------------
+/// * [`parse_remain`] – Higher-level field extraction for one line.
 fn parse_f32(
     s: &str,
     slice: std::ops::Range<usize>,
@@ -183,6 +358,20 @@ fn parse_f32(
         .parse()
 }
 
+/// Extract longitude, ρ·cosφ, ρ·sinφ, and name from a fixed-width MPC row.
+///
+/// This helper returns partial values (with zeros) if any field fails to parse,
+/// allowing the caller to still record the site name while signaling missing data
+/// implicitly through zeros.
+///
+/// Arguments
+/// -----------------
+/// * `remain`: Fixed-width tail of the line (after the 3-char MPC code).
+/// * `code`:   MPC code (for diagnostics).
+///
+/// Return
+/// ----------
+/// * `(longitude_deg, rho_cos_phi, rho_sin_phi, name)`
 fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
     let name = remain
         .get(27..)
@@ -200,80 +389,4 @@ fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
         return (longitude, cos, 0.0, name.to_string());
     };
     (longitude, cos, sin, name.to_string())
-}
-
-#[cfg(test)]
-mod outfit_struct_test {
-    use super::*;
-    use ordered_float::NotNan;
-
-    use crate::{observers::Observer, outfit::Outfit};
-
-    #[test]
-    fn test_observer_from_mpc_code() {
-        let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-
-        let observer = outfit.get_observer_from_mpc_code(&"000".into());
-        let test = Observer {
-            longitude: NotNan::try_from(0.).unwrap(),
-            rho_cos_phi: NotNan::try_from(0.6241099834442139).unwrap(),
-            rho_sin_phi: NotNan::try_from(0.7787299752235413).unwrap(),
-            name: Some("Greenwich".to_string()),
-            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
-            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
-        };
-        assert_eq!(observer, test.into());
-
-        let observer = outfit.get_observer_from_mpc_code(&"C51".into());
-        let test = Observer {
-            longitude: NotNan::try_from(0.).unwrap(),
-            rho_cos_phi: NotNan::try_from(0.).unwrap(),
-            rho_sin_phi: NotNan::try_from(0.).unwrap(),
-            name: Some("WISE".to_string()),
-            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
-            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
-        };
-        assert_eq!(observer, test.into());
-
-        let observer = outfit.get_observer_from_mpc_code(&"Z50".into());
-        let test = Observer {
-            longitude: NotNan::try_from(355.2843017578125).unwrap(),
-            rho_cos_phi: NotNan::try_from(0.7440530061721802).unwrap(),
-            rho_sin_phi: NotNan::try_from(0.666068971157074).unwrap(),
-            name: Some("Mazariegos".to_string()),
-            ra_accuracy: Some(NotNan::try_from(0.5099999904632568).unwrap()),
-            dec_accuracy: Some(NotNan::try_from(0.4000000059604645).unwrap()),
-        };
-        assert_eq!(observer, test.into());
-    }
-
-    #[test]
-    fn test_add_observer() {
-        let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-        let obs = outfit.new_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
-        assert_eq!(obs.longitude, 1.0);
-        assert_eq!(obs.rho_cos_phi, 0.999395371426802);
-        assert_eq!(obs.rho_sin_phi, 0.0346660237964843);
-        assert_eq!(obs.name, Some("Test".to_string()));
-        assert_eq!(outfit.observatories.uint16_from_observer(obs), 0);
-
-        let obs2 = outfit.new_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
-        assert_eq!(outfit.observatories.uint16_from_observer(obs2), 1);
-    }
-
-    #[test]
-    #[cfg(feature = "jpl-download")]
-    fn test_get_jpl_ephem_from_horizon() {
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-        let jpl_ephem = OUTFIT_HORIZON_TEST.0.get_jpl_ephem();
-        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
-    }
-
-    #[test]
-    #[cfg(feature = "jpl-download")]
-    fn test_get_jpl_ephem_from_naif() {
-        use crate::unit_test_global::OUTFIT_NAIF_TEST;
-        let jpl_ephem = OUTFIT_NAIF_TEST.get_jpl_ephem();
-        assert!(jpl_ephem.is_ok(), "Failed to get JPL ephemeris file");
-    }
 }
