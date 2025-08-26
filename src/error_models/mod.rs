@@ -272,7 +272,7 @@ impl FromStr for ErrorModel {
 ///
 /// # Example
 ///
-/// ```rust, ignore
+/// ```rust, no_run
 /// use outfit::error_models::{ErrorModel, get_bias_rms};
 ///
 /// // Load error model data

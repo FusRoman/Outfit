@@ -15,7 +15,7 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use outfit::initial_orbit_determination::IODParams;
 //!
 //! let params = IODParams::builder()
@@ -134,7 +134,7 @@ pub mod gauss_result;
 ///
 /// The [`Default`] implementation provides a good starting point:
 ///
-/// ```rust, ignore
+/// ```rust, no_run
 /// use outfit::initial_orbit_determination::IODParams;
 ///
 /// let params = IODParams::default();
@@ -187,16 +187,26 @@ impl IODParams {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// use rand::{rngs::StdRng, SeedableRng};
+    /// use outfit::initial_orbit_determination::IODParams;
+    /// use outfit::constants::Observations;
+    /// use outfit::observations::observations_ext::ObservationIOD;
+    ///
     /// let params = IODParams::builder()
     ///     .n_noise_realizations(100)
     ///     .noise_scale(1.0)
     ///     .dtmax(30.0)
     ///     .max_triplets(50)
-    ///     .build();
+    ///     .build().unwrap();
+    ///
+    /// let observations: Observations = unimplemented!(); // Your observations here
+    /// let state = unimplemented!(); // Your state here
+    /// let error_model = unimplemented!(); // Your error model here
+    /// let mut rng = StdRng::seed_from_u64(42);
     ///
     /// let (orbit, rms) = observations.estimate_best_orbit(
-    ///     &state, &error_model, &mut rng, &params)?;
+    ///     &state, &error_model, &mut rng, &params).unwrap();
     /// ```
     ///
     /// # See also
@@ -335,7 +345,7 @@ impl IODParamsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust, ignore
+    /// ```rust, no_run
     /// use outfit::initial_orbit_determination::IODParams;
     ///
     /// // Use builder to customize parameters

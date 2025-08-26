@@ -58,18 +58,12 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust, no_run
 //! use outfit::initial_orbit_determination::gauss::GaussObs;
 //! use nalgebra::Vector3;
 //!
 //! // Build GaussObs (here positions are assumed precomputed)
-//! let gauss = GaussObs {
-//!     idx_obs: Vector3::new(0, 1, 2),
-//!     ra: Vector3::new(1.68, 1.69, 1.75),
-//!     dec: Vector3::new(1.08, 0.94, 0.82),
-//!     time: Vector3::new(57028.4, 57049.2, 57063.9),
-//!     observer_position: Matrix3::zeros(),
-//! };
+//! let gauss: GaussObs = unimplemented!("Construct GaussObs from RA/DEC/time and observer state");
 //!
 //! // Run the preliminary orbit computation
 //! let result = gauss.prelim_orbit().unwrap();

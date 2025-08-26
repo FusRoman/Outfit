@@ -38,7 +38,7 @@
 //! [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit)
 //! or [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;
 //!
 //! fn handle_result(result: GaussResult) {
