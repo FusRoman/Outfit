@@ -91,7 +91,6 @@ use crate::initial_orbit_determination::gauss_result::GaussResult;
 use crate::kepler::velocity_correction;
 use crate::observers::helio_obs_pos;
 use crate::observers::Observer;
-use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
 use crate::orbit_type::OrbitalElements;
 use crate::outfit::Outfit;
@@ -741,7 +740,11 @@ impl GaussObs {
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 
         // Compute the classical orbital elements from the state vector and return orbital elements in a structured form
-        Ok(ccek1(&ecl_pos, &ecl_vel, reference_epoch))
+        Ok(OrbitalElements::from_orbital_state(
+            &ecl_pos,
+            &ecl_vel,
+            reference_epoch,
+        ))
     }
 
     /// Estimate an initial orbit using Gauss’s method from three astrometric observations.

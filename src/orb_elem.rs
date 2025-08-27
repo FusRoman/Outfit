@@ -6,51 +6,56 @@ use super::constants::{DPI, GAUSS_GRAV_SQUARED};
 use super::ref_system::rotmt;
 use nalgebra::Vector3;
 
-/// Converts a Cartesian state vector into orbital elements in the J2000 equatorial frame.
+/// Convert a Cartesian heliocentric state vector into orbital elements in the J2000 equatorial frame.
 ///
-/// This function takes a 6D state vector representing position and velocity in an inertial
-/// heliocentric reference frame and converts it into classical orbital elements (COEs).
+/// This function computes the classical orbital elements from a state vector `[r, v]` expressed
+/// in heliocentric J2000 coordinates. It distinguishes between **elliptical**, **parabolic**,
+/// and **hyperbolic** orbits based on the reciprocal semi-major axis `1/a`.
 ///
-/// The computed orbital elements depend on the type of orbit:
-/// - For elliptic orbits (`1/a > 0`), the output is:  
-///   `[a, e, i, Ω, ω, M]`  
-///   where:
-///   - `a` is the semi-major axis (AU)
-///   - `e` is the eccentricity
-///   - `i` is the inclination (radians)
-///   - `Ω` is the longitude of ascending node (radians)
-///   - `ω` is the argument of periapsis (radians)
-///   - `M` is the mean anomaly (radians)
+/// Elliptical orbits (`1/a > 0`) return:
+/// -----------------
+/// * `a` – Semi-major axis (AU)  
+/// * `e` – Eccentricity  
+/// * `i` – Inclination (radians)  
+/// * `Ω` – Longitude of ascending node (radians)  
+/// * `ω` – Argument of periapsis (radians)  
+/// * `M` – Mean anomaly (radians)  
 ///
-/// - For parabolic and hyperbolic orbits (`1/a ≤ 0`), the output is:
-///   `[q, e, i, Ω, ω, ν]`  
-///   where:
-///   - `q` is the perihelion distance (AU)
-///   - `e` is the eccentricity (=1 for parabolic)
-///   - `ν` is the true anomaly (radians)
+/// Parabolic orbits (`1/a = 0`) and hyperbolic orbits (`1/a < 0`) return:
+/// -----------------
+/// * `q` – Perihelion distance (AU)  
+/// * `e` – Eccentricity (= 1 for parabolic)  
+/// * `i` – Inclination (radians)  
+/// * `Ω` – Longitude of ascending node (radians)  
+/// * `ω` – Argument of periapsis (radians)  
+/// * `ν` – True anomaly (radians)  
 ///
 /// Arguments
-/// ---------
-/// * `xv` – A 6-element array `[x, y, z, vx, vy, vz]` in heliocentric J2000 coordinates.
-///   Positions are in astronomical units (AU) and velocities in AU/day.
-/// * `reference_epoch` – Epoch of the state vector in Julian Date (TDB).
+/// -----------------
+/// * `position`: Position vector `[x, y, z]` in AU, heliocentric J2000.  
+/// * `velocity`: Velocity vector `[vx, vy, vz]` in AU/day, heliocentric J2000.  
+/// * `reference_epoch`: Epoch of the state vector in Julian Date (TDB).  
 ///
-/// Returns
-/// -------
-/// An `OrbitalElements` enum containing either `KeplerianElements` or `CometaryElements`.
+/// Return
+/// ----------
+/// * An [`OrbitalElements`] enum, which can be either:  
+///   - [`KeplerianElements`] for elliptic solutions, or  
+///   - [`CometaryElements`] for parabolic and hyperbolic solutions.  
 ///
 /// Note
-/// ----
-/// This function does not account for planetary perturbations or relativistic corrections.
-/// The orbital elements are computed under the assumption of a two-body Keplerian motion.
+/// ----------
+/// * The computation assumes a pure two-body Keplerian motion.  
+/// * Planetary perturbations, relativistic corrections, and non-gravitational effects are **not** included.  
+/// * For equatorial orbits (`i = 0`), the longitude of the ascending node is set to zero by convention.  
 ///
 /// See also
-/// --------
-/// * [`eccentricity_control`] – Filters orbital solutions based on eccentricity and perihelion distance thresholds.
-/// * [`KeplerianElements`] – Struct holding canonical orbital elements.
-/// * [`velocity_correction`](crate::kepler::velocity_correction) – Lagrange-based velocity refinement from triplet position vectors.
-/// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant.
-pub fn ccek1(
+/// ------------
+/// * [`KeplerianElements`] – Canonical set of orbital elements.  
+/// * [`CometaryElements`] – Orbital elements for parabolic and hyperbolic solutions.  
+/// * [`eccentricity_control`] – Filters orbital solutions based on eccentricity and perihelion distance thresholds.  
+/// * [`velocity_correction`](crate::kepler::velocity_correction) – Lagrange-based velocity refinement.  
+/// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant squared.
+pub(crate) fn ccek1(
     position: &Vector3<f64>,
     velocity: &Vector3<f64>,
     reference_epoch: f64,
@@ -205,7 +210,7 @@ pub fn ccek1(
 ///
 /// See also
 /// --------
-/// * [`ccek1`] – Computes classical orbital elements from a Cartesian state vector.
+/// * [`OrbitalElements::from_orbital_state`] – Computes classical orbital elements from a Cartesian state vector.
 /// * [`KeplerianElements`] – Structured representation of orbital parameters.
 /// * [`velocity_correction`](crate::kepler::velocity_correction) – Computes orbital velocity from position triplets using the Lagrange formulation.
 /// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant squared.
