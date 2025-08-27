@@ -719,7 +719,8 @@ impl GaussObs {
     /// * The transformation matrix from equatorial to ecliptic frame is computed using [`rotpn`].
     /// * Orbital elements are computed using the function [`ccek1`] from the `orb_elem` module.
     ///
-    /// # See also
+    /// See also
+    /// --------
     /// * [`rotpn`] – computes the rotation matrix between celestial reference frames.
     /// * [`OrbitalElements::from_orbital_state`] – Computes classical orbital elements from a Cartesian state vector.
     /// * [`KeplerianElements`] – definition of the orbital elements struct.
