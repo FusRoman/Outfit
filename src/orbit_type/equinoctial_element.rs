@@ -1,6 +1,6 @@
 //! # Equinoctial orbital elements
 //!
-//! This module defines the [`crate::equinoctial_element::EquinoctialElements`] struct and its associated methods,
+//! This module defines the [`crate::orbit_type::equinoctial_element::EquinoctialElements`] struct and its associated methods,
 //! providing a **non-singular representation of orbital elements**.  
 //! Equinoctial elements are particularly well suited for orbit determination and propagation
 //! because they remain regular for small eccentricities and inclinations, unlike classical Keplerian elements.
@@ -27,7 +27,7 @@
 //!
 //! ## Provided functionality
 //!
-//! - **Conversion** between [`crate::equinoctial_element::EquinoctialElements`] and [`crate::keplerian_element::KeplerianElements`].
+//! - **Conversion** between [`crate::orbit_type::equinoctial_element::EquinoctialElements`] and [`crate::orbit_type::keplerian_element::KeplerianElements`].
 //! - **Propagation** of two-body orbits:
 //!   * Solve the generalized Kepler equation
 //!   * Compute inertial Cartesian position and velocity from equinoctial elements
@@ -37,17 +37,17 @@
 //!
 //! ## Key methods
 //!
-//! - [`crate::equinoctial_element::EquinoctialElements::solve_kepler_equation`]  
+//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_kepler_equation`]  
 //!   Solve the generalized Kepler equation in equinoctial form.
 //!
-//! - [`crate::equinoctial_element::EquinoctialElements::solve_two_body_problem`]  
+//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_two_body_problem`]  
 //!   Propagate an orbit from `t0` to `t1` using the two-body approximation,
 //!   returning position, velocity, and optionally Jacobians.
 //!
-//! - [`crate::equinoctial_element::EquinoctialElements::compute_cartesian_position_and_velocity`]  
+//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::compute_cartesian_position_and_velocity`]  
 //!   Compute position/velocity vectors from the equinoctial elements at a given epoch.
 //!
-//! - [`crate::equinoctial_element::EquinoctialElements::compute_w_vector`]  
+//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::compute_w_vector`]  
 //!   Compute the **w** basis vector of the equinoctial frame (normal to the orbital plane).
 //!
 //! ## Units
@@ -65,9 +65,9 @@
 //!
 //! ## Example
 //!
-//! ```rust, ignore
-//! use outfit::equinoctial_element::EquinoctialElements;
-//! use outfit::keplerian_element::KeplerianElements;
+//! ```rust, no_run
+//! use outfit::orbit_type::equinoctial_element::EquinoctialElements;
+//! use outfit::orbit_type::keplerian_element::KeplerianElements;
 //!
 //! // Define equinoctial elements
 //! let equ = EquinoctialElements {
@@ -89,10 +89,10 @@
 //!
 //! ## See also
 //!
-//! - [`KeplerianElements`](crate::keplerian_element::KeplerianElements)
+//! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
 use core::f64;
-use std::f64::consts::PI;
+use std::{f64::consts::PI, fmt};
 
 use nalgebra::{Matrix3x6, Matrix6x3, Vector3};
 use roots::{find_root_newton_raphson, SimpleConvergency};
@@ -100,7 +100,7 @@ use roots::{find_root_newton_raphson, SimpleConvergency};
 use crate::{
     constants::{DPI, GAUSS_GRAV_SQUARED},
     kepler::principal_angle,
-    keplerian_element::KeplerianElements,
+    orbit_type::keplerian_element::KeplerianElements,
     outfit_errors::OutfitError,
 };
 
@@ -116,7 +116,7 @@ pub type TwoBodyResult = (
 /// - h, k: dimensionless (related to eccentricity)
 /// - p, q: dimensionless (related to inclination)
 /// - lambda: radians (mean longitude)
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct EquinoctialElements {
     pub reference_epoch: f64,        // Reference epoch (MJD)
     pub semi_major_axis: f64,        // Semi-major axis (AU)
@@ -795,6 +795,49 @@ impl From<&EquinoctialElements> for KeplerianElements {
             equinoctial.tan_half_incl_sin_node,
             equinoctial.tan_half_incl_cos_node,
             equinoctial.mean_longitude,
+        )
+    }
+}
+
+impl fmt::Display for EquinoctialElements {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let rad_to_deg = 180.0 / std::f64::consts::PI;
+        writeln!(
+            f,
+            "Equinoctial Elements @ epoch (MJD): {:.6}",
+            self.reference_epoch
+        )?;
+        writeln!(f, "------------------------------------------------")?;
+        writeln!(
+            f,
+            "  a   (semi-major axis)            = {:.6} AU",
+            self.semi_major_axis
+        )?;
+        writeln!(
+            f,
+            "  h   (e·sin(Ω+ω))                 = {:.6}",
+            self.eccentricity_sin_lon
+        )?;
+        writeln!(
+            f,
+            "  k   (e·cos(Ω+ω))                 = {:.6}",
+            self.eccentricity_cos_lon
+        )?;
+        writeln!(
+            f,
+            "  p   (tan(i/2)·sinΩ)              = {:.6}",
+            self.tan_half_incl_sin_node
+        )?;
+        writeln!(
+            f,
+            "  q   (tan(i/2)·cosΩ)              = {:.6}",
+            self.tan_half_incl_cos_node
+        )?;
+        writeln!(
+            f,
+            "  λ   (mean longitude)             = {:.6} rad ({:.6}°)",
+            self.mean_longitude,
+            self.mean_longitude * rad_to_deg
         )
     }
 }

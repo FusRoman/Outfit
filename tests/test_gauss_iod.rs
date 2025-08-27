@@ -2,20 +2,22 @@
 
 mod common;
 
-use crate::common::assert_orbit_close;
 use approx::assert_relative_eq;
 use camino::Utf8Path;
 use outfit::constants::{ObjectNumber, TrajectorySet};
 use outfit::error_models::ErrorModel;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
 use outfit::initial_orbit_determination::IODParams;
-use outfit::keplerian_element::KeplerianElements;
 use outfit::observations::observations_ext::ObservationIOD;
 use outfit::observations::trajectory_ext::TrajectoryExt;
+use outfit::orbit_type::keplerian_element::KeplerianElements;
+use outfit::orbit_type::OrbitalElements;
 use outfit::outfit::Outfit;
 use outfit::outfit_errors::OutfitError;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+
+use crate::common::approx_equal;
 
 fn run_iod(
     env_state: &mut Outfit,
@@ -58,7 +60,7 @@ fn test_gauss_iod() {
     )
     .unwrap();
 
-    let expected_orbit = GaussResult::CorrectedOrbit(KeplerianElements {
+    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 57049.22904452732,
         semi_major_axis: 1.8017634341924607,
         eccentricity: 0.28360400982137435,
@@ -69,8 +71,9 @@ fn test_gauss_iod() {
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
-    assert_orbit_close(&best_orbit_unwrapped, &expected_orbit, test_epsilon);
+    let orbit = best_orbit_unwrapped.get_orbit();
 
+    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(best_rms, 47.679542690830374, epsilon = test_epsilon);
 
     let (best_orbit, best_rms) = run_iod(
@@ -80,7 +83,7 @@ fn test_gauss_iod() {
     )
     .unwrap();
 
-    let expected_orbit = GaussResult::CorrectedOrbit(KeplerianElements {
+    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60672.24113100201,
         semi_major_axis: 3.1895469772492726,
         eccentricity: 0.05434034666133621,
@@ -91,7 +94,9 @@ fn test_gauss_iod() {
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
-    assert_orbit_close(&best_orbit_unwrapped, &expected_orbit, test_epsilon);
+    let orbit = best_orbit_unwrapped.get_orbit();
+
+    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(best_rms, 0.550927559734149, epsilon = test_epsilon);
 
     let (best_orbit, best_rms) = run_iod(
@@ -101,9 +106,7 @@ fn test_gauss_iod() {
     )
     .unwrap();
 
-    let best_orbit_unwrapped = best_orbit.unwrap();
-
-    let expected_orbit = GaussResult::CorrectedOrbit(KeplerianElements {
+    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60465.26778016307,
         semi_major_axis: 2.1921362022018465,
         eccentricity: 0.2042936374305541,
@@ -113,6 +116,9 @@ fn test_gauss_iod() {
         mean_anomaly: 4.9466622638824855,
     });
 
-    assert_orbit_close(&best_orbit_unwrapped, &expected_orbit, test_epsilon);
+    let best_orbit_unwrapped = best_orbit.unwrap();
+    let orbit = best_orbit_unwrapped.get_orbit();
+
+    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(best_rms, 6.3193950851085035, epsilon = test_epsilon);
 }

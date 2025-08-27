@@ -7,9 +7,9 @@ pub mod triplets_iod;
 use crate::{
     constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC, VLIGHT_AU},
     conversion::{cartesian_to_radec, parse_dec_to_deg, parse_ra_to_deg},
-    equinoctial_element::EquinoctialElements,
     observations::trajectory_ext::ObservationBatch,
     observers::Observer,
+    orbit_type::equinoctial_element::EquinoctialElements,
     outfit::Outfit,
     outfit_errors::OutfitError,
     ref_system::{rotpn, RefEpoch, RefSystem},

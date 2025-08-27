@@ -4,11 +4,10 @@ use std::collections::VecDeque;
 
 use crate::{
     constants::{Observations, Radian},
-    equinoctial_element::EquinoctialElements,
     error_models::ErrorModel,
     initial_orbit_determination::{gauss::GaussObs, gauss_result::GaussResult, IODParams},
-    keplerian_element::KeplerianElements,
     observations::{triplets_iod::generate_triplets, Observation},
+    orbit_type::equinoctial_element::EquinoctialElements,
     outfit::Outfit,
     outfit_errors::OutfitError,
 };
@@ -51,7 +50,7 @@ use crate::{
 /// # See also
 /// * [`GaussObs`] – Data structure used to represent a triplet of observations.
 /// * [`Outfit`] – Global state providing ephemerides and reference frames.
-/// * [`KeplerianElements`] – Orbital elements used to propagate orbits.
+/// * [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) – Orbital elements used to propagate orbits.
 /// * [`Observation`] – Individual observation data structure.
 ///
 /// # References
@@ -186,7 +185,7 @@ pub trait ObservationsExt {
         &self,
         state: &Outfit,
         triplets: &GaussObs,
-        orbit_element: &KeplerianElements,
+        orbit_element: &EquinoctialElements,
         extf: f64,
         dtmax: f64,
     ) -> Result<f64, OutfitError>;
@@ -336,7 +335,7 @@ pub trait ObservationsExt {
 /// * [`ObservationsExt::compute_triplets`] – Generates candidate triplets from the observation set.
 /// * [`ObservationsExt::rms_orbit_error`] – Evaluates the quality of an orbit over the full arc.
 /// * [`GaussResult`] – Data structure holding the result of a single Gauss method run.
-/// * [`KeplerianElements`] – Orbital elements returned by successful preliminary orbit estimation.
+/// * [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) – Orbital elements returned by successful preliminary orbit estimation.
 /// * [`IODParams`] – Groups all configuration options for IOD.
 pub trait ObservationIOD {
     /// Estimate the best-fitting preliminary orbit from a full set of astrometric observations.
@@ -497,17 +496,15 @@ impl ObservationsExt for Observations {
         &self,
         state: &Outfit,
         triplets: &GaussObs,
-        orbit_element: &KeplerianElements,
+        orbit_element: &EquinoctialElements,
         extf: f64,
         dtmax: f64,
     ) -> Result<f64, OutfitError> {
         let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
 
-        let equinoctial_elements: EquinoctialElements = orbit_element.into();
-
         let rms_all_obs = self[start_obs_rms..=end_obs_rms]
             .iter()
-            .map(|obs| obs.ephemeris_error(state, &equinoctial_elements, obs.get_observer(state)))
+            .map(|obs| obs.ephemeris_error(state, orbit_element, obs.get_observer(state)))
             .try_fold(0.0, |acc, rms_obs| rms_obs.map(|rms| acc + rms))?;
 
         Ok((rms_all_obs / (2. * (end_obs_rms - start_obs_rms + 1) as f64)).sqrt())
@@ -616,12 +613,15 @@ impl ObservationIOD for Observations {
             // For each noisy realization, attempt orbit determination
             for realization in realizations {
                 match realization.prelim_orbit() {
-                    Ok(orbit) => {
+                    Ok(gauss_res) => {
+                        let orbit = gauss_res.get_orbit();
+                        let equinoctial_elements = orbit.to_equinoctial()?;
+
                         // Evaluate how well this orbit fits the full observation set
                         match self.rms_orbit_error(
                             state,
                             &realization,
-                            &orbit,
+                            &equinoctial_elements,
                             params.extf,
                             params.dtmax,
                         ) {
@@ -629,7 +629,7 @@ impl ObservationIOD for Observations {
                                 // Keep orbit if it's the best (lowest RMS) so far
                                 if rms < best_rms {
                                     best_rms = rms;
-                                    best_orbit = Some(orbit);
+                                    best_orbit = Some(gauss_res);
                                 }
                             }
                             Err(e) => {
@@ -711,7 +711,9 @@ mod test_obs_ext {
     fn test_rms_trajectory() {
         use nalgebra::Matrix3;
 
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+        use crate::{
+            orbit_type::keplerian_element::KeplerianElements, unit_test_global::OUTFIT_HORIZON_TEST,
+        };
 
         let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
 
@@ -755,7 +757,7 @@ mod test_obs_ext {
         };
 
         let rms = traj
-            .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler, -1.0, 30.)
+            .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler.into(), -1.0, 30.)
             .unwrap();
 
         assert_eq!(rms, 68.88650730830162);
@@ -957,7 +959,10 @@ mod test_obs_ext {
         use rand::{rngs::StdRng, SeedableRng};
 
         use crate::{
-            keplerian_element::test_keplerian_element::assert_orbit_close,
+            orbit_type::{
+                keplerian_element::KeplerianElements, orbit_type_test::approx_equal,
+                OrbitalElements,
+            },
             unit_test_global::OUTFIT_HORIZON_TEST,
         };
 
@@ -999,7 +1004,10 @@ mod test_obs_ext {
             )
             .unwrap();
 
-        let expected_orbit = KeplerianElements {
+        let binding = best_orbit.unwrap();
+        let orbit = binding.get_orbit();
+
+        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch: 57049.22904488294,
             semi_major_axis: 1.801748431600605,
             eccentricity: 0.283572284127787,
@@ -1007,8 +1015,9 @@ mod test_obs_ext {
             ascending_node_longitude: 0.008022659889281067,
             periapsis_argument: 1.245060173584828,
             mean_anomaly: 0.44047943792316746,
-        };
-        assert_orbit_close(&best_orbit.unwrap(), &expected_orbit, 1e-14);
+        });
+
+        assert!(approx_equal(orbit, &expected_orbit, 1e-14));
         assert_relative_eq!(best_rms, 55.14810894219461, epsilon = 1e-14);
     }
 }
