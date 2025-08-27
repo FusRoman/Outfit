@@ -169,9 +169,6 @@ pub mod earth_orientation;
 /// Environment state: ephemerides, dynamical models, configuration.
 pub mod env_state;
 
-/// Equinoctial orbital elements and related conversions.
-pub mod equinoctial_element;
-
 /// Error models used for weighting astrometric residuals.
 pub mod error_models;
 
@@ -184,8 +181,8 @@ pub mod jpl_ephem;
 /// Keplerian solver for propagation.
 pub mod kepler;
 
-/// Classical Keplerian elements structure and utilities.
-pub mod keplerian_element;
+/// Orbital types and conversions between them.
+pub mod orbit_type;
 
 /// Observation handling (RA, DEC, times).
 pub mod observations;

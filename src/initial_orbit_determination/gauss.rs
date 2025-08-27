@@ -31,7 +31,7 @@
 //!   * Solve the 8th-degree polynomial using the Aberth method,
 //!   * Compute preliminary heliocentric positions,
 //!   * Estimate velocity via **Gibbs' method**,
-//!   * Return a [`GaussResult`] (PrelimOrbit or CorrectedOrbit) containing classical [`KeplerianElements`].
+//!   * Return a [`GaussResult`] (PrelimOrbit or CorrectedOrbit) containing classical [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements).
 //!
 //! - **Orbit refinement:**
 //!   * [`GaussObs::pos_and_vel_correction`] – Iterative refinement of positions and velocities,
@@ -53,7 +53,7 @@
 //! ## Output
 //!
 //! The main result is a [`GaussResult`] which contains the computed orbit as
-//! a [`KeplerianElements`] object. It can be either preliminary (direct result)
+//! a [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) object. It can be either preliminary (direct result)
 //! or corrected (after refinement).
 //!
 //! ## Example
@@ -78,7 +78,7 @@
 //! ## See also
 //!
 //! - [`GaussResult`]
-//! - [`KeplerianElements`]
+//! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
 //! - [`helio_obs_pos`]
 use aberth::StopReason;
 use nalgebra::Matrix3;
@@ -89,11 +89,11 @@ use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::initial_orbit_determination::gauss_result::GaussResult;
 use crate::kepler::velocity_correction;
-use crate::keplerian_element::KeplerianElements;
 use crate::observers::helio_obs_pos;
 use crate::observers::Observer;
 use crate::orb_elem::ccek1;
 use crate::orb_elem::eccentricity_control;
+use crate::orbit_type::OrbitalElements;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use crate::ref_system::rotpn;
@@ -729,7 +729,7 @@ impl GaussObs {
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
-    ) -> Result<KeplerianElements, OutfitError> {
+    ) -> Result<OrbitalElements, OutfitError> {
         // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
         let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
@@ -745,23 +745,8 @@ impl GaussObs {
             ecl_pos.x, ecl_pos.y, ecl_pos.z, ecl_vel.x, ecl_vel.y, ecl_vel.z,
         ];
 
-        // Prepare buffers for orbital element output
-        let mut elem = [0.0; 6];
-        let mut type_ = String::new();
-
-        // Compute the classical orbital elements from the state vector
-        ccek1(&mut elem, &mut type_, &ast_pos_vel);
-
-        // Return orbital elements in a structured form
-        Ok(KeplerianElements {
-            reference_epoch,
-            semi_major_axis: elem[0],
-            eccentricity: elem[1],
-            inclination: elem[2],
-            ascending_node_longitude: elem[3],
-            periapsis_argument: elem[4],
-            mean_anomaly: elem[5],
-        })
+        // Compute the classical orbital elements from the state vector and return orbital elements in a structured form
+        Ok(ccek1(&ast_pos_vel, reference_epoch))
     }
 
     /// Estimate an initial orbit using Gauss’s method from three astrometric observations.
@@ -971,7 +956,7 @@ impl GaussObs {
 pub(crate) mod gauss_test {
 
     use super::*;
-    use crate::keplerian_element::test_keplerian_element::assert_orbit_close;
+    use crate::orbit_type::{keplerian_element::KeplerianElements, orbit_type_test::approx_equal};
 
     #[test]
     fn test_gauss_prelim() {
@@ -1241,6 +1226,8 @@ pub(crate) mod gauss_test {
 
     #[test]
     fn test_solve_orbit() {
+        let tol = 1e-13;
+
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
             ra: Vector3::new(1.6894680985108945, 1.6898614520910629, 1.7526450904422723),
@@ -1267,14 +1254,15 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let prelim_orbit = gauss.prelim_orbit().unwrap();
+        let binding = gauss.prelim_orbit().unwrap();
+        let prelim_orbit = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
         // The values are obtained from the Orbfit output for the same observations
         // The values are very close to the ones obtained from the Rust implementation
         // The floating point differences is very close to one ulp
         // (unit in the last place) of the floating point representation
-        let expected_orbit = KeplerianElements {
+        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch: 57_049.229_045_244_22,
             semi_major_axis: 1.8014943988486352,
             eccentricity: 0.283_514_142_249_080_7,
@@ -1282,10 +1270,10 @@ pub(crate) mod gauss_test {
             ascending_node_longitude: 8.118_562_444_269_591E-3,
             periapsis_argument: 1.244_795_311_814_302,
             mean_anomaly: 0.44065425435816186,
-        };
+        });
 
         // Compare the prelim_orbit with the expected orbit
-        assert_orbit_close(&prelim_orbit, &expected_orbit, 1e-14);
+        assert!(approx_equal(prelim_orbit, &expected_orbit, tol));
 
         let a = GaussObs {
             idx_obs: [[23, 24, 33]].into(),
@@ -1300,9 +1288,10 @@ pub(crate) mod gauss_test {
             .into(),
         };
 
-        let prelim_orbit_a = a.prelim_orbit().unwrap();
+        let binding = a.prelim_orbit().unwrap();
+        let prelim_orbit_a = binding.get_orbit();
 
-        let expected_orbit = KeplerianElements {
+        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch: 57049.22904525282,
             semi_major_axis: 1.801490008178814,
             eccentricity: 0.28350961635625993,
@@ -1310,10 +1299,10 @@ pub(crate) mod gauss_test {
             ascending_node_longitude: 0.008105552171682476,
             periapsis_argument: 1.244832121745955,
             mean_anomaly: 0.4406444535028061,
-        };
+        });
 
         // Compare the prelim_orbit_a with the expected orbit
-        assert_orbit_close(&prelim_orbit_a, &expected_orbit, 1e-13);
+        assert!(approx_equal(prelim_orbit_a, &expected_orbit, tol));
 
         let gauss = GaussObs {
             idx_obs: Vector3::new(0, 1, 2),
@@ -1345,11 +1334,12 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let prelim_orbit_b = gauss.prelim_orbit().unwrap();
+        let binding = gauss.prelim_orbit().unwrap();
+        let prelim_orbit_b = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
         // The values are obtained from the Orbfit output for the same observations
-        let expected_orbfit = KeplerianElements {
+        let expected_orbfit = OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch: 57_049.229_045_608_86,
             semi_major_axis: 1.8013098187420686,
             eccentricity: 0.28347096712267805,
@@ -1357,11 +1347,11 @@ pub(crate) mod gauss_test {
             ascending_node_longitude: 8.194_805_420_465_082E-3,
             periapsis_argument: 1.2446747244785052,
             mean_anomaly: 0.44073731381184733,
-        };
+        });
 
         // Compare the prelim_orbit_b with the expected orbit
-        // The epsilon value is set to 1e-10 for a very close match between the OrbFit and the Rust implementation
-        assert_orbit_close(&prelim_orbit_b, &expected_orbfit, 1e-13);
+        // The epsilon value is set to 1e-13 for a very close match between the OrbFit and the Rust implementation
+        assert!(approx_equal(prelim_orbit_b, &expected_orbfit, tol));
     }
 
     #[test]

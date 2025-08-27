@@ -251,6 +251,10 @@ pub enum OutfitError {
     /// Invalid or inconsistent orbital elements/state vector.
     #[error("Invalid orbit: {0}")]
     InvalidOrbit(String),
+
+    /// Generic invalid input error with a descriptive message.
+    #[error("Invalid input: {0}")]
+    InvalidConversion(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -289,6 +293,7 @@ impl PartialEq for OutfitError {
             (InvalidRefSystem(a), InvalidRefSystem(b)) => a == b,
             (VelocityCorrectionError(a), VelocityCorrectionError(b)) => a == b,
             (InvalidOrbit(a), InvalidOrbit(b)) => a == b,
+            (InvalidConversion(a), InvalidConversion(b)) => a == b,
 
             // Variantes unitaires
             (SingularDirectionMatrix, SingularDirectionMatrix) => true,

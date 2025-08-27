@@ -1,6 +1,6 @@
 //! # Keplerian orbital elements
 //!
-//! This module defines the [`crate::keplerian_element::KeplerianElements`] struct
+//! This module defines the [`crate::orbit_type::keplerian_element::KeplerianElements`] struct
 //! and its associated conversion routines, providing the **classical orbital element
 //! representation** widely used in celestial mechanics.
 //!
@@ -20,9 +20,9 @@
 //!
 //! ## Provided functionality
 //!
-//! - **Conversion** between [`KeplerianElements`](crate::keplerian_element::KeplerianElements) and
-//!   [`crate::equinoctial_element::EquinoctialElements`].
-//!   * [`KeplerianElements::from_equinoctial_internal`](crate::keplerian_element::KeplerianElements::from_equinoctial_internal) – inverse mapping from equinoctial form.
+//! - **Conversion** between [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) and
+//!   [`crate::orbit_type::equinoctial_element::EquinoctialElements`].
+//!   * [`KeplerianElements::from_equinoctial_internal`](crate::orbit_type::keplerian_element::KeplerianElements::from_equinoctial_internal) – inverse mapping from equinoctial form.
 //!   * [`From<KeplerianElements>`] and [`From<&KeplerianElements>`] – forward mapping.
 //!
 //! - **Normalization** of angular parameters using [`crate::kepler::principal_angle`],
@@ -44,13 +44,13 @@
 //! - **Equatorial orbits (`i → 0`)**: ascending node Ω becomes undefined.  
 //!   → conventionally set to `0.0` during conversion.
 //!
-//! For robust numerical work, the [`EquinoctialElements`](crate::equinoctial_element::EquinoctialElements) representation is recommended.
+//! For robust numerical work, the [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) representation is recommended.
 //!
 //! ## Example
 //!
-//! ```rust, ignore
-//! use outfit::keplerian_element::KeplerianElements;
-//! use outfit::equinoctial_element::EquinoctialElements;
+//! ```rust, no_run
+//! use outfit::orbit_type::keplerian_element::KeplerianElements;
+//! use outfit::orbit_type::equinoctial_element::EquinoctialElements;
 //!
 //! // Define Keplerian elements
 //! let kep = KeplerianElements {
@@ -80,10 +80,12 @@
 //!
 //! ## See also
 //!
-//! - [`EquinoctialElements`](crate::equinoctial_element::EquinoctialElements) – regularized, non-singular form.
+//! - [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) – regularized, non-singular form.
 //! - [`principal_angle`](crate::kepler::principal_angle) – helper to normalize angular elements.
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
-use crate::{equinoctial_element::EquinoctialElements, kepler::principal_angle};
+
+use crate::{kepler::principal_angle, orbit_type::equinoctial_element::EquinoctialElements};
+use std::fmt;
 
 /// Keplerian orbital elements (osculating, two-body).
 ///
@@ -246,64 +248,57 @@ impl From<&KeplerianElements> for EquinoctialElements {
     }
 }
 
+/// Keplerian orbital elements (osculating, two-body).
+impl fmt::Display for KeplerianElements {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let rad_to_deg = 180.0 / std::f64::consts::PI;
+        writeln!(
+            f,
+            "Keplerian Elements @ epoch (MJD): {:.6}",
+            self.reference_epoch
+        )?;
+        writeln!(f, "-------------------------------------------")?;
+        writeln!(
+            f,
+            "  a   (semi-major axis)       = {:.6} AU",
+            self.semi_major_axis
+        )?;
+        writeln!(
+            f,
+            "  e   (eccentricity)          = {:.6}",
+            self.eccentricity
+        )?;
+        writeln!(
+            f,
+            "  i   (inclination)           = {:.6} rad ({:.6}°)",
+            self.inclination,
+            self.inclination * rad_to_deg
+        )?;
+        writeln!(
+            f,
+            "  Ω   (longitude of node)     = {:.6} rad ({:.6}°)",
+            self.ascending_node_longitude,
+            self.ascending_node_longitude * rad_to_deg
+        )?;
+        writeln!(
+            f,
+            "  ω   (argument of periapsis) = {:.6} rad ({:.6}°)",
+            self.periapsis_argument,
+            self.periapsis_argument * rad_to_deg
+        )?;
+        writeln!(
+            f,
+            "  M   (mean anomaly)          = {:.6} rad ({:.6}°)",
+            self.mean_anomaly,
+            self.mean_anomaly * rad_to_deg
+        )
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_keplerian_element {
     use super::*;
-    use crate::equinoctial_element::EquinoctialElements;
-    use approx::assert_relative_eq;
-
-    /// Assert that two Keplerian orbits are element-wise close within `epsilon`.
-    ///
-    /// Arguments
-    /// ---------
-    /// * `actual` – Computed Keplerian elements.
-    /// * `expected` – Reference Keplerian elements.
-    /// * `epsilon` – Absolute tolerance used for all scalar comparisons.
-    ///
-    /// Return
-    /// ------
-    /// * This function panics on mismatch; it returns `()` on success.
-    ///
-    /// See also
-    /// --------
-    /// * [`assert_relative_eq`] – Macro used internally for comparisons.
-    pub(crate) fn assert_orbit_close(
-        actual: &KeplerianElements,
-        expected: &KeplerianElements,
-        epsilon: f64,
-    ) {
-        assert_relative_eq!(
-            actual.reference_epoch,
-            expected.reference_epoch,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.semi_major_axis,
-            expected.semi_major_axis,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.eccentricity,
-            expected.eccentricity,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(actual.inclination, expected.inclination, epsilon = epsilon);
-        assert_relative_eq!(
-            actual.ascending_node_longitude,
-            expected.ascending_node_longitude,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.periapsis_argument,
-            expected.periapsis_argument,
-            epsilon = epsilon
-        );
-        assert_relative_eq!(
-            actual.mean_anomaly,
-            expected.mean_anomaly,
-            epsilon = epsilon
-        );
-    }
+    use crate::orbit_type::equinoctial_element::EquinoctialElements;
 
     #[test]
     fn test_keplerian_conversion() {
