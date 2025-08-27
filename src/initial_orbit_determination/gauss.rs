@@ -721,7 +721,7 @@ impl GaussObs {
     ///
     /// # See also
     /// * [`rotpn`] – computes the rotation matrix between celestial reference frames.
-    /// * [`ccek1`] – converts position and velocity vectors to orbital elements.
+    /// * [`OrbitalElements::from_orbital_state`] – Computes classical orbital elements from a Cartesian state vector.
     /// * [`KeplerianElements`] – definition of the orbital elements struct.
     fn compute_orbit_from_state(
         &self,
