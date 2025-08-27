@@ -1,6 +1,11 @@
-use crate::orbit_type::{
-    cometary_element::CometaryElements, equinoctial_element::EquinoctialElements,
-    keplerian_element::KeplerianElements,
+use nalgebra::Vector3;
+
+use crate::{
+    orb_elem::ccek1,
+    orbit_type::{
+        cometary_element::CometaryElements, equinoctial_element::EquinoctialElements,
+        keplerian_element::KeplerianElements,
+    },
 };
 
 /// Equinoctial orbital elements and related conversions.
@@ -39,6 +44,47 @@ pub enum OrbitalElements {
 }
 
 impl OrbitalElements {
+    /// Build orbital elements from a heliocentric Cartesian state vector.
+    ///
+    /// This constructor converts a position–velocity pair `[r, v]` in the J2000
+    /// equatorial frame into the appropriate orbital element representation.
+    ///
+    /// Depending on the reciprocal semi-major axis `1/a`, the method selects the
+    /// correct formulation:
+    ///
+    /// * **Elliptical orbits** (`1/a > 0`): returns [`OrbitalElements::Keplerian`]
+    ///   containing a [`KeplerianElements`] struct.  
+    /// * **Parabolic or hyperbolic orbits** (`1/a ≤ 0`): returns
+    ///   [`OrbitalElements::Cometary`] containing a [`CometaryElements`] struct.  
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `position`: Position vector `[x, y, z]` in AU, heliocentric J2000.  
+    /// * `velocity`: Velocity vector `[vx, vy, vz]` in AU/day, heliocentric J2000.  
+    /// * `reference_epoch`: Epoch of the state vector in Julian Date (TDB).  
+    ///
+    /// Return
+    /// ----------
+    /// * An [`OrbitalElements`] enum instance, wrapping either:
+    ///   - [`KeplerianElements`] (elliptical), or  
+    ///   - [`CometaryElements`] (parabolic/hyperbolic).  
+    ///
+    /// Note
+    /// ----------
+    /// * No planetary perturbations or relativistic corrections are applied.  
+    ///
+    /// See also
+    /// ------------
+    /// * [`KeplerianElements`] – Orbital elements for elliptical orbits.  
+    /// * [`CometaryElements`] – Orbital elements for parabolic and hyperbolic solutions.
+    pub fn from_orbital_state(
+        position: &Vector3<f64>,
+        velocity: &Vector3<f64>,
+        reference_epoch: f64,
+    ) -> Self {
+        ccek1(position, velocity, reference_epoch)
+    }
+
     /// Convert to Keplerian elements, if possible.
     ///
     /// This conversion may fail if the current representation is not suitable
