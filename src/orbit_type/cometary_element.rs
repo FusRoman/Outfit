@@ -46,43 +46,40 @@ pub struct CometaryElements {
 }
 
 impl CometaryElements {
-    /// Compute the **hyperbolic mean anomaly** `M` from cometary elements (`e > 1`).
+    /// Compute the hyperbolic mean anomaly `M` from `(e, ν)`.
     ///
-    /// This uses the standard relation:
-    /// 1) Convert true anomaly `ν` to hyperbolic anomaly `H` via  
-    ///    `tanh(H/2) = sqrt((e-1)/(e+1)) * tan(ν/2)`  
-    /// 2) Then `M = e*sinh(H) - H`.
+    /// This implementation clamps the argument of `atanh` strictly inside `(-1, 1)`
+    /// to avoid infinities and `NaN` when `tanh(H/2) → ±1` due to round-off.
     ///
     /// Arguments
     /// -----------------
-    /// * `e`  – Eccentricity (> 1).  
+    /// * `e`  – Eccentricity (> 1 expected).
     /// * `nu` – True anomaly `ν` (radians).
     ///
     /// Return
     /// ----------
-    /// * Hyperbolic mean anomaly `M` (radians).
-    ///
-    /// Panics
-    /// ----------
-    /// * If `e ≤ 1` (domain violation).
+    /// * `Ok(M)` – Hyperbolic mean anomaly (radians).  
+    /// * `Err(OutfitError::InvalidOrbit)` – if `e ≤ 1`.
     ///
     /// See also
     /// ------------
-    /// * [`CometaryElements`] – Perihelion-based orbital elements.  
-    /// * [`KeplerianElements`] – Classical elements used as an intermediate in conversions.
-    ///
-    /// Reference
-    /// ---------
-    /// * Danby, *Fundamentals of Celestial Mechanics*, hyperbolic motion relations.
-    pub fn hyperbolic_mean_anomaly(e: f64, nu: f64) -> f64 {
-        assert!(e > 1.0, "eccentricity must be > 1 for hyperbolic orbits");
+    /// * [`CometaryElements`] – Perihelion-based orbital elements.
+    /// * Danby, *Fundamentals of Celestial Mechanics*, hyperbolic motion.
+    pub fn hyperbolic_mean_anomaly(e: f64, nu: f64) -> Result<f64, OutfitError> {
+        if e <= 1.0 {
+            return Err(OutfitError::InvalidOrbit(
+                "eccentricity must be > 1 for hyperbolic orbits".into(),
+            ));
+        }
 
-        // Compute hyperbolic anomaly H from true anomaly ν
-        let tanh_half_h = ((e - 1.0) / (e + 1.0)).sqrt() * (nu / 2.0).tan();
-        let h = 2.0 * tanh_half_h.atanh();
+        const EPS: f64 = 1e-15;
 
-        // Hyperbolic mean anomaly M = e sinh H - H
-        e * h.sinh() - h
+        let s = ((e - 1.0) / (e + 1.0)).sqrt();
+        let t = (0.5 * nu).tan();
+        let x = (s * t).clamp(-1.0 + EPS, 1.0 - EPS);
+
+        let h = 2.0 * x.atanh();
+        Ok(e * h.sinh() - h)
     }
 
     /// Convert **Cometary → Keplerian** (hyperbolic/parabolic).
@@ -120,7 +117,7 @@ impl CometaryElements {
         let p = self.perihelion_distance * (1.0 + e);
         let a = -p / (e * e - 1.0);
 
-        let m = CometaryElements::hyperbolic_mean_anomaly(e, self.true_anomaly);
+        let m = CometaryElements::hyperbolic_mean_anomaly(e, self.true_anomaly)?;
 
         // We keep (i, Ω, ω) and set a placeholder "mean anomaly" interpreted
         // by downstream code as hyperbolic M when used with Kepler dynamics.
@@ -267,5 +264,260 @@ impl fmt::Display for CometaryElements {
             self.true_anomaly,
             self.true_anomaly * rad_to_deg
         )
+    }
+}
+
+#[cfg(test)]
+mod cometary_element_tests {
+    use super::*;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
+    use std::f64::consts::PI;
+
+    /// Assert that two angles are equal modulo 2π, within an absolute epsilon.
+    fn assert_angle_eq(a: f64, b: f64, eps: f64) {
+        let two_pi = 2.0 * PI;
+        let d = (a - b + PI).rem_euclid(two_pi) - PI;
+        assert_abs_diff_eq!(d, 0.0, epsilon = eps);
+    }
+
+    // ---------- hyperbolic_mean_anomaly ----------
+
+    #[test]
+    fn hma_is_zero_when_nu_is_zero() {
+        // For ν=0, tanh(H/2)=0 -> H=0 -> M=0.
+        let e = 1.2;
+        let nu = 0.0;
+        let m = CometaryElements::hyperbolic_mean_anomaly(e, nu).unwrap();
+        assert_abs_diff_eq!(m, 0.0, epsilon = 1e-15);
+    }
+
+    #[test]
+    fn hma_increases_with_positive_nu() {
+        // For small positive ν, M should be positive.
+        let e = 1.3;
+        let nu = 10.0_f64.to_degrees();
+        let m = CometaryElements::hyperbolic_mean_anomaly(e, nu).unwrap();
+        assert!(m > 0.0);
+    }
+
+    #[test]
+    fn hma_returns_err_for_e_equal_1() {
+        let res = CometaryElements::hyperbolic_mean_anomaly(1.0, 0.0);
+        assert!(res.is_err(), "expected Err for e = 1");
+    }
+
+    #[test]
+    fn hma_returns_err_for_e_less_than_1() {
+        let res = CometaryElements::hyperbolic_mean_anomaly(0.9, 0.0);
+        assert!(res.is_err(), "expected Err for e < 1");
+    }
+
+    // ---------- Cometary -> Keplerian conversion (core) ----------
+
+    #[test]
+    fn cometary_to_keplerian_hyperbolic_yields_negative_a_and_preserves_angles() {
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.8, // q
+            eccentricity: 1.4,        // e>1 hyperbolic
+            inclination: 12.0_f64.to_degrees(),
+            ascending_node_longitude: 33.0_f64.to_degrees(),
+            periapsis_argument: 45.0_f64.to_degrees(),
+            true_anomaly: 5.0_f64.to_degrees(),
+        };
+
+        let ke = ce
+            .cometary_to_keplerian()
+            .expect("hyperbolic cometary -> keplerian should succeed");
+
+        // a must be negative for hyperbola, e preserved
+        assert!(
+            ke.semi_major_axis < 0.0,
+            "a should be negative for hyperbola"
+        );
+        assert_relative_eq!(ke.eccentricity, ce.eccentricity, max_relative = 1e-14);
+
+        // Orientation angles preserved
+        assert_angle_eq(ke.inclination, ce.inclination, 1e-14);
+        assert_angle_eq(
+            ke.ascending_node_longitude,
+            ce.ascending_node_longitude,
+            1e-14,
+        );
+        assert_angle_eq(ke.periapsis_argument, ce.periapsis_argument, 1e-14);
+
+        // mean_anomaly equals hyperbolic mean anomaly at ν
+        let m_expected =
+            CometaryElements::hyperbolic_mean_anomaly(ce.eccentricity, ce.true_anomaly).unwrap();
+        assert_abs_diff_eq!(ke.mean_anomaly, m_expected, epsilon = 1e-14);
+
+        // Sanity check for 'a' formula used: a = -q(1+e)/(e^2-1)
+        let a_expected = -ce.perihelion_distance * (1.0 + ce.eccentricity)
+            / (ce.eccentricity * ce.eccentricity - 1.0);
+        assert_relative_eq!(ke.semi_major_axis, a_expected, max_relative = 1e-14);
+    }
+
+    #[test]
+    fn cometary_to_keplerian_parabolic_fails() {
+        // Exactly parabolic (e=1) -> error
+        let ce_exact = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 1.0,
+            eccentricity: 1.0,
+            inclination: 0.0,
+            ascending_node_longitude: 0.0,
+            periapsis_argument: 0.0,
+            true_anomaly: 0.0,
+        };
+        assert!(
+            ce_exact.cometary_to_keplerian().is_err(),
+            "parabolic conversion must error"
+        );
+
+        // Within the tolerance band |e-1| < 1e-12 -> error
+        let ce_tiny = CometaryElements {
+            eccentricity: 1.0 + 5e-13, // still < 1e-12 away from 1
+            ..ce_exact
+        };
+        assert!(
+            ce_tiny.cometary_to_keplerian().is_err(),
+            "borderline parabolic (|e-1|<1e-12) must error"
+        );
+
+        // Just outside tolerance -> should succeed as hyperbolic
+        let ce_ok = CometaryElements {
+            eccentricity: 1.0 + 5e-12, // > 1e-12 away
+            ..ce_exact
+        };
+        assert!(
+            ce_ok.cometary_to_keplerian().is_ok(),
+            "slightly hyperbolic should convert"
+        );
+    }
+
+    // ---------- TryFrom implementations ----------
+
+    #[test]
+    fn tryfrom_owned_to_keplerian_matches_method() {
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.7,
+            eccentricity: 1.2,
+            inclination: 3.0_f64.to_degrees(),
+            ascending_node_longitude: 10.0_f64.to_degrees(),
+            periapsis_argument: 20.0_f64.to_degrees(),
+            true_anomaly: 15.0_f64.to_degrees(),
+        };
+        let via_method = ce.cometary_to_keplerian().unwrap();
+        let via_tryfrom = KeplerianElements::try_from(ce).unwrap();
+        assert_relative_eq!(
+            via_method.semi_major_axis,
+            via_tryfrom.semi_major_axis,
+            max_relative = 1e-15
+        );
+        assert_relative_eq!(
+            via_method.eccentricity,
+            via_tryfrom.eccentricity,
+            max_relative = 1e-15
+        );
+        assert_angle_eq(via_method.inclination, via_tryfrom.inclination, 1e-14);
+        assert_angle_eq(
+            via_method.ascending_node_longitude,
+            via_tryfrom.ascending_node_longitude,
+            1e-14,
+        );
+        assert_angle_eq(
+            via_method.periapsis_argument,
+            via_tryfrom.periapsis_argument,
+            1e-14,
+        );
+        assert_abs_diff_eq!(
+            via_method.mean_anomaly,
+            via_tryfrom.mean_anomaly,
+            epsilon = 1e-15
+        );
+    }
+
+    #[test]
+    fn tryfrom_borrowed_to_keplerian_matches_method() {
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.9,
+            eccentricity: 1.05,
+            inclination: 1.0_f64.to_degrees(),
+            ascending_node_longitude: 2.0_f64.to_degrees(),
+            periapsis_argument: 3.0_f64.to_degrees(),
+            true_anomaly: 4.0_f64.to_degrees(),
+        };
+        let via_method = ce.cometary_to_keplerian().unwrap();
+        let via_tryfrom = KeplerianElements::try_from(&ce).unwrap();
+        assert_relative_eq!(
+            via_method.semi_major_axis,
+            via_tryfrom.semi_major_axis,
+            max_relative = 1e-15
+        );
+        assert_relative_eq!(
+            via_method.eccentricity,
+            via_tryfrom.eccentricity,
+            max_relative = 1e-15
+        );
+        assert_angle_eq(via_method.inclination, via_tryfrom.inclination, 1e-14);
+        assert_abs_diff_eq!(
+            via_method.mean_anomaly,
+            via_tryfrom.mean_anomaly,
+            epsilon = 1e-15
+        );
+    }
+
+    #[test]
+    fn tryfrom_to_equinoctial_via_keplerian_has_negative_a() {
+        // When e>1, Equinoctial a should remain negative (inherited from Keplerian).
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.6,
+            eccentricity: 1.3,
+            inclination: 8.0_f64.to_degrees(),
+            ascending_node_longitude: 12.0_f64.to_degrees(),
+            periapsis_argument: 30.0_f64.to_degrees(),
+            true_anomaly: 25.0_f64.to_degrees(),
+        };
+        let eq = EquinoctialElements::try_from(&ce)
+            .expect("Cometary -> Equinoctial via Keplerian should succeed for e>1");
+        assert!(
+            eq.semi_major_axis < 0.0,
+            "equinoctial a should be negative for hyperbolic orbits"
+        );
+    }
+
+    // ---------- Display formatting ----------
+
+    #[test]
+    fn display_contains_expected_lines_and_degrees() {
+        let ce = CometaryElements {
+            reference_epoch: 2461234.56789,
+            perihelion_distance: 0.5,
+            eccentricity: 1.8,
+            inclination: 10.0_f64.to_degrees(),
+            ascending_node_longitude: 20.0_f64.to_degrees(),
+            periapsis_argument: 30.0_f64.to_degrees(),
+            true_anomaly: 40.0_f64.to_degrees(),
+        };
+
+        let s = format!("{ce}");
+        assert!(
+            s.contains("Cometary Elements @ epoch (MJD)"),
+            "header missing"
+        );
+        assert!(s.contains("q   (perihelion distance)"), "q line missing");
+        assert!(s.contains("e   (eccentricity)"), "e line missing");
+        assert!(
+            s.contains(" rad (") && s.contains("°)"),
+            "expected rad/deg formatting with degree symbol"
+        );
+        // Spot-check one angle formatting with degrees
+        assert!(
+            s.contains("inclination") && s.contains("rad (") && s.contains("°)"),
+            "inclination rad/deg formatting missing"
+        );
     }
 }
