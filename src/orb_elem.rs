@@ -60,127 +60,155 @@ pub(crate) fn ccek1(
     velocity: &Vector3<f64>,
     reference_epoch: f64,
 ) -> OrbitalElements {
-    // === 1. Compute angular momentum vector h = r × v
-    let elle = position.cross(velocity); // h = r × v
+    // ---- Helpers & constants ------------------------------------------------
+    #[inline]
+    fn wrap_0_2pi(x: f64) -> f64 {
+        x.rem_euclid(DPI)
+    }
 
-    let el2 = elle.norm_squared(); // ||h||²
-    let elmod = el2.sqrt(); // ||h||
-    let elv = elle / elmod; // Normalized angular momentum vector
+    #[inline]
+    fn squared_norm(v: &Vector3<f64>) -> f64 {
+        v.dot(v)
+    }
 
-    // === 2. Compute inclination i and longitude of ascending node Ω
-    let sini = elv.xy().norm();
-    let ainc = sini.atan2(elv.z); // inclination
+    const EPS_EQ: f64 = 1e-15; // threshold for equatorial orbits (sin(i) ≈ 0)
+    const EPS_PARAB: f64 = 1e-12; // threshold for nearly parabolic orbits (1/a ≈ 0)
+    const EPS_E: f64 = 5e-15; // threshold for eccentricity ≈ 1
 
-    // Normalize inclination to [0, 2π]
-    let ainc = ainc.rem_euclid(DPI);
+    let mu = GAUSS_GRAV_SQUARED;
 
-    // Ascending node longitude
-    let anod = if sini == 0.0 {
-        // Equatorial orbit: node undefined
+    // ---- 1) Angular momentum and orbital plane orientation ------------------
+    // Specific angular momentum vector: h = r × v
+    let angular_momentum = position.cross(velocity);
+    let angular_momentum_squared = squared_norm(&angular_momentum);
+    let angular_momentum_norm = angular_momentum_squared.sqrt();
+    let angular_momentum_unit = angular_momentum / angular_momentum_norm;
+
+    // Inclination i = atan2(||projection in XY plane||, z-component)
+    let sin_inclination = angular_momentum_unit.xy().norm();
+    let mut inclination = wrap_0_2pi(sin_inclination.atan2(angular_momentum_unit.z));
+
+    // Longitude of ascending node Ω
+    let ascending_node_longitude = if sin_inclination <= EPS_EQ {
+        // Equatorial orbit: conventionally set i = 0 and Ω = 0
+        inclination = 0.0;
         0.0
     } else {
-        elv.x.atan2(-elv.y).rem_euclid(DPI)
+        wrap_0_2pi(angular_momentum_unit.x.atan2(-angular_momentum_unit.y))
     };
 
-    // === 3. Transform position and velocity to the orbital frame
-    let r1 = rotmt(ainc, 0); // Rotation around X-axis (inclination)
-    let r2 = rotmt(anod, 2); // Rotation around Z-axis (node)
+    // ---- 2) Rotate to orbital frame (orbital plane ≈ XY plane) --------------
+    let rotation_inclination = rotmt(inclination, 0); // rotation around X-axis
+    let rotation_node = rotmt(ascending_node_longitude, 2); // rotation around Z-axis
+    let orbital_rotation = rotation_inclination.transpose() * rotation_node.transpose();
 
-    // Rotation matrix to orbital frame
-    let rot = r1.transpose() * r2.transpose(); // rot = r1 * r2
+    let position_orbital = orbital_rotation * position;
+    let velocity_orbital = orbital_rotation * velocity;
 
-    let orb_pos = rot * position; // Position in the orbital frame
-    let orb_vel = rot * velocity; // Velocity in the orbital frame
+    // In-plane scalars (avoid z-component to reduce numerical noise)
+    let radial_velocity_dot = position_orbital.xy().dot(&velocity_orbital.xy()); // r · v
+    let radial_distance = position_orbital.xy().norm(); // |r|
+    let velocity_squared = velocity_orbital.xy().norm_squared(); // |v|²
 
-    // === 4. Scalar products needed for orbital element derivation
-    // Note: We restrict to the XY components in the orbital frame because
-    // the motion is confined to the orbital plane (Z ≈ 0). Using .xy()
-    // avoids injecting numerical noise from the near-zero Z component.
-    let rv = orb_pos.xy().dot(&orb_vel.xy()); // r ⋅ v
-    let rs = orb_pos.xy().norm(); // |r|
-    let v2 = orb_vel.xy().norm_squared(); // |v|²
+    // Reciprocal semi-major axis: 1/a = 2/|r| − |v|²/μ
+    let reciprocal_semi_major_axis = 2.0 / radial_distance - velocity_squared / mu;
 
-    // === 5. Reciprocal of semi-major axis (1/a)
-    let reca = 2.0 / rs - v2 / GAUSS_GRAV_SQUARED;
+    // Closure: compute periapsis argument ω from true anomaly ν
+    let periapsis_argument_from_true_anomaly = |true_anomaly: f64| -> f64 {
+        wrap_0_2pi(position_orbital.y.atan2(position_orbital.x) - true_anomaly)
+    };
 
-    // === CASE 1: Elliptical orbit (reca > 0)
-    if reca > 0.0 {
-        let sma = 1.0 / reca;
-        let enne = (GAUSS_GRAV_SQUARED / sma.powi(3)).sqrt(); // mean motion
+    // Closure: return cometary elements in the parabolic case
+    let parabolic_solution = || -> OrbitalElements {
+        let eccentricity = 1.0;
+        let semi_latus_rectum = angular_momentum_squared / mu;
+        let perihelion_distance = semi_latus_rectum / 2.0;
+        let cos_true_anomaly = semi_latus_rectum / radial_distance - 1.0;
+        let sin_true_anomaly =
+            radial_velocity_dot * semi_latus_rectum / (radial_distance * angular_momentum_norm);
+        let true_anomaly = sin_true_anomaly.atan2(cos_true_anomaly);
+        let periapsis_argument = periapsis_argument_from_true_anomaly(true_anomaly);
 
-        // Eccentricity from e⋅sinE and e⋅cosE
-        let esine = rv / (enne * sma * sma);
-        let ecose = v2 * rs / GAUSS_GRAV_SQUARED - 1.0;
-        let ecc = (esine.powi(2) + ecose.powi(2)).sqrt();
+        OrbitalElements::Cometary(CometaryElements {
+            reference_epoch,
+            perihelion_distance,
+            eccentricity,
+            inclination,
+            ascending_node_longitude,
+            periapsis_argument,
+            true_anomaly,
+        })
+    };
 
-        let anec = esine.atan2(ecose); // eccentric anomaly E
-        let emme = (anec - ecc * anec.sin()).rem_euclid(DPI); // mean anomaly M
+    // ---- 3) Orbit classification --------------------------------------------
+    if reciprocal_semi_major_axis > EPS_PARAB {
+        // -------- Elliptical orbit
+        let semi_major_axis = 1.0 / reciprocal_semi_major_axis;
+        let mean_motion = (mu / semi_major_axis.powi(3)).sqrt();
+
+        // Components e·sinE and e·cosE
+        let eccentricity_sin_ea =
+            radial_velocity_dot / (mean_motion * semi_major_axis * semi_major_axis);
+        let eccentricity_cos_ea = velocity_squared * radial_distance / mu - 1.0;
+        let eccentricity = (eccentricity_sin_ea.powi(2) + eccentricity_cos_ea.powi(2)).sqrt();
+
+        // Near-parabolic degeneracy
+        if (eccentricity - 1.0).abs() < EPS_E {
+            return parabolic_solution();
+        }
+
+        // Eccentric anomaly and mean anomaly
+        let eccentric_anomaly = eccentricity_sin_ea.atan2(eccentricity_cos_ea);
+        let mean_anomaly = wrap_0_2pi(eccentric_anomaly - eccentricity * eccentric_anomaly.sin());
 
         // Argument of periapsis ω
-        let x1 = anec.cos() - ecc;
-        let rad = 1.0 - ecc * ecc;
-        let x2 = rad.sqrt() * anec.sin();
-        let xm = (x1 * x1 + x2 * x2).sqrt();
-        let x1 = x1 / xm;
-        let x2 = x2 / xm;
-        let sinper = x1 * orb_pos.y - x2 * orb_pos.x;
-        let cosper = x1 * orb_pos.x + x2 * orb_pos.y;
-        let argper = sinper.atan2(cosper);
+        let x1 = eccentric_anomaly.cos() - eccentricity;
+        let rad = (1.0 - eccentricity * eccentricity).sqrt();
+        let x2 = rad * eccentric_anomaly.sin();
+        let norm = (x1 * x1 + x2 * x2).sqrt();
+        let (x1n, x2n) = (x1 / norm, x2 / norm);
+
+        let sin_periapsis = x1n * position_orbital.y - x2n * position_orbital.x;
+        let cos_periapsis = x1n * position_orbital.x + x2n * position_orbital.y;
+        let periapsis_argument = wrap_0_2pi(sin_periapsis.atan2(cos_periapsis));
 
         OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch,
-            semi_major_axis: sma,
-            eccentricity: ecc,
-            inclination: ainc,
-            ascending_node_longitude: anod,
-            periapsis_argument: argper,
-            mean_anomaly: emme,
+            semi_major_axis,
+            eccentricity,
+            inclination,
+            ascending_node_longitude,
+            periapsis_argument,
+            mean_anomaly,
         })
-    }
-    // === CASE 2: Parabolic orbit (reca == 0)
-    else if reca == 0.0 {
-        let ecc = 1.0;
-        let p = el2 / GAUSS_GRAV_SQUARED; // semi-latus rectum
-        let q = p / 2.0; // perihelion distance
+    } else if reciprocal_semi_major_axis.abs() <= EPS_PARAB {
+        // -------- Parabolic orbit
+        parabolic_solution()
+    } else {
+        // -------- Hyperbolic orbit
+        let semi_latus_rectum = angular_momentum_squared / mu;
+        let ecc_cos_true_anomaly = semi_latus_rectum / radial_distance - 1.0;
+        let ecc_sin_true_anomaly =
+            radial_velocity_dot * semi_latus_rectum / (angular_momentum_norm * radial_distance);
+        let true_anomaly = ecc_sin_true_anomaly.atan2(ecc_cos_true_anomaly);
+        let eccentricity = (ecc_cos_true_anomaly.powi(2) + ecc_sin_true_anomaly.powi(2)).sqrt();
 
-        // True anomaly ν
-        let cosf = p / rs - 1.0;
-        let sinf = rv * p / (rs * elmod);
-        let effe = sinf.atan2(cosf); // ν
+        // Near-parabolic degeneracy
+        if (eccentricity - 1.0).abs() < EPS_E {
+            return parabolic_solution();
+        }
 
-        // Argument of periapsis ω
-        let argper = orb_pos.y.atan2(orb_pos.x) - effe;
+        let perihelion_distance = semi_latus_rectum / (1.0 + eccentricity);
+        let periapsis_argument = periapsis_argument_from_true_anomaly(true_anomaly);
 
         OrbitalElements::Cometary(CometaryElements {
             reference_epoch,
-            perihelion_distance: q,
-            eccentricity: ecc,
-            inclination: ainc,
-            ascending_node_longitude: anod,
-            periapsis_argument: argper,
-            true_anomaly: effe,
-        })
-    }
-    // === CASE 3: Hyperbolic orbit (reca < 0)
-    else {
-        let p = el2 / GAUSS_GRAV_SQUARED;
-        let ecosf = p / rs - 1.0;
-        let esinf = rv * p / (elmod * rs);
-        let effe = esinf.atan2(ecosf); // true anomaly ν
-        let ecc = (ecosf.powi(2) + esinf.powi(2)).sqrt();
-        let q = p / (1.0 + ecc); // perihelion distance
-
-        // Argument of periapsis ω
-        let argper = orb_pos.y.atan2(orb_pos.x) - effe;
-
-        OrbitalElements::Cometary(CometaryElements {
-            reference_epoch,
-            perihelion_distance: q,
-            eccentricity: ecc,
-            inclination: ainc,
-            ascending_node_longitude: anod,
-            periapsis_argument: argper,
-            true_anomaly: effe,
+            perihelion_distance,
+            eccentricity,
+            inclination,
+            ascending_node_longitude,
+            periapsis_argument,
+            true_anomaly,
         })
     }
 }
