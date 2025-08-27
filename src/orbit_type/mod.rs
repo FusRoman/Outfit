@@ -1,3 +1,38 @@
+//! # Orbital element representations
+//!
+//! This module defines multiple **canonical orbital element sets** and the
+//! associated conversions between them:
+//!
+//! - [`keplerian_element`](crate::orbit_type::keplerian_element) — Classical Keplerian elements `(a, e, i, Ω, ω, M)`,
+//!   valid for elliptic and hyperbolic orbits.
+//! - [`equinoctial_element`](crate::orbit_type::equinoctial_element) — Equinoctial elements `(a, h, k, p, q, λ)`,
+//!   a **non-singular formulation** well suited for orbit determination near
+//!   zero eccentricity or inclination.
+//! - [`cometary_element`](crate::orbit_type::cometary_element) — Perihelion-based representation `(q, e, i, Ω, ω, ν)`,
+//!   convenient for parabolic and hyperbolic orbits.
+//!
+//! The [`OrbitalElements`](crate::orbit_type::OrbitalElements) enum acts as a **type-erased wrapper** that can hold
+//! any of these three representations, while providing uniform constructors and
+//! conversion methods.
+//!
+//! ## Typical workflow
+//!
+//! ```rust,no_run
+//! use nalgebra::Vector3;
+//! use outfit::orbit_type::OrbitalElements;
+//!
+//! // State vector (heliocentric J2000)
+//! let r = Vector3::new(1.0, 0.0, 0.0);
+//! let v = Vector3::new(0.0, 1.0, 0.0);
+//!
+//! // Build canonical orbital elements from state
+//! let elems = OrbitalElements::from_orbital_state(&r, &v, 2460000.5);
+//!
+//! // Convert to Keplerian form if possible
+//! if let Ok(kep) = elems.to_keplerian() {
+//!     println!("semi-major axis = {}", kep.semi_major_axis);
+//! }
+//! ```
 use nalgebra::Vector3;
 
 use crate::{
