@@ -17,7 +17,7 @@
 //!
 //! ## Typical workflow
 //!
-//! ```rust,no_run
+//! ```rust, no_run
 //! use nalgebra::Vector3;
 //! use outfit::orbit_type::OrbitalElements;
 //!
@@ -126,8 +126,8 @@ impl OrbitalElements {
     /// for Keplerian elements. In particular, `Cometary` elements with
     /// eccentricity e < 1 cannot be converted to Keplerian form.
     ///
-    /// # Errors
-    ///
+    /// Errors
+    /// ------
     /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
     pub fn to_keplerian(&self) -> Result<KeplerianElements, crate::outfit_errors::OutfitError> {
         match self {
@@ -143,8 +143,8 @@ impl OrbitalElements {
     /// for Equinoctial elements. In particular, `Cometary` elements with
     /// eccentricity e < 1 cannot be converted to Equinoctial form.
     ///
-    /// # Errors
-    ///
+    /// Errors
+    /// ------
     /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
     pub fn to_equinoctial(&self) -> Result<EquinoctialElements, crate::outfit_errors::OutfitError> {
         match self {
@@ -154,6 +154,7 @@ impl OrbitalElements {
         }
     }
 
+    /// Get a reference to the underlying [`KeplerianElements`] if this is `Keplerian`.
     pub fn as_keplerian(&self) -> Option<&KeplerianElements> {
         if let OrbitalElements::Keplerian(ref k) = self {
             Some(k)
@@ -162,6 +163,7 @@ impl OrbitalElements {
         }
     }
 
+    /// Get a reference to the underlying [`EquinoctialElements`] if this is `Equinoctial`.
     pub fn as_equinoctial(&self) -> Option<&EquinoctialElements> {
         if let OrbitalElements::Equinoctial(ref e) = self {
             Some(e)
@@ -170,6 +172,7 @@ impl OrbitalElements {
         }
     }
 
+    /// Get a reference to the underlying [`CometaryElements`] if this is `Cometary`.
     pub fn as_cometary(&self) -> Option<&CometaryElements> {
         if let OrbitalElements::Cometary(ref c) = self {
             Some(c)
