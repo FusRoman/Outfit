@@ -521,3 +521,222 @@ mod cometary_element_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod cometary_element_proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::f64::consts::PI;
+
+    // ---------- helpers ----------
+
+    /// Wrap angle difference to [-π, π].
+    fn wrap_to_pi(x: f64) -> f64 {
+        (x + PI).rem_euclid(2.0 * PI) - PI
+    }
+
+    // Domain constants for generation
+    const EPS_PARABOLA: f64 = 1e-12;
+    const NU_EPS: f64 = 1e-6; // to avoid tan(ν/2) singularities at ±π
+
+    // ---------- strategies ----------
+
+    // e in (1 + 1e-12, 5]
+    prop_compose! {
+        fn e_hyperbolic()(u in 0.0f64..1.0) -> f64 {
+            1.0 + EPS_PARABOLA + u * (5.0 - (1.0 + EPS_PARABOLA))
+        }
+    }
+
+    // e very close to 1 within the "parabolic tolerance band"
+    prop_compose! {
+        fn e_near_parabolic()(u in -0.5f64..0.5) -> f64 {
+            1.0 + u * EPS_PARABOLA // |e-1| < 5e-13 < 1e-12 -> erreur attendue
+        }
+    }
+
+    // q in (1e-6, 50] AU (strictly positive, up to 50 AU)
+    prop_compose! {
+        fn perihelion_q()(u in 0.0f64..1.0) -> f64 {
+            1e-6 + u * (50.0 - 1e-6)
+        }
+    }
+
+    prop_compose! {
+        fn true_anomaly()(u in 0.0f64..1.0) -> f64 {
+            // ν ∈ (-π + NU_EPS, π - NU_EPS)
+            -PI + NU_EPS + u * (2.0 * PI - 2.0 * NU_EPS)
+        }
+    }
+
+    // i ∈ [0, π], Ω, ω ∈ [0, 2π]
+    prop_compose! {
+        fn inc_omega_arg()(ui in 0.0f64..1.0, uo in 0.0f64..1.0, ua in 0.0f64..1.0) -> (f64, f64, f64) {
+            let i = ui * PI;
+            let big_omega = uo * 2.0 * PI;
+            let small_omega = ua * 2.0 * PI;
+            (i, big_omega, small_omega)
+        }
+    }
+
+    // ---------- properties ----------
+
+    proptest! {
+        /// For hyperbolic e>1 and safe ν, M_hyp(e,ν) is finite (no NaN/Inf).
+        #[test]
+        fn hma_no_nan_no_inf(e in e_hyperbolic(), nu in true_anomaly()) {
+            let m = CometaryElements::hyperbolic_mean_anomaly(e, nu)
+                .expect("e>1 must be Ok");
+            prop_assert!(m.is_finite());
+        }
+    }
+
+    proptest! {
+        /// Odd symmetry away from the atanh saturation band:
+        /// For e>1 and |x|<0.9 with x = sqrt((e-1)/(e+1)) * tan(ν/2),
+        /// we expect M(e, -ν) ≈ -M(e, ν).
+        #[test]
+        fn hma_is_odd_in_nu(e in e_hyperbolic(), nu in true_anomaly()) {
+            // Compute x = s * tan(ν/2) where s = sqrt((e-1)/(e+1)).
+            let s = ((e - 1.0) / (e + 1.0)).sqrt();
+            let t = (0.5 * nu).tan();
+            // If tan blows up, or x is too close to ±1, skip this input:
+            prop_assume!(t.is_finite());
+            let x = s * t;
+            // Keep well inside (-1,1) so the clamp in the implementation is inactive.
+            const X_MAX: f64 = 0.9;
+            prop_assume!(x.abs() < X_MAX);
+
+            let m_pos = CometaryElements::hyperbolic_mean_anomaly(e, nu).unwrap();
+            let m_neg = CometaryElements::hyperbolic_mean_anomaly(e, -nu).unwrap();
+
+            // Mixed tolerance: absolute for near-zero, relative for large |M|.
+            let err = (m_pos + m_neg).abs();
+            let tol = 1e-12_f64.max(1e-12 * m_pos.abs().max(m_neg.abs()));
+            prop_assert!(err <= tol, "oddness failed: |M(ν)+M(-ν)|={} > tol={}", err, tol);
+        }
+    }
+
+    proptest! {
+        /// Cometary -> Keplerian: a<0, a = -q(1+e)/(e^2-1), angles preserved, mean_anomaly = M_hyp.
+        #[test]
+        fn cometary_to_keplerian_invariants(
+            q in perihelion_q(),
+            e in e_hyperbolic(),
+            nu in true_anomaly(),
+            (i, big_omega, small_omega) in inc_omega_arg(),
+            epoch in 2_400_000.5f64..=2_500_000.5
+        ) {
+            let ce = CometaryElements {
+                reference_epoch: epoch,
+                perihelion_distance: q,
+                eccentricity: e,
+                inclination: i,
+                ascending_node_longitude: big_omega,
+                periapsis_argument: small_omega,
+                true_anomaly: nu,
+            };
+
+            let ke = ce.cometary_to_keplerian().expect("hyperbolic conversion must succeed");
+
+            // a negative + formula check
+            prop_assert!(ke.semi_major_axis < 0.0);
+            let a_expected = -q * (1.0 + e) / (e*e - 1.0);
+            prop_assert!((ke.semi_major_axis - a_expected).abs() <= 1e-12_f64.max(1e-12 * a_expected.abs()));
+
+            // e preserved
+            prop_assert!((ke.eccentricity - e).abs() <= 1e-14);
+
+            // angles preserved modulo 2π
+            prop_assert!(wrap_to_pi(ke.inclination - i).abs() < 1e-12);
+            prop_assert!(wrap_to_pi(ke.ascending_node_longitude - big_omega).abs() < 1e-12);
+            prop_assert!(wrap_to_pi(ke.periapsis_argument - small_omega).abs() < 1e-12);
+
+            // mean_anomaly equals hyperbolic mean anomaly at ν
+            let m_expected = CometaryElements::hyperbolic_mean_anomaly(e, nu).unwrap();
+            prop_assert!((ke.mean_anomaly - m_expected).abs() <= 1e-12_f64.max(1e-12 * m_expected.abs()));
+        }
+    }
+
+    proptest! {
+        /// Near-parabolic band: |e-1| < 1e-12 -> conversion must error.
+        #[test]
+        fn cometary_to_keplerian_errors_in_parabolic_band(
+            q in perihelion_q(),
+            e in e_near_parabolic(), // within ±5e-13 around 1.0 -> < 1e-12
+            nu in true_anomaly(),
+            (i, big_omega, small_omega) in inc_omega_arg(),
+            epoch in 2_400_000.5f64..=2_500_000.5
+        ) {
+            let ce = CometaryElements {
+                reference_epoch: epoch,
+                perihelion_distance: q,
+                eccentricity: e,
+                inclination: i,
+                ascending_node_longitude: big_omega,
+                periapsis_argument: small_omega,
+                true_anomaly: nu,
+            };
+            prop_assert!(ce.cometary_to_keplerian().is_err());
+        }
+    }
+
+    proptest! {
+        /// Just outside the parabolic band: e >= 1 + 2e-12 -> conversion must succeed.
+        #[test]
+        fn cometary_to_keplerian_succeeds_outside_parabolic_band(
+            q in perihelion_q(),
+            u in 0.0f64..1.0,
+            nu in true_anomaly(),
+            (i, big_omega, small_omega) in inc_omega_arg(),
+            epoch in 2_400_000.5f64..=2_500_000.5
+        ) {
+            let e = 1.0 + 2.0*EPS_PARABOLA + u * (4.0 - 2.0*EPS_PARABOLA); // >= 1 + 2e-12
+            let ce = CometaryElements {
+                reference_epoch: epoch,
+                perihelion_distance: q,
+                eccentricity: e,
+                inclination: i,
+                ascending_node_longitude: big_omega,
+                periapsis_argument: small_omega,
+                true_anomaly: nu,
+            };
+            let ke = ce.cometary_to_keplerian().expect("should succeed for e >= 1 + 2e-12");
+            prop_assert!(ke.semi_major_axis.is_finite());
+            prop_assert!(ke.semi_major_axis < 0.0);
+        }
+    }
+
+    proptest! {
+        /// Cometary -> Equinoctial via Keplerian:
+        /// if supported, a should remain negative; if not supported, Err is acceptable.
+        #[test]
+        fn tryfrom_to_equinoctial_preserves_negative_a_when_ok(
+            q in perihelion_q(),
+            e in e_hyperbolic(),
+            nu in true_anomaly(),
+            (i, big_omega, small_omega) in inc_omega_arg(),
+            epoch in 2_400_000.5f64..=2_500_000.5
+        ) {
+            let ce = CometaryElements {
+                reference_epoch: epoch,
+                perihelion_distance: q,
+                eccentricity: e,
+                inclination: i,
+                ascending_node_longitude: big_omega,
+                periapsis_argument: small_omega,
+                true_anomaly: nu,
+            };
+            match EquinoctialElements::try_from(&ce) {
+                Ok(eq) => {
+                    // Hyperbolic: a should be negative too in the equinoctial mapping
+                    prop_assert!(eq.semi_major_axis < 0.0);
+                }
+                Err(_) => {
+                    // Acceptable: some implementations restrict equinoctials to elliptic.
+                    prop_assert!(true);
+                }
+            }
+        }
+    }
+}
