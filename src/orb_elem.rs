@@ -6,41 +6,6 @@ use super::constants::{DPI, GAUSS_GRAV_SQUARED};
 use super::ref_system::rotmt;
 use nalgebra::Vector3;
 
-fn atan2(y: f64, x: f64) -> f64 {
-    y.atan2(x)
-}
-
-fn sqrt(x: f64) -> f64 {
-    x.sqrt()
-}
-
-fn prodmm(a: &mut [[f64; 3]; 3], b: [[f64; 3]; 3], c: [[f64; 3]; 3]) {
-    let w = b;
-    let z = c;
-
-    for j in 0..3 {
-        for k in 0..3 {
-            let mut s = 0.0;
-            for (l, row) in w[j].iter().enumerate() {
-                s += row * z[l][k];
-            }
-            a[j][k] = s;
-        }
-    }
-}
-
-fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
-    let z = x;
-
-    for (j, row) in a.iter().enumerate() {
-        let mut s = 0.0;
-        for (l, val) in row.iter().enumerate() {
-            s += val * z[l];
-        }
-        y[j] = s;
-    }
-}
-
 /// Converts a Cartesian state vector into orbital elements in the J2000 equatorial frame.
 ///
 /// This function takes a 6D state vector representing position and velocity in an inertial
@@ -85,62 +50,50 @@ fn prodmv(y: &mut [f64; 3], a: [[f64; 3]; 3], x: [f64; 3]) {
 /// * [`KeplerianElements`] – Struct holding canonical orbital elements.
 /// * [`velocity_correction`](crate::kepler::velocity_correction) – Lagrange-based velocity refinement from triplet position vectors.
 /// * [`GAUSS_GRAV_SQUARED`] – Gaussian gravitational constant.
-pub fn ccek1(xv: &[f64; 6], reference_epoch: f64) -> OrbitalElements {
-    let mut elle = [0.0; 3]; // Angular momentum vector (r × v)
-    let mut elv = [0.0; 3]; // Normalized angular momentum vector
-    let mut xorb = [0.0; 3]; // Position in the orbital frame
-    let mut vorb = [0.0; 3]; // Velocity in the orbital frame
-    let mut rot = [[0.; 3]; 3]; // Rotation matrix to orbital frame
-
+pub fn ccek1(
+    position: &Vector3<f64>,
+    velocity: &Vector3<f64>,
+    reference_epoch: f64,
+) -> OrbitalElements {
     // === 1. Compute angular momentum vector h = r × v
-    elle[0] = xv[1] * xv[5] - xv[2] * xv[4];
-    elle[1] = xv[2] * xv[3] - xv[0] * xv[5];
-    elle[2] = xv[0] * xv[4] - xv[1] * xv[3];
+    let elle = position.cross(velocity); // h = r × v
 
-    let el2 = elle.iter().map(|&x| x * x).sum::<f64>(); // ||h||²
-    let elmod = sqrt(el2); // ||h||
-    for j in 0..3 {
-        elv[j] = elle[j] / elmod;
-    }
+    let el2 = elle.norm_squared(); // ||h||²
+    let elmod = el2.sqrt(); // ||h||
+    let elv = elle / elmod; // Normalized angular momentum vector
 
     // === 2. Compute inclination i and longitude of ascending node Ω
-    let sini = sqrt(elv[0].powi(2) + elv[1].powi(2));
-    let mut ainc = atan2(sini, elv[2]); // inclination
+    let sini = elv.xy().norm();
+    let ainc = sini.atan2(elv.z); // inclination
 
     // Normalize inclination to [0, 2π]
-    if ainc > DPI {
-        ainc -= DPI;
-    }
-    if ainc < 0.0 {
-        ainc += DPI;
-    }
+    let ainc = ainc.rem_euclid(DPI);
 
     // Ascending node longitude
     let anod = if sini == 0.0 {
-        0.0 // Equatorial orbit: node undefined
+        // Equatorial orbit: node undefined
+        0.0
     } else {
-        let mut anod = atan2(elv[0], -elv[1]);
-        if anod > DPI {
-            anod -= DPI;
-        }
-        if anod < 0.0 {
-            anod += DPI;
-        }
-        anod
+        elv.x.atan2(-elv.y).rem_euclid(DPI)
     };
 
     // === 3. Transform position and velocity to the orbital frame
     let r1 = rotmt(ainc, 0); // Rotation around X-axis (inclination)
     let r2 = rotmt(anod, 2); // Rotation around Z-axis (node)
-    prodmm(&mut rot, r1.into(), r2.into()); // rot = r1 * r2
 
-    prodmv(&mut xorb, rot, xv[0..3].try_into().unwrap()); // orbital position
-    prodmv(&mut vorb, rot, xv[3..6].try_into().unwrap()); // orbital velocity
+    // Rotation matrix to orbital frame
+    let rot = r1.transpose() * r2.transpose(); // rot = r1 * r2
+
+    let orb_pos = rot * position; // Position in the orbital frame
+    let orb_vel = rot * velocity; // Velocity in the orbital frame
 
     // === 4. Scalar products needed for orbital element derivation
-    let rv = xorb[0] * vorb[0] + xorb[1] * vorb[1]; // r ⋅ v
-    let rs = sqrt(xorb[0].powi(2) + xorb[1].powi(2)); // |r|
-    let v2 = vorb[0].powi(2) + vorb[1].powi(2); // |v|²
+    // Note: We restrict to the XY components in the orbital frame because
+    // the motion is confined to the orbital plane (Z ≈ 0). Using .xy()
+    // avoids injecting numerical noise from the near-zero Z component.
+    let rv = orb_pos.xy().dot(&orb_vel.xy()); // r ⋅ v
+    let rs = orb_pos.xy().norm(); // |r|
+    let v2 = orb_vel.xy().norm_squared(); // |v|²
 
     // === 5. Reciprocal of semi-major axis (1/a)
     let reca = 2.0 / rs - v2 / GAUSS_GRAV_SQUARED;
@@ -148,40 +101,26 @@ pub fn ccek1(xv: &[f64; 6], reference_epoch: f64) -> OrbitalElements {
     // === CASE 1: Elliptical orbit (reca > 0)
     if reca > 0.0 {
         let sma = 1.0 / reca;
-        let enne = sqrt(GAUSS_GRAV_SQUARED / sma.powi(3)); // mean motion
+        let enne = (GAUSS_GRAV_SQUARED / sma.powi(3)).sqrt(); // mean motion
 
         // Eccentricity from e⋅sinE and e⋅cosE
         let esine = rv / (enne * sma * sma);
         let ecose = v2 * rs / GAUSS_GRAV_SQUARED - 1.0;
-        let ecc = sqrt(esine.powi(2) + ecose.powi(2));
+        let ecc = (esine.powi(2) + ecose.powi(2)).sqrt();
 
-        let anec = atan2(esine, ecose); // eccentric anomaly E
-        let mut emme = anec - ecc * anec.sin(); // mean anomaly M
-        if emme < 0.0 {
-            emme += DPI;
-        }
-        if emme > DPI {
-            emme -= DPI;
-        }
+        let anec = esine.atan2(ecose); // eccentric anomaly E
+        let emme = (anec - ecc * anec.sin()).rem_euclid(DPI); // mean anomaly M
 
         // Argument of periapsis ω
         let x1 = anec.cos() - ecc;
         let rad = 1.0 - ecc * ecc;
-        let x2 = sqrt(rad) * anec.sin();
-        let xm = sqrt(x1 * x1 + x2 * x2);
+        let x2 = rad.sqrt() * anec.sin();
+        let xm = (x1 * x1 + x2 * x2).sqrt();
         let x1 = x1 / xm;
         let x2 = x2 / xm;
-        let sinper = x1 * xorb[1] - x2 * xorb[0];
-        let cosper = x1 * xorb[0] + x2 * xorb[1];
-        let argper = atan2(sinper, cosper);
-
-        // Output: a, e, i, Ω, ω, M
-        // elem[0] = sma;
-        // elem[1] = ecc;
-        // elem[2] = ainc;
-        // elem[3] = anod;
-        // elem[4] = argper;
-        // elem[5] = emme;
+        let sinper = x1 * orb_pos.y - x2 * orb_pos.x;
+        let cosper = x1 * orb_pos.x + x2 * orb_pos.y;
+        let argper = sinper.atan2(cosper);
 
         OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch,
@@ -202,18 +141,10 @@ pub fn ccek1(xv: &[f64; 6], reference_epoch: f64) -> OrbitalElements {
         // True anomaly ν
         let cosf = p / rs - 1.0;
         let sinf = rv * p / (rs * elmod);
-        let effe = atan2(sinf, cosf); // ν
+        let effe = sinf.atan2(cosf); // ν
 
         // Argument of periapsis ω
-        let argper = atan2(xorb[1], xorb[0]) - effe;
-
-        // Output: q, e, i, Ω, ω, ν
-        // elem[0] = q;
-        // elem[1] = ecc;
-        // elem[2] = ainc;
-        // elem[3] = anod;
-        // elem[4] = argper;
-        // elem[5] = effe;
+        let argper = orb_pos.y.atan2(orb_pos.x) - effe;
 
         OrbitalElements::Cometary(CometaryElements {
             reference_epoch,
@@ -230,20 +161,12 @@ pub fn ccek1(xv: &[f64; 6], reference_epoch: f64) -> OrbitalElements {
         let p = el2 / GAUSS_GRAV_SQUARED;
         let ecosf = p / rs - 1.0;
         let esinf = rv * p / (elmod * rs);
-        let effe = atan2(esinf, ecosf); // true anomaly ν
-        let ecc = sqrt(ecosf.powi(2) + esinf.powi(2));
+        let effe = esinf.atan2(ecosf); // true anomaly ν
+        let ecc = (ecosf.powi(2) + esinf.powi(2)).sqrt();
         let q = p / (1.0 + ecc); // perihelion distance
 
         // Argument of periapsis ω
-        let argper = atan2(xorb[1], xorb[0]) - effe;
-
-        // Output: q, e, i, Ω, ω, ν
-        // elem[0] = q;
-        // elem[1] = ecc;
-        // elem[2] = ainc;
-        // elem[3] = anod;
-        // elem[4] = argper;
-        // elem[5] = effe;
+        let argper = orb_pos.y.atan2(orb_pos.x) - effe;
 
         OrbitalElements::Cometary(CometaryElements {
             reference_epoch,
@@ -343,23 +266,10 @@ mod orb_elem_test {
 
     const TWO_PI: f64 = DPI;
 
-    fn energy_from_state(xv: &[f64; 6]) -> f64 {
-        // ε = v²/2 - μ/r
-        let r = (xv[0].powi(2) + xv[1].powi(2) + xv[2].powi(2)).sqrt();
-        let v2 = xv[3].powi(2) + xv[4].powi(2) + xv[5].powi(2);
+    pub fn energy_from_state(position: Vector3<f64>, velocity: Vector3<f64>) -> f64 {
+        let r = position.norm(); // |r|
+        let v2 = velocity.norm_squared(); // |v|²
         0.5 * v2 - GAUSS_GRAV_SQUARED / r
-    }
-
-    fn norm3(x: &[f64; 3]) -> f64 {
-        (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt()
-    }
-
-    fn cross(a: &[f64; 3], b: &[f64; 3]) -> [f64; 3] {
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
     }
 
     fn wrap_0_2pi(mut ang: f64) -> f64 {
@@ -373,16 +283,21 @@ mod orb_elem_test {
 
     #[test]
     fn test_elem_regression_reference_with_tolerance() {
-        let xv = [
+        use nalgebra::Vector3;
+
+        let position = Vector3::new(
             -0.623_550_051_003_163_9,
             1.211_468_114_860_160_5,
             0.252_000_591_437_760_4,
+        );
+
+        let velocity = Vector3::new(
             -1.554_984_513_777_466_3E-2,
             -4.631_577_489_268_288E-3,
             -9.363_362_126_133_925E-4,
-        ];
+        );
 
-        let orbit = ccek1(&xv, 0.0);
+        let orbit = ccek1(&position, &velocity, 0.0);
 
         let ref_elem = [
             1.815_529_716_630_423_2,
@@ -411,17 +326,26 @@ mod orb_elem_test {
     #[test]
     fn test_kepler_energy_invariant_when_elliptic() {
         // For elliptic orbits (type_ == "KEP"), we have ε = -μ/(2a).
-        let xv = [
+
+        // Position (AU)
+        let position = Vector3::new(
             -0.623_550_051_003_163_9,
             1.211_468_114_860_160_5,
             0.252_000_591_437_760_4,
+        );
+
+        // Velocity (AU/day)
+        let velocity = Vector3::new(
             -1.554_984_513_777_466_3E-2,
             -4.631_577_489_268_288E-3,
             -9.363_362_126_133_925E-4,
-        ];
-        let eps = energy_from_state(&xv);
+        );
 
-        let orbit = ccek1(&xv, 0.0);
+        // Specific orbital energy ε = v²/2 - μ/r
+        let eps = energy_from_state(position, velocity);
+
+        // Build orbital elements from state vector
+        let orbit = ccek1(&position, &velocity, 0.0);
 
         let kepler_orb = orbit.as_keplerian().unwrap();
         let a = kepler_orb.semi_major_axis;
@@ -443,13 +367,12 @@ mod orb_elem_test {
     #[test]
     fn test_hyperbolic_orbit_detection_and_diagnostics() {
         // Pick r = 1 AU along x, and v > v_esc along +y to ensure hyperbolic orbit.
-        // v_esc = sqrt(2μ/r), with r=1 AU.
-        let r = [1.0, 0.0, 0.0];
-        let vesc = (2.0 * GAUSS_GRAV_SQUARED).sqrt();
-        let v = [0.0, vesc * 1.2, 0.0]; // 20% above escape
+        // v_esc = sqrt(2μ/r), with r = 1 AU.
+        let position: Vector3<f64> = Vector3::new(1.0, 0.0, 0.0);
+        let vesc = (2.0 * GAUSS_GRAV_SQUARED / position.norm()).sqrt();
+        let velocity = Vector3::new(0.0, vesc * 1.2, 0.0); // 20% above escape
 
-        let xv = [r[0], r[1], r[2], v[0], v[1], v[2]];
-        let orbit = ccek1(&xv, 0.0);
+        let orbit = ccek1(&position, &velocity, 0.0);
 
         match orbit {
             OrbitalElements::Cometary(ce) => {
@@ -474,27 +397,27 @@ mod orb_elem_test {
     #[test]
     fn test_quasi_parabolic_behaviour() {
         // Construct a nearly parabolic orbit: r = 1 AU, v ~ v_escape
+        let position: Vector3<f64> = Vector3::new(1.0, 0.0, 0.0);
+
         // Escape velocity at r=1 AU: v_esc = sqrt(2μ/r)
-        let r = [1.0, 0.0, 0.0];
-        let vesc = (2.0 * GAUSS_GRAV_SQUARED).sqrt();
+        let vesc: f64 = (2.0 * GAUSS_GRAV_SQUARED / position.norm()).sqrt();
 
         // Slightly below escape velocity → almost parabolic ellipse
-        let v = [0.0, vesc * 0.999_999, 0.0];
-        let xv: [f64; 6] = [r[0], r[1], r[2], v[0], v[1], v[2]];
+        let velocity = Vector3::new(0.0, vesc * 0.999_999, 0.0);
 
-        // For parabolic orbits, the specific orbital energy ε = 0
-        // Verify that the energy is close to zero
+        // For parabolic orbits, the specific orbital energy ε ≈ 0
         let eps = {
-            let rnorm = (xv[0].powi(2) + xv[1].powi(2) + xv[2].powi(2)).sqrt();
-            let v2 = xv[3].powi(2) + xv[4].powi(2) + xv[5].powi(2);
+            let rnorm = position.norm();
+            let v2 = velocity.norm_squared();
             0.5 * v2 - GAUSS_GRAV_SQUARED / rnorm
         };
+
         assert!(
             eps.abs() < 1e-8,
             "Near-parabolic specific energy should be ~0, got {eps}"
         );
 
-        let orbit = ccek1(&xv, 0.0);
+        let orbit = ccek1(&position, &velocity, 0.0);
 
         match orbit {
             OrbitalElements::Keplerian(ke) => {
@@ -578,31 +501,21 @@ mod orb_elem_test {
 
     #[test]
     fn test_invariants_a_e_i_under_rotation_about_z() {
-        // Rotate state about Z: a,e,i should be invariant.
-        let xv = [0.8, 0.3, 0.1, 0.0, 0.02, -0.005];
-        let orbit = ccek1(&xv, 0.0);
+        // Rotate state about Z: a, e, i should be invariant.
+        let position = Vector3::new(0.8, 0.3, 0.1);
+        let velocity = Vector3::new(0.0, 0.02, -0.005);
+
+        let orbit = ccek1(&position, &velocity, 0.0);
 
         // Build a pure Z-rotation of phi using rotmt:
         let phi = 0.73;
-        let r_z = rotmt(phi, 2);
+        let r_z = rotmt(phi, 2); // assumes rotmt returns a 3×3 rotation matrix
 
-        // Apply rotation to position and velocity
-        let mut rot = [[0.0; 3]; 3];
-        // identity * r_z
-        prodmm(
-            &mut rot,
-            r_z.into(),
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        );
-        let p = [xv[0], xv[1], xv[2]];
-        let v = [xv[3], xv[4], xv[5]];
-        let mut pr = [0.0; 3];
-        let mut vr = [0.0; 3];
-        prodmv(&mut pr, rot, p);
-        prodmv(&mut vr, rot, v);
+        // Apply rotation to position and velocity (no need for identity or manual products)
+        let pr = r_z * position; // rotated position
+        let vr = r_z * velocity; // rotated velocity
 
-        let xvr = [pr[0], pr[1], pr[2], vr[0], vr[1], vr[2]];
-        let orbit2 = ccek1(&xvr, 0.0);
+        let orbit2 = ccek1(&pr, &vr, 0.0);
 
         // Extract invariants a, e, i (Keplerian) or q, e, i (Cometary).
         let (a1, e1, i1, om1) = match &orbit {
@@ -660,78 +573,88 @@ mod orb_elem_test {
 
     proptest! {
         // Generate random but reasonable heliocentric states:
-        // r in [0.3, 5] AU; v in [0, 0.05] AU/day
+        // r in [0.3, 5] AU; v in [-0.05, 0.05] AU/day
         // Avoid h ~ 0 by rejecting near-parallel r and v.
         #[test]
         fn prop_state_to_elements_basic_sanity(
-            rx in 0.3f64..5.0, ry in -5.0f64..5.0, rz in -2.0f64..2.0,
+            rx in 0.3f64..5.0,  ry in -5.0f64..5.0,  rz in -2.0f64..2.0,
             vx in -0.05f64..0.05, vy in -0.05f64..0.05, vz in -0.05f64..0.05
         ) {
-            let r = [rx, ry, rz];
-            let v = [vx, vy, vz];
-            let rnorm = norm3(&r);
-            prop_assume!(rnorm > 0.3);
+            // State vectors
+            let r = Vector3::new(rx, ry, rz);
+            let v = Vector3::new(vx, vy, vz);
 
-            let h = cross(&r, &v);
-            let hnorm = norm3(&h);
-            // reject nearly singular angular momentum
-            prop_assume!(hnorm > 1e-6);
+            // Reject too-small |r| (degenerate orbits)
+            prop_assume!(r.norm() > 0.3);
 
-            let xv = [r[0], r[1], r[2], v[0], v[1], v[2]];
-            let orbit = ccek1(&xv, 0.0);
+            // Reject nearly singular angular momentum h = r × v
+            let h = r.cross(&v);
+            prop_assume!(h.norm() > 1e-6);
 
-            // Compare eccentricity with eccentricity_control
-            let (_, e_ctrl, q_ctrl, _) = eccentricity_control(
-                &Vector3::new(r[0], r[1], r[2]),
-                &Vector3::new(v[0], v[1], v[2]),
-                1e4, 5.0
-            ).expect("non-degenerate");
+            // Convert state → elements
+            let orbit = ccek1(&r, &v, 0.0);
+
+            // Compare eccentricity against the control path
+            let (_, e_ctrl, q_ctrl, _) = eccentricity_control(&r, &v, 1e4, 5.0).expect("non-degenerate");
             prop_assert!(e_ctrl >= 0.0);
             prop_assert!(q_ctrl > 0.0);
 
+            // Helper to normalize any angle to [0, 2π)
+            let wrap_0_2pi = |ang: f64| ang.rem_euclid(TWO_PI);
+
             match orbit {
                 OrbitalElements::Keplerian(ke) => {
-                // e from both paths should match (parabolic borderline may differ by ~1e-6)
-                prop_assert!((e_ctrl - ke.eccentricity).abs() < 1e-6);
+                    // Eccentricity must match the control within tolerance
+                    prop_assert!((e_ctrl - ke.eccentricity).abs() < 1e-6);
 
-                // Elliptic: a > 0, e in [0,1), M in [0,2π), ε = -μ/(2a)
-                let a = ke.semi_major_axis;
-                prop_assert!(a > 0.0);
-                prop_assert!((0.0..1.0 + 1e-12).contains(&ke.eccentricity));
+                    // Elliptic: a > 0, e in [0,1), M in [0,2π), ε = -μ/(2a)
+                    let a = ke.semi_major_axis;
+                    prop_assert!(a > 0.0);
+                    prop_assert!((0.0..1.0 + 1e-12).contains(&ke.eccentricity));
 
-                let m = wrap_0_2pi(ke.mean_anomaly);
-                prop_assert!((0.0..TWO_PI + 1e-12).contains(&m));
+                    let m = wrap_0_2pi(ke.mean_anomaly);
+                    prop_assert!((0.0..TWO_PI + 1e-12).contains(&m));
 
-                let eps = energy_from_state(&xv);
-                let energy_kepler = -GAUSS_GRAV_SQUARED / (2.0 * a);
-                prop_assert!((eps - energy_kepler).abs() < 1e-7);
+                    let eps = energy_from_state(r, v);
+                    let energy_kepler = -GAUSS_GRAV_SQUARED / (2.0 * a);
+                    prop_assert!((eps - energy_kepler).abs() < 1e-7);
 
-                // Angles are finite
-                for &ang in &[ke.inclination, ke.ascending_node_longitude, ke.periapsis_argument, ke.mean_anomaly] {
-                    let w = wrap_0_2pi(ang);
-                    prop_assert!((0.0..TWO_PI + 1e-12).contains(&w));
-                }
+                    // Angles are finite and normalized
+                    for &ang in &[
+                        ke.inclination,
+                        ke.ascending_node_longitude,
+                        ke.periapsis_argument,
+                        ke.mean_anomaly,
+                    ] {
+                        let w = wrap_0_2pi(ang);
+                        prop_assert!((0.0..TWO_PI + 1e-12).contains(&w));
+                    }
 
-                // Inclination in [0,π]
-                let inc = ke.inclination;
-                prop_assert!((-1e-12..=std::f64::consts::PI + 1e-12).contains(&inc));
+                    // Inclination in [0, π]
+                    let inc = ke.inclination;
+                    prop_assert!((-1e-12..=std::f64::consts::PI + 1e-12).contains(&inc));
                 }
 
                 OrbitalElements::Cometary(ce) => {
-                    // e from both paths should match (parabolic borderline may differ by ~1e-6)
+                    // Eccentricity must match the control within tolerance
                     prop_assert!((e_ctrl - ce.eccentricity).abs() < 1e-6);
 
                     // Cometary (parabolic/hyperbolic): e >= 1
                     prop_assert!(ce.eccentricity >= 1.0 - 1e-6);
                     prop_assert!(ce.perihelion_distance > 0.0);
 
-                    // Angles are finite
-                    for &ang in &[ce.inclination, ce.ascending_node_longitude, ce.periapsis_argument, ce.true_anomaly] {
+                    // Angles are finite and normalized
+                    for &ang in &[
+                        ce.inclination,
+                        ce.ascending_node_longitude,
+                        ce.periapsis_argument,
+                        ce.true_anomaly,
+                    ] {
                         let w = wrap_0_2pi(ang);
                         prop_assert!((0.0..TWO_PI + 1e-12).contains(&w));
                     }
 
-                    // Inclination in [0,π]
+                    // Inclination in [0, π]
                     let inc = ce.inclination;
                     prop_assert!((-1e-12..=std::f64::consts::PI + 1e-12).contains(&inc));
                 }

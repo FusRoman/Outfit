@@ -740,13 +740,8 @@ impl GaussObs {
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 
-        // Merge position and velocity into a single array expected by `ccek1`
-        let ast_pos_vel: [f64; 6] = [
-            ecl_pos.x, ecl_pos.y, ecl_pos.z, ecl_vel.x, ecl_vel.y, ecl_vel.z,
-        ];
-
         // Compute the classical orbital elements from the state vector and return orbital elements in a structured form
-        Ok(ccek1(&ast_pos_vel, reference_epoch))
+        Ok(ccek1(&ecl_pos, &ecl_vel, reference_epoch))
     }
 
     /// Estimate an initial orbit using Gauss’s method from three astrometric observations.
