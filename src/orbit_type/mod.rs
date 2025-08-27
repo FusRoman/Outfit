@@ -168,9 +168,14 @@ impl fmt::Display for OrbitalElements {
 #[cfg(test)]
 pub(crate) mod orbit_type_test {
     use super::*;
-    use approx::abs_diff_eq;
+    use approx::{abs_diff_eq, assert_abs_diff_eq, assert_relative_eq};
+    use std::f64::consts::PI;
 
-    pub fn approx_equal(current: &OrbitalElements, other: &OrbitalElements, tol: f64) -> bool {
+    pub(crate) fn approx_equal(
+        current: &OrbitalElements,
+        other: &OrbitalElements,
+        tol: f64,
+    ) -> bool {
         match (current, other) {
             (OrbitalElements::Keplerian(ke1), OrbitalElements::Keplerian(ke2)) => {
                 abs_diff_eq!(ke1.semi_major_axis, ke2.semi_major_axis, epsilon = tol)
@@ -233,5 +238,317 @@ pub(crate) mod orbit_type_test {
             }
             _ => false, // Different types cannot be equal
         }
+    }
+
+    /// Degrees to radians helper.
+    fn deg(x: f64) -> f64 {
+        x * PI / 180.0
+    }
+
+    /// Compare two angles modulo 2π with an absolute epsilon.
+    fn assert_angle_eq(a: f64, b: f64, eps: f64) {
+        fn wrap_to_pi(x: f64) -> f64 {
+            // Shift into [-π, π] using rem_euclid for clarity and robustness
+            let two_pi = 2.0 * PI;
+            (x + PI).rem_euclid(two_pi) - PI
+        }
+
+        let d = wrap_to_pi(a - b);
+        assert_abs_diff_eq!(d, 0.0, epsilon = eps);
+    }
+
+    // ---------- construction from state (elliptic vs hyperbolic) ----------
+
+    #[test]
+    fn from_state_returns_keplerian_for_elliptic_orbit() {
+        // Example taken from user's earlier vector dump (AU and AU/day).
+        let r = Vector3::new(
+            -0.632_363_815_650_731_f64,
+            1.130_641_635_350_301_7_f64,
+            0.491_670_066_794_699_5_f64,
+        );
+        let v = Vector3::new(
+            -0.015_515_672_728_876_466_f64,
+            -0.004_456_064_593_471_24_f64,
+            -0.001_879_709_408_428_156_1_f64,
+        );
+        let jd_tdb = 2460000.5_f64;
+
+        let elems = OrbitalElements::from_orbital_state(&r, &v, jd_tdb);
+
+        match elems {
+            OrbitalElements::Keplerian(ke) => {
+                assert!(ke.semi_major_axis > 0.0);
+                // Loose target for a sanity check, not a golden number.
+                assert_abs_diff_eq!(ke.semi_major_axis, 1.8155, epsilon = 5e-3);
+                assert!(ke.inclination >= 0.0 && ke.inclination <= PI);
+                assert!(ke.eccentricity >= 0.0);
+            }
+            _ => panic!("Expected Keplerian elements for elliptic state"),
+        }
+    }
+
+    #[test]
+    fn from_state_returns_cometary_for_hyperbolic_orbit() {
+        // Position at 1 AU on x-axis, velocity set > escape speed on y-axis.
+        let r = Vector3::new(1.0_f64, 0.0, 0.0);
+
+        // Use Gauss constant to compute v_escape in AU/day:
+        let k = 0.017_202_098_95_f64; // Gauss gravitational constant [AU^(3/2)/day]
+        let v_circ = (k * k).sqrt(); // circular speed at 1 AU
+        let v_esc = (2.0_f64).sqrt() * v_circ;
+        let v = Vector3::new(0.0, 1.05 * v_esc, 0.0);
+
+        let jd_tdb = 2460000.5_f64;
+        let elems = OrbitalElements::from_orbital_state(&r, &v, jd_tdb);
+
+        match elems {
+            OrbitalElements::Cometary(ce) => {
+                assert!(ce.eccentricity >= 1.0);
+                assert!(ce.perihelion_distance > 0.0);
+            }
+            _ => panic!("Expected Cometary elements for hyperbolic state"),
+        }
+    }
+
+    // ---------- conversions to Keplerian / Equinoctial ----------
+
+    #[test]
+    fn to_keplerian_from_keplerian_is_identity_like() {
+        let ke = KeplerianElements {
+            reference_epoch: 2460000.5,
+            semi_major_axis: 1.2,
+            eccentricity: 0.1,
+            inclination: deg(10.0),
+            ascending_node_longitude: deg(20.0),
+            periapsis_argument: deg(30.0),
+            mean_anomaly: deg(40.0),
+        };
+        let oe = OrbitalElements::Keplerian(ke.clone());
+
+        let back = oe
+            .to_keplerian()
+            .expect("Keplerian -> Keplerian should succeed");
+
+        assert_abs_diff_eq!(back.semi_major_axis, ke.semi_major_axis, epsilon = 1e-14);
+        assert_abs_diff_eq!(back.eccentricity, ke.eccentricity, epsilon = 1e-14);
+        assert_abs_diff_eq!(back.inclination, ke.inclination, epsilon = 1e-14);
+        assert_abs_diff_eq!(
+            back.ascending_node_longitude,
+            ke.ascending_node_longitude,
+            epsilon = 1e-14
+        );
+        assert_abs_diff_eq!(
+            back.periapsis_argument,
+            ke.periapsis_argument,
+            epsilon = 1e-14
+        );
+        assert_angle_eq(back.mean_anomaly, ke.mean_anomaly, 1e-12);
+    }
+
+    #[test]
+    fn to_equinoctial_from_keplerian_round_trips_reasonably() {
+        let ke = KeplerianElements {
+            reference_epoch: 2460000.5,
+            semi_major_axis: 2.0,
+            eccentricity: 0.3,
+            inclination: deg(15.0),
+            ascending_node_longitude: deg(25.0),
+            periapsis_argument: deg(35.0),
+            mean_anomaly: deg(45.0),
+        };
+        let oe = OrbitalElements::Keplerian(ke.clone());
+
+        let eq = oe
+            .to_equinoctial()
+            .expect("Keplerian -> Equinoctial should succeed");
+        let ke_back = KeplerianElements::from(&eq);
+
+        // Use a mix of absolute and relative checks to be robust to scaling.
+        assert_abs_diff_eq!(ke_back.semi_major_axis, ke.semi_major_axis, epsilon = 1e-12);
+        assert_relative_eq!(ke_back.eccentricity, ke.eccentricity, max_relative = 1e-10);
+        assert_abs_diff_eq!(ke_back.inclination, ke.inclination, epsilon = 1e-12);
+        assert_abs_diff_eq!(
+            ke_back.ascending_node_longitude,
+            ke.ascending_node_longitude,
+            epsilon = 1e-12
+        );
+        assert_abs_diff_eq!(
+            ke_back.periapsis_argument,
+            ke.periapsis_argument,
+            epsilon = 1e-12
+        );
+        assert_angle_eq(ke_back.mean_anomaly, ke.mean_anomaly, 1e-10);
+    }
+
+    #[test]
+    fn to_keplerian_from_equinoctial_matches_direct_from() {
+        let ke = KeplerianElements {
+            reference_epoch: 2460000.5,
+            semi_major_axis: 1.7,
+            eccentricity: 0.05,
+            inclination: deg(5.0),
+            ascending_node_longitude: deg(40.0),
+            periapsis_argument: deg(80.0),
+            mean_anomaly: deg(10.0),
+        };
+        let eq = EquinoctialElements::from(&ke);
+        let oe = OrbitalElements::Equinoctial(eq.clone());
+
+        let back_via_enum = oe.to_keplerian().expect("Eq -> Kep should succeed");
+        let back_via_direct = KeplerianElements::from(&eq);
+
+        assert_abs_diff_eq!(
+            back_via_enum.semi_major_axis,
+            back_via_direct.semi_major_axis,
+            epsilon = 1e-13
+        );
+        assert_relative_eq!(
+            back_via_enum.eccentricity,
+            back_via_direct.eccentricity,
+            max_relative = 1e-11
+        );
+        assert_abs_diff_eq!(
+            back_via_enum.inclination,
+            back_via_direct.inclination,
+            epsilon = 1e-13
+        );
+        assert_angle_eq(
+            back_via_enum.ascending_node_longitude,
+            back_via_direct.ascending_node_longitude,
+            1e-12,
+        );
+        assert_angle_eq(
+            back_via_enum.periapsis_argument,
+            back_via_direct.periapsis_argument,
+            1e-12,
+        );
+        assert_angle_eq(
+            back_via_enum.mean_anomaly,
+            back_via_direct.mean_anomaly,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn cometary_to_keplerian_hyperbolic_succeeds_and_is_consistent() {
+        use std::f64::consts::PI;
+        let deg = |x: f64| x * PI / 180.0;
+
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.9,
+            eccentricity: 1.1,
+            inclination: deg(12.0),
+            ascending_node_longitude: deg(33.0),
+            periapsis_argument: deg(45.0),
+            true_anomaly: deg(5.0),
+        };
+        let oe = OrbitalElements::Cometary(ce);
+
+        let ke = oe
+            .to_keplerian()
+            .expect("Cometary(e>1) -> Keplerian should succeed for hyperbolic orbits");
+
+        assert!(ke.eccentricity >= 1.0, "expected e >= 1 for hyperbola");
+        assert!(ke.semi_major_axis < 0.0, "expected a < 0 for hyperbola");
+    }
+
+    #[test]
+    fn cometary_to_equinoctial_hyperbolic_maybe_succeeds_and_if_so_is_consistent() {
+        use std::f64::consts::PI;
+        let deg = |x: f64| x * PI / 180.0;
+
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.7,
+            eccentricity: 1.3,
+            inclination: deg(10.0),
+            ascending_node_longitude: deg(20.0),
+            periapsis_argument: deg(30.0),
+            true_anomaly: deg(15.0),
+        };
+        let oe = OrbitalElements::Cometary(ce);
+
+        if let Ok(eq) = oe.to_equinoctial() {
+            assert!(
+                eq.semi_major_axis < 0.0,
+                "equinoctial a should be < 0 for hyperbolic orbits"
+            );
+        }
+    }
+
+    // ---------- as_* accessors ----------
+
+    #[test]
+    fn as_accessors_return_some_only_for_matching_variant() {
+        let ke = KeplerianElements {
+            reference_epoch: 2460000.5,
+            semi_major_axis: 1.0,
+            eccentricity: 0.0,
+            inclination: 0.0,
+            ascending_node_longitude: 0.0,
+            periapsis_argument: 0.0,
+            mean_anomaly: 0.0,
+        };
+        let eq = EquinoctialElements::from(&ke);
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 1.0,
+            eccentricity: 1.0,
+            inclination: 0.0,
+            ascending_node_longitude: 0.0,
+            periapsis_argument: 0.0,
+            true_anomaly: 0.0,
+        };
+
+        let oe_k = OrbitalElements::Keplerian(ke.clone());
+        assert!(oe_k.as_keplerian().is_some());
+        assert!(oe_k.as_equinoctial().is_none());
+        assert!(oe_k.as_cometary().is_none());
+
+        let oe_e = OrbitalElements::Equinoctial(eq);
+        assert!(oe_e.as_keplerian().is_none());
+        assert!(oe_e.as_equinoctial().is_some());
+        assert!(oe_e.as_cometary().is_none());
+
+        let oe_c = OrbitalElements::Cometary(ce);
+        assert!(oe_c.as_keplerian().is_none());
+        assert!(oe_c.as_equinoctial().is_none());
+        assert!(oe_c.as_cometary().is_some());
+    }
+
+    // ---------- Display formatting ----------
+
+    #[test]
+    fn display_prefix_matches_variant() {
+        let ke = KeplerianElements {
+            reference_epoch: 2460000.5,
+            semi_major_axis: 1.0,
+            eccentricity: 0.01,
+            inclination: deg(1.0),
+            ascending_node_longitude: deg(2.0),
+            periapsis_argument: deg(3.0),
+            mean_anomaly: deg(4.0),
+        };
+        let eq = EquinoctialElements::from(&ke);
+        let ce = CometaryElements {
+            reference_epoch: 2460000.5,
+            perihelion_distance: 0.5,
+            eccentricity: 1.2,
+            inclination: deg(10.0),
+            ascending_node_longitude: deg(20.0),
+            periapsis_argument: deg(30.0),
+            true_anomaly: deg(0.0),
+        };
+
+        let s_k = format!("{}", OrbitalElements::Keplerian(ke));
+        assert!(s_k.starts_with("[Keplerian representation]"));
+
+        let s_e = format!("{}", OrbitalElements::Equinoctial(eq));
+        assert!(s_e.starts_with("[Equinoctial representation]"));
+
+        let s_c = format!("{}", OrbitalElements::Cometary(ce));
+        assert!(s_c.starts_with("[Cometary representation]"));
     }
 }
