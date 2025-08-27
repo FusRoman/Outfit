@@ -67,7 +67,7 @@
 //!
 //! // Run the preliminary orbit computation
 //! let result = gauss.prelim_orbit().unwrap();
-//! println!("Semi-major axis: {}", result.get_orbit().semi_major_axis);
+//! println!("Semi-major axis: {}", result.get_orbit().as_keplerian().unwrap().semi_major_axis);
 //! ```
 //!
 //! ## References
