@@ -76,7 +76,7 @@
 use nalgebra::Matrix3;
 
 use crate::{
-    constants::{ArcSec, Radian, DPI, RADEG, RADSEC, T2000},
+    constants::{ArcSec, Radian, RADEG, RADSEC, T2000},
     ref_system::rotmt,
 };
 
@@ -165,37 +165,43 @@ pub fn obleq(tjm: f64) -> Radian {
 /// # See also
 /// * [`rnut80`] – uses these angles to build the nutation rotation matrix
 /// * [`rotpn`](crate::ref_system::rotpn) – applies nutation when transforming between Equt and Equm systems
+#[inline(always)]
 pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
-    // Compute the fundamental lunar and solar arguments (in radians)
-    let t1 = (tjm - T2000) / 36525.0;
-    let t = t1;
+    // ---- time powers (Julian centuries from J2000)
+    let t = (tjm - T2000) / 36525.0;
     let t2 = t * t;
     let t3 = t2 * t;
 
-    let dl = (485866.733 + 1717915922.633 * t1 + 31.310 * t2 + 0.064 * t3) * RADSEC;
-    let dp = (1287099.804 + 129596581.224 * t1 - 0.577 * t2 - 0.012 * t3) * RADSEC;
-    let df = (335778.877 + 1739527263.137 * t1 - 13.257 * t2 + 0.011 * t3) * RADSEC;
-    let dd = (1072261.307 + 1602961601.328 * t1 - 6.891 * t2 + 0.019 * t3) * RADSEC;
-    let dn = (450160.280 - 6962890.539 * t1 + 7.455 * t2 + 0.008 * t3) * RADSEC;
+    // ---- fundamental arguments in *radians* (no modulus needed)
+    #[inline(always)]
+    fn as_rad(a0: f64, a1: f64, a2: f64, a3: f64, t: f64, t2: f64, t3: f64) -> f64 {
+        // (a0 + a1*t + a2*t^2 + a3*t^3) * RADSEC
+        (a3.mul_add(t3, a2.mul_add(t2, a1.mul_add(t, a0)))) * RADSEC
+    }
 
-    let l = dl % DPI;
-    let p = dp % DPI;
-    let x = df % DPI * 2.0;
-    let d = dd % DPI;
-    let n = dn % DPI;
+    let l = as_rad(485_866.733, 1_717_915_922.633, 31.310, 0.064, t, t2, t3);
+    let p = as_rad(1_287_099.804, 129_596_581.224, -0.577, -0.012, t, t2, t3);
+    let f = as_rad(335_778.877, 1_739_527_263.137, -13.257, 0.011, t, t2, t3);
+    let d = as_rad(1_072_261.307, 1_602_961_601.328, -6.891, 0.019, t, t2, t3);
+    let n = as_rad(450_160.280, -6_962_890.539, 7.455, 0.008, t, t2, t3);
 
-    // Precompute cosine and sine of fundamental arguments
-    let sin_cos = |x: f64| -> (f64, f64) { (x.cos(), x.sin()) };
+    // Double-argument used by the series (2f)
+    let x = f + f;
 
-    let (cl, sl) = sin_cos(l);
-    let (cp, sp) = sin_cos(p);
-    let (cx, sx) = sin_cos(x);
-    let (cd, sd) = sin_cos(d);
-    let (cn, sn) = sin_cos(n);
+    // ---- sin/cos with shared argument reduction (major win vs cos+sin separately)
+    #[inline(always)]
+    fn sc(a: f64) -> (f64, f64) {
+        a.sin_cos()
+    }
 
-    // Construct compound trigonometric terms used in the series expansion
+    let (sl, cl) = sc(l);
+    let (sp, cp) = sc(p);
+    let (sx, cx) = sc(x);
+    let (sd, cd) = sc(d);
+    let (sn, cn) = sc(n);
+
+    // ---- compound terms (keep everything in registers, no extra trig)
     let cp2 = 2.0 * cp * cp - 1.0;
-
     let sp2 = 2.0 * sp * cp;
     let cd2 = 2.0 * cd * cd - 1.0;
     let sd2 = 2.0 * sd * cd;
@@ -209,7 +215,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
     let cb = ca * cn - sa * sn;
     let sb = sa * cn + ca * sn;
     let cc = cb * cn - sb * sn;
-    let sc = sb * cn + cb * sn;
+    let sc_ = sb * cn + cb * sn;
 
     let cv = cx * cd2 - sx * sd2;
     let sv = sx * cd2 + cx * sd2;
@@ -244,24 +250,24 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
     let cw = cp * cg - sp * sg;
     let sw = sp * cg + cp * sg;
 
-    // Series expansion for nutation in longitude (Δψ), in 0.0001 arcseconds
+    // ---- series (unchanged algebra; keep as-is for correctness)
     let mut dpsi =
-        -(171996.0 + 174.2 * t) * sn + (2062.0 + 0.2 * t) * sn2 + 46.0 * (sm * cn + cm * sn)
+        -(171_996.0 + 174.2 * t) * sn + (2062.0 + 0.2 * t) * sn2 + 46.0 * (sm * cn + cm * sn)
             - 11.0 * sm
             - 3.0 * (sm * cn2 + cm * sn2)
             - 3.0 * (sq * cp - cq * sp)
             - 2.0 * (sb * cp2 - cb * sp2)
             + (sn * cm - cn * sm)
-            - (13187.0 + 1.6 * t) * sc
+            - (13_187.0 + 1.6 * t) * sc_
             + (1426.0 - 3.4 * t) * sp
-            - (517.0 - 1.2 * t) * (sc * cp + cc * sp)
-            + (217.0 - 0.5 * t) * (sc * cp - cc * sp)
+            - (517.0 - 1.2 * t) * (sc_ * cp + cc * sp)
+            + (217.0 - 0.5 * t) * (sc_ * cp - cc * sp)
             + (129.0 + 0.1 * t) * sb
             + 48.0 * sr
             - 22.0 * sa
             + (17.0 - 0.1 * t) * sp2
             - 15.0 * (sp * cn + cp * sn)
-            - (16.0 - 0.1 * t) * (sc * cp2 + cc * sp2)
+            - (16.0 - 0.1 * t) * (sc_ * cp2 + cc * sp2)
             - 12.0 * (sn * cp - cn * sp);
 
     dpsi += -6.0 * (sn * cr - cn * sr) - 5.0 * (sb * cp - cb * sp)
@@ -274,7 +280,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         + (sp * cn2 + cp * sn2)
         + (sn * cq - cn * sq)
         - (sp * ca + cp * sa)
-        - (2274.0 + 0.2 * t) * sh
+        - (2_274.0 + 0.2 * t) * sh
         + (712.0 + 0.1 * t) * sl
         - (386.0 + 0.4 * t) * ss
         - 301.0 * sj
@@ -288,7 +294,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         - 38.0 * sf
         + 29.0 * sl2;
 
-    dpsi += 29.0 * (sc * cl + cc * sl) - 31.0 * sk
+    dpsi += 29.0 * (sc_ * cl + cc * sl) - 31.0 * sk
         + 26.0 * sx
         + 21.0 * (ss * cl - cs * sl)
         + 16.0 * (sn * cg - cn * sg)
@@ -299,7 +305,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         - 7.0 * (sh * cp - ch * sp)
         - 8.0 * (sf * cl + cf * sl)
         + 6.0 * (sl * cd2 + cl * sd2)
-        + 6.0 * (sc * cl2 + cc * sl2)
+        + 6.0 * (sc_ * cl2 + cc * sl2)
         - 6.0 * (sn * cd2 + cn * sd2)
         - 7.0 * se
         + 6.0 * (sb * cl + cb * sl)
@@ -334,7 +340,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         + (sb * cl2 + cb * sl2)
         - (sf * cl2 + cf * sl2)
         - (st * ca - ct * sa)
-        + (sc * cx + cc * sx)
+        + (sc_ * cx + cc * sx)
         + (sj * cr + cj * sr)
         - (sg * cx + cg * sx);
 
@@ -350,18 +356,17 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         - (sf * cd2 + cf * sd2)
         + (sp * cd + cp * sd);
 
-    // Series expansion for nutation in obliquity (Δε), in 0.0001 arcseconds
-    let mut deps = (92025.0 + 8.9 * t) * cn - (895.0 - 0.5 * t) * cn2 - 24.0 * (cm * cn - sm * sn)
+    let mut deps = (92_025.0 + 8.9 * t) * cn - (895.0 - 0.5 * t) * cn2 - 24.0 * (cm * cn - sm * sn)
         + (cm * cn2 - sm * sn2)
         + (cb * cp2 + sb * sp2)
-        + (5736.0 - 3.1 * t) * cc
+        + (5_736.0 - 3.1 * t) * cc
         + (54.0 - 0.1 * t) * cp
-        + (224.0 - 0.6 * t) * (cc * cp - sc * sp)
-        - (95.0 - 0.3 * t) * (cc * cp + sc * sp)
+        + (224.0 - 0.6 * t) * (cc * cp - sc_ * sp)
+        - (95.0 - 0.3 * t) * (cc * cp + sc_ * sp)
         - 70.0 * cb
         + cr
         + 9.0 * (cp * cn - sp * sn)
-        + 7.0 * (cc * cp2 - sc * sp2)
+        + 7.0 * (cc * cp2 - sc_ * sp2)
         + 6.0 * (cn * cp + sn * sp)
         + 3.0 * (cn * cr + sn * sr)
         + 3.0 * (cb * cp + sb * sp)
@@ -378,7 +383,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         + 27.0 * ct
         + 16.0 * cf
         - cl2
-        - 12.0 * (cc * cl - sc * sl)
+        - 12.0 * (cc * cl - sc_ * sl)
         + 13.0 * ck
         - cx
         - 10.0 * (cs * cl + ss * sl)
@@ -388,7 +393,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         - 3.0 * (ch * cp - sh * sp)
         + 3.0 * (ch * cp + sh * sp)
         + 3.0 * (cf * cl - sf * sl)
-        - 3.0 * (cc * cl2 - sc * sl2)
+        - 3.0 * (cc * cl2 - sc_ * sl2)
         + 3.0 * (cn * cd2 - sn * sd2)
         + 3.0 * ce
         - 3.0 * (cb * cl - sb * sl)
@@ -412,11 +417,8 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
         + (cf * cr + sf * sr)
         - (cb * cl2 - sb * sl2);
 
-    // Convert results from 0.0001 arcseconds to arcseconds
-    dpsi *= 1e-4;
-    deps *= 1e-4;
-
-    (dpsi, deps)
+    // 0.0001 arcsec → arcsec
+    (dpsi * 1e-4, deps * 1e-4)
 }
 
 /// Construct the nutation rotation matrix using the IAU 1980 nutation model.
