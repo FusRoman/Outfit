@@ -64,8 +64,6 @@ use std::{collections::HashMap, sync::Arc};
 use nalgebra::Matrix3;
 use once_cell::sync::OnceCell;
 
-use ordered_float::NotNan;
-
 use crate::{
     constants::{Degree, Kilometer, MpcCode, MpcCodeObs},
     env_state::OutfitEnv,
@@ -259,14 +257,15 @@ impl Outfit {
                 // TODO: support per-site catalog codes (not always "c")
                 let bias_rms = get_bias_rms(&self.error_model, code.to_string(), "c".to_string());
 
-                let observer = Observer {
-                    longitude: NotNan::try_from(longitude as f64).expect("Longitude cannot be NaN"),
-                    rho_cos_phi: NotNan::try_from(cos as f64).expect("Longitude cannot be NaN"),
-                    rho_sin_phi: NotNan::try_from(sin as f64).expect("Longitude cannot be NaN"),
-                    name: Some(name),
-                    ra_accuracy: bias_rms.map(|(ra, _)| NotNan::try_from(ra as f64).unwrap()),
-                    dec_accuracy: bias_rms.map(|(_, dec)| NotNan::try_from(dec as f64).unwrap()),
-                };
+                let observer = Observer::from_parallax(
+                    longitude as f64,
+                    cos as f64,
+                    sin as f64,
+                    Some(name),
+                    bias_rms.map(|(ra, _)| ra as f64),
+                    bias_rms.map(|(_, dec)| dec as f64),
+                )
+                .expect("Failed to create observer");
                 observatories.insert(code.to_string(), Arc::new(observer));
             };
         }

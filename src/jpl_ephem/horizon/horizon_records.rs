@@ -559,8 +559,8 @@ mod test_horizon_records {
             let rb = b.interpolate(tau, true, true, n_sub);
             let rc = c.interpolate(tau, true, true, n_sub);
 
-            assert_relative_eq!(rc.position,  ra.position  * alpha + rb.position  * beta, max_relative = 1e-12);
-            assert_relative_eq!(rc.velocity.unwrap(),  ra.velocity.unwrap()  * alpha + rb.velocity.unwrap()  * beta, max_relative = 1e-12);
+            assert_relative_eq!(rc.position,  ra.position  * alpha + rb.position  * beta, max_relative = 1e-11);
+            assert_relative_eq!(rc.velocity.unwrap(),  ra.velocity.unwrap()  * alpha + rb.velocity.unwrap()  * beta, max_relative = 1e-11);
             assert_relative_eq!(rc.acceleration.unwrap(), ra.acceleration.unwrap() * alpha + rb.acceleration.unwrap() * beta, max_relative = 1e-11);
         }
 

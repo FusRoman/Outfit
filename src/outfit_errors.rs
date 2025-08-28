@@ -255,11 +255,21 @@ pub enum OutfitError {
     /// Generic invalid input error with a descriptive message.
     #[error("Invalid input: {0}")]
     InvalidConversion(String),
+
+    /// Error indicating a floating-point value is NaN (Not a Number).
+    #[error("Invalid floating-point value: {0}")]
+    InvalidFloatValue(ordered_float::FloatIsNan),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
     fn from(err: rand_distr::NormalError) -> Self {
         OutfitError::NoiseInjectionError(err)
+    }
+}
+
+impl From<ordered_float::FloatIsNan> for OutfitError {
+    fn from(err: ordered_float::FloatIsNan) -> Self {
+        OutfitError::InvalidFloatValue(err)
     }
 }
 

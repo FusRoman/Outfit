@@ -24,7 +24,8 @@ impl Observatories {
         elevation: Kilometer,
         name: Option<String>,
     ) -> Arc<Observer> {
-        let obs = Observer::new(longitude, latitude, elevation, name.clone(), None, None);
+        let obs = Observer::new(longitude, latitude, elevation, name.clone(), None, None)
+            .expect("Failed to create observer");
         let arc_observer = Arc::new(obs);
         self.obs_to_uint16
             .entry_or_insert_by_key(arc_observer.clone(), self.obs_to_uint16.len() as u16);
