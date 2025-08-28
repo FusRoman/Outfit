@@ -12,12 +12,11 @@ use crate::{
     orbit_type::equinoctial_element::EquinoctialElements,
     outfit::Outfit,
     outfit_errors::OutfitError,
-    ref_system::{rotpn, RefEpoch, RefSystem},
     time::frac_date_to_mjd,
 };
 use camino::Utf8Path;
 use hifitime::Epoch;
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::Vector3;
 use std::{f64::consts::PI, ops::Range, sync::Arc};
 use thiserror::Error;
 
@@ -175,12 +174,10 @@ impl Observation {
         let obs_mjd = Epoch::from_mjd_in_time_scale(self.time, hifitime::TimeScale::TT);
 
         // 3. Earth's barycentric position in ecliptic J2000
-        let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, true);
+        let (earth_position, _) = state.get_jpl_ephem()?.earth_ephemeris(&obs_mjd, false);
 
-        // 4. Build rotation from equatorial mean J2000 to ecliptic mean J2000
-        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
-        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let matrix_elc_transform = Matrix3::from(rotpn(&ref_sys1, &ref_sys2)?);
+        // 4. get rotation from equatorial mean J2000 to ecliptic mean J2000
+        let matrix_elc_transform = state.get_rot_equmj2000_to_eclmj2000();
 
         let earth_pos_eclj2000 = matrix_elc_transform.transpose() * earth_position;
         let cart_pos_ast_eclj2000 = matrix_elc_transform * cart_pos_ast;

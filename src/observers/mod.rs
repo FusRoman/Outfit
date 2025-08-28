@@ -205,10 +205,7 @@ impl Observer {
         let earth_pos = jpl.earth_ephemeris(epoch, false).0;
 
         // Transform observer position from ecliptic to equatorial J2000
-        let ref_sys1 = RefSystem::Eclm(RefEpoch::J2000);
-        let ref_sys2 = RefSystem::Equm(RefEpoch::J2000);
-        let rot = rotpn(&ref_sys1, &ref_sys2)?;
-        let rot_matrix = Matrix3::from(rot).transpose();
+        let rot_matrix = state.get_rot_eclmj2000_to_equmj2000().transpose();
 
         Ok(earth_pos + rot_matrix * obs_pos_ecl)
     }

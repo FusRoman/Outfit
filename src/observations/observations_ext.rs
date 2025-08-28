@@ -612,7 +612,7 @@ impl ObservationIOD for Observations {
 
             // For each noisy realization, attempt orbit determination
             for realization in realizations {
-                match realization.prelim_orbit() {
+                match realization.prelim_orbit(state) {
                     Ok(gauss_res) => {
                         let orbit = gauss_res.get_orbit();
                         let equinoctial_elements = orbit.to_equinoctial()?;
