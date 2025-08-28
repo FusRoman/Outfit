@@ -132,7 +132,7 @@ impl Observer {
 
         // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
         // based on the hifitime crate
-        let mjd_ut1 = tmjd.to_ut1(ut1_provider.to_owned());
+        let mjd_ut1 = tmjd.to_ut1(ut1_provider);
         let tut = mjd_ut1.to_mjd_tai_days();
 
         // Compute the Greenwich sideral apparent time
