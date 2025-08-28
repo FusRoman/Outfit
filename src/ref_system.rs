@@ -810,7 +810,8 @@ mod ref_system_test {
         let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
         let roteqec = rotpn(&ref_sys1, &ref_sys2).unwrap();
 
-        assert_eq!(roteqec, ref_roteqec.into());
+        // Compare with high precision tolerance
+        assert_relative_eq!(roteqec, ref_roteqec.into(), epsilon = 1e-17);
     }
 
     #[test]

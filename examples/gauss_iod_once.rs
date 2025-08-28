@@ -16,6 +16,8 @@ use outfit::outfit_errors::OutfitError;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+use std::{thread, time::Duration};
+
 /// Run Gauss IOD on a single trajectory and return the best orbit and RMS.
 ///
 /// Arguments
@@ -85,9 +87,21 @@ fn main() -> Result<(), OutfitError> {
     // Run IOD once for the requested object.
     let (best, rms) = run_iod_once(&mut env, &mut set, &obj)?;
 
+    thread::sleep(Duration::from_millis(500)); // pause 0,5 s
+
+    // Run IOD once for the requested object.
+    let (best2, rms2) = run_iod_once(&mut env, &mut set, &obj)?;
+
     if verbose {
         eprintln!("[gauss_iod_once] object = {obj:?}, rms(mas) = {rms}");
         if let Some(gr) = best {
+            eprintln!("[gauss_iod_once] orbit = {:?}", gr.get_orbit());
+        } else {
+            eprintln!("[gauss_iod_once] no orbit found");
+        }
+
+        eprintln!("[gauss_iod_once] object = {obj:?}, rms(mas) = {rms2}");
+        if let Some(gr) = best2 {
             eprintln!("[gauss_iod_once] orbit = {:?}", gr.get_orbit());
         } else {
             eprintln!("[gauss_iod_once] no orbit found");
