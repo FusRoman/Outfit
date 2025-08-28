@@ -54,6 +54,7 @@
 //! use nalgebra::{Vector3, Matrix3};
 //! use outfit::outfit::Outfit;
 //! use outfit::error_models::ErrorModel;
+//! use outfit::observers::{Observer, helio_obs_pos};
 //!
 //! // 1) Environment (JPL ephem + UT1) and site
 //! let state = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
