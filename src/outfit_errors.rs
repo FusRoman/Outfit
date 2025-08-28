@@ -1,106 +1,113 @@
 //! # Outfit error types
 //!
-//! This module defines the [`OutfitError`](crate::outfit_errors::OutfitError) enum, the unified error type
-//! for the **Outfit** crate.  
+//! This module defines the [`OutfitError`](crate::outfit_errors::OutfitError) enum,
+//! the **unified error type** for the Outfit crate.  
+//! Each variant represents a distinct failure mode, either from external dependencies
+//! (I/O, HTTP, parsing) or internal algorithms (orbit determination, root finding).
 //!
 //! # Outfit error taxonomy (thematic groups)
 //!
-//! To make diagnostics and handling more systematic, we group variants into themes below.
+//! To help diagnostics and error handling, we classify variants into thematic groups.
 //!
 //! ## 1) Ephemerides & SPK handling
 //!
-//! **When**: Selecting the JPL source/version, opening/reading files, decoding SPK content.
+//! **When**: Selecting JPL ephemeris sources, reading SPK files, decoding binary records.
 //!
-//! - [`OutfitError::InvalidJPLStringFormat`](crate::outfit_errors::OutfitError::InvalidJPLStringFormat)
-//! - [`OutfitError::InvalidJPLEphemFileSource`](crate::outfit_errors::OutfitError::InvalidJPLEphemFileSource)
-//! - [`OutfitError::InvalidJPLEphemFileVersion`](crate::outfit_errors::OutfitError::InvalidJPLEphemFileVersion)
-//! - [`OutfitError::JPLFileNotFound`](crate::outfit_errors::OutfitError::JPLFileNotFound)
-//! - [`OutfitError::InvalidSpkDataType`](crate::outfit_errors::OutfitError::InvalidSpkDataType)
+//! - [`InvalidJPLStringFormat`](crate::outfit_errors::OutfitError::InvalidJPLStringFormat)
+//! - [`InvalidJPLEphemFileSource`](crate::outfit_errors::OutfitError::InvalidJPLEphemFileSource)
+//! - [`InvalidJPLEphemFileVersion`](crate::outfit_errors::OutfitError::InvalidJPLEphemFileVersion)
+//! - [`JPLFileNotFound`](crate::outfit_errors::OutfitError::JPLFileNotFound)
+//! - [`InvalidSpkDataType`](crate::outfit_errors::OutfitError::InvalidSpkDataType)
 //!
-//! **Typical causes**: malformed `"horizon:DE###"` strings; unsupported ephemeris revision;
-//! missing local file; unexpected SPK segment type.
+//! **Typical causes**: malformed `"horizon:DE###"` strings; unsupported ephemeris revisions;
+//! missing local SPK files; unexpected segment types.
 //!
-//! **Remediation**: validate the source string early; log available ephemeris revisions;
-//! verify file paths; assert known SPK types during parsing.
+//! **Remediation**: validate early; log available revisions; check paths; assert known SPK types.
 //!
 //! ## 2) Network & filesystem I/O
 //!
-//! **When**: Downloading MPC/JPL resources, touching files/directories, handling paths.
+//! **When**: Downloading MPC/JPL data, touching files or directories.
 //!
-//! - [`OutfitError::InvalidUrl`](crate::outfit_errors::OutfitError::InvalidUrl)
-//! - [`OutfitError::UreqHttpError`](crate::outfit_errors::OutfitError::UreqHttpError)
-//! - [`OutfitError::ReqwestError`](crate::outfit_errors::OutfitError::ReqwestError) *(feature: `jpl-download`)*
-//! - [`OutfitError::IoError`](crate::outfit_errors::OutfitError::IoError)
-//! - [`OutfitError::UnableToCreateBaseDir`](crate::outfit_errors::OutfitError::UnableToCreateBaseDir)
-//! - [`OutfitError::Utf8PathError`](crate::outfit_errors::OutfitError::Utf8PathError)
+//! - [`InvalidUrl`](crate::outfit_errors::OutfitError::InvalidUrl)
+//! - [`UreqHttpError`](crate::outfit_errors::OutfitError::UreqHttpError)
+//! - [`ReqwestError`](crate::outfit_errors::OutfitError::ReqwestError) *(feature: `jpl-download`)*
+//! - [`IoError`](crate::outfit_errors::OutfitError::IoError)
+//! - [`UnableToCreateBaseDir`](crate::outfit_errors::OutfitError::UnableToCreateBaseDir)
+//! - [`Utf8PathError`](crate::outfit_errors::OutfitError::Utf8PathError)
 //!
-//! **Typical causes**: malformed URL; HTTP errors (4xx/5xx, timeouts); missing permissions;
-//! non-UTF-8 paths on some platforms.
+//! **Typical causes**: malformed URL; HTTP 4xx/5xx; permission denied; non-UTF-8 paths.
 //!
-//! **Remediation**: sanitize/format URLs; add retries/timeouts; create directories recursively;
+//! **Remediation**: sanitize URLs; retry with backoff; create directories recursively;
 //! normalize/encode paths.
 //!
 //! ## 3) Parsing & data ingestion
 //!
-//! **When**: Parsing observations, fixed-width legacy records, or internal byte streams.
+//! **When**: Parsing observations, fixed-width records, or internal streams.
 //!
-//! - [`OutfitError::NomParsingError`](crate::outfit_errors::OutfitError::NomParsingError)
-//! - [`OutfitError::Parsing80ColumnFileError`](crate::outfit_errors::OutfitError::Parsing80ColumnFileError)
+//! - [`NomParsingError`](crate::outfit_errors::OutfitError::NomParsingError)
+//! - [`Parsing80ColumnFileError`](crate::outfit_errors::OutfitError::Parsing80ColumnFileError)
 //!
-//! **Typical causes**: schema drift; corrupted inputs; unexpected whitespace/locale separators.
+//! **Typical causes**: schema drift; corrupted inputs; locale-specific formats.
 //!
-//! **Remediation**: strengthen parsers with tolerant combinators; surface line/column context;
-//! round-trip tests with golden files.
+//! **Remediation**: strengthen parsers; surface line/column context; round-trip with golden files.
 //!
 //! ## 4) Numerical methods & stochastic routines
 //!
-//! **When**: Root-finding, complex polynomial solvers, Gaussian noise injection.
+//! **When**: Root finding, polynomial solving, Gaussian noise injection.
 //!
-//! - [`OutfitError::RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError)
-//! - [`OutfitError::PolynomialRootFindingFailed`](crate::outfit_errors::OutfitError::PolynomialRootFindingFailed)
-//! - [`OutfitError::NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError)
+//! - [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError)
+//! - [`PolynomialRootFindingFailed`](crate::outfit_errors::OutfitError::PolynomialRootFindingFailed)
+//! - [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError)
+//! - [`InvalidFloatValue`](crate::outfit_errors::OutfitError::InvalidFloatValue)
 //!
-//! **Typical causes**: poor initial guesses; ill-conditioned polynomials; invalid σ parameters.
+//! **Typical causes**: poor initial guesses; ill-conditioned polynomials; invalid σ; NaN propagation.
 //!
-//! **Remediation**: guard preconditions and parameter ranges; implement fallbacks
-//! or multiple initial seeds; log residuals and iteration counts.
+//! **Remediation**: guard parameter ranges; multiple seeds; log residuals; check NaN early.
 //!
 //! ## 5) Reference frames & orbit determination
 //!
-//! **When**: Building frame rotations, IOD preconditions, sanity checks on states.
+//! **When**: Building rotation matrices, running IOD, checking orbital states.
 //!
-//! - [`OutfitError::InvalidIODParameter`](crate::outfit_errors::OutfitError::InvalidIODParameter)
-//! - [`OutfitError::InvalidRefSystem`](crate::outfit_errors::OutfitError::InvalidRefSystem)
-//! - [`OutfitError::VelocityCorrectionError`](crate::outfit_errors::OutfitError::VelocityCorrectionError)
-//! - [`OutfitError::InvalidOrbit`](crate::outfit_errors::OutfitError::InvalidOrbit)
-//! - [`OutfitError::SingularDirectionMatrix`](crate::outfit_errors::OutfitError::SingularDirectionMatrix)
-//! - [`OutfitError::SpuriousRootDetected`](crate::outfit_errors::OutfitError::SpuriousRootDetected)
-//! - [`OutfitError::GaussNoRootsFound`](crate::outfit_errors::OutfitError::GaussNoRootsFound)
+//! - [`InvalidIODParameter`](crate::outfit_errors::OutfitError::InvalidIODParameter)
+//! - [`InvalidRefSystem`](crate::outfit_errors::OutfitError::InvalidRefSystem)
+//! - [`VelocityCorrectionError`](crate::outfit_errors::OutfitError::VelocityCorrectionError)
+//! - [`InvalidOrbit`](crate::outfit_errors::OutfitError::InvalidOrbit)
+//! - [`SingularDirectionMatrix`](crate::outfit_errors::OutfitError::SingularDirectionMatrix)
+//! - [`SpuriousRootDetected`](crate::outfit_errors::OutfitError::SpuriousRootDetected)
+//! - [`GaussNoRootsFound`](crate::outfit_errors::OutfitError::GaussNoRootsFound)
+//! - [`InvalidConversion`](crate::outfit_errors::OutfitError::InvalidConversion)
 //!
-//! **Typical causes**: coplanar/degenerate geometry; negative/near-zero ranges;
-//! inconsistent elements; unsupported frame transitions.
+//! **Typical causes**: coplanar geometry; invalid orbital elements; unsupported frame conversions.
 //!
-//! **Remediation**: pre-filter observations (geometry checks); enforce bounds;
-//! provide multiple IOD seeds; degrade gracefully to alternative solvers.
+//! **Remediation**: pre-filter observations; enforce numeric bounds; fall back to alternative solvers.
 //!
 //! ## 6) Observation catalog & indexing
 //!
-//! **When**: Looking up observations by index or key in internal stores.
+//! **When**: Looking up observations in internal stores.
 //!
-//! - [`OutfitError::ObservationNotFound`](crate::outfit_errors::OutfitError::ObservationNotFound)
+//! - [`ObservationNotFound`](crate::outfit_errors::OutfitError::ObservationNotFound)
 //!
 //! **Typical causes**: stale indices; filtered/compacted buffers.
 //!
-//! **Remediation**: validate indices; prefer keyed lookups; add debug metadata in errors.
+//! **Remediation**: validate indices; prefer keyed lookups; embed metadata in errors.
+//!
+//! ## 7) Error model configuration
+//!
+//! **When**: Loading or selecting observational error models.
+//!
+//! - [`InvalidErrorModel`](crate::outfit_errors::OutfitError::InvalidErrorModel)
+//! - [`InvalidErrorModelFilePath`](crate::outfit_errors::OutfitError::InvalidErrorModelFilePath)
+//!
+//! **Typical causes**: wrong model identifier; bad configuration file path.
+//!
+//! **Remediation**: validate identifiers against registry; check file paths upfront.
 //!
 //! ---
 //!
 //! ## Testing & equality
 //!
-//! - [`OutfitError`](crate::outfit_errors::OutfitError) implements [`PartialEq`] for *deterministic* variants; variants that
-//!   wrap opaque external errors (e.g., I/O/HTTP) compare equal by *kind* only.
-//! - Use pattern matches in tests to assert the right **class** of failure without relying
-//!   on OS-/locale-dependent strings.
+//! - [`OutfitError`](crate::outfit_errors::OutfitError) implements [`PartialEq`] for deterministic variants.
+//! - Variants wrapping opaque errors (e.g., I/O, HTTP) compare equal by kind only.
 //!
 //! ```rust,ignore
 //! match result {
@@ -110,15 +117,12 @@
 //! }
 //! ```
 //!
-//! `OutfitError` implements [`thiserror::Error`] for user-friendly messages,
-//! as well as [`PartialEq`] for convenient testing and assertions.
-//!
 //! ## See also
 //! -------------
-//! * [`Outfit`](crate::outfit::Outfit) – main context using this error type.
-//! * [`ParseObsError`](crate::observations::ParseObsError) – specific parser error re-used here.
-//! * [`roots::SearchError`] – root-finding errors wrapped into this type.
-//! * [`rand_distr::NormalError`] – Gaussian noise generation errors.
+//! * [`Outfit`](crate::outfit::Outfit) – main crate context using this error type.
+//! * [`ParseObsError`](crate::observations::ParseObsError) – observation parsing errors.
+//! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
+//! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
 //!
 //! ## Example
 //! ```rust,ignore
@@ -158,56 +162,56 @@ pub enum OutfitError {
     InvalidJPLEphemFileVersion(String),
 
     /// Invalid URL string (parse failure).
-    #[error("Invalid URL: {0}")]
+    #[error("Invalid URL string: {0}")]
     InvalidUrl(String),
 
     /// HTTP error raised by [`ureq`] client.
-    #[error("HTTP ureq error: {0}")]
+    #[error("HTTP request failed (ureq): {0}")]
     UreqHttpError(#[from] ureq::Error),
 
     /// Filesystem I/O error (open/read/write).
-    #[error("Unable to perform file operation: {0}")]
+    #[error("Filesystem I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
     /// HTTP error raised by [`reqwest`] client (only with `jpl-download` feature).
     #[cfg(feature = "jpl-download")]
-    #[error("HTTP reqwest error: {0}")]
+    #[error("HTTP request failed (reqwest): {0}")]
     ReqwestError(#[from] reqwest::Error),
 
     /// Unable to create the base directory for JPL ephemeris file storage.
-    #[error("Base dir creation error for JPL ephemeris file: {0}")]
+    #[error("Failed to create base directory for JPL ephemeris file: {0}")]
     UnableToCreateBaseDir(String),
 
     /// UTF-8 error when decoding a filesystem path.
-    #[error("UTF-8 Path error: {0}")]
+    #[error("Filesystem path is not valid UTF-8: {0}")]
     Utf8PathError(String),
 
     /// JPL ephemeris file not found at the expected location.
-    #[error("JPL File not found at: {0}")]
+    #[error("JPL ephemeris file not found: {0}")]
     JPLFileNotFound(String),
 
     /// Failure during polynomial or numerical root finding (from `roots` crate).
-    #[error("ROOTS finding error: {0}")]
+    #[error("Numerical root finding failed: {0}")]
     RootFindingError(#[from] roots::SearchError),
 
     /// Observation not found (index out of range or missing data).
-    #[error("Observation not found: {0}")]
+    #[error("Observation not found at index: {0}")]
     ObservationNotFound(usize),
 
     /// Invalid error model specification (e.g., unknown identifier).
-    #[error("Invalid Error model: {0}")]
+    #[error("Invalid error model identifier: {0}")]
     InvalidErrorModel(String),
 
     /// Invalid file path provided for an error model file.
-    #[error("Invalid File Path for Error model: {0}")]
+    #[error("Invalid error model file path: {0}")]
     InvalidErrorModelFilePath(String),
 
     /// Error during parsing with `nom` parser combinators.
-    #[error("Error during the nom parsing: {0}")]
+    #[error("Parsing error (nom): {0}")]
     NomParsingError(String),
 
     /// Error while parsing legacy 80-column formatted observation files.
-    #[error("Error during the 80 column file parsing: {0}")]
+    #[error("Parsing error in 80-column observation file: {0}")]
     Parsing80ColumnFileError(ParseObsError),
 
     /// Gaussian noise generation failed (invalid parameters for normal distribution).
@@ -215,29 +219,27 @@ pub enum OutfitError {
     NoiseInjectionError(rand_distr::NormalError),
 
     /// The unit direction matrix is singular (cannot invert; likely coplanar observations).
-    #[error(
-        "Unit direction matrix is singular (cannot be inverted); observations may be coplanar"
-    )]
+    #[error("Singular direction matrix (cannot invert); observations may be coplanar")]
     SingularDirectionMatrix,
 
     /// Aberth–Ehrlich method failed to find acceptable complex polynomial roots.
-    #[error("Aberth–Ehrlich method failed to find acceptable complex roots")]
+    #[error("Polynomial root finding failed (Aberth–Ehrlich method did not converge)")]
     PolynomialRootFindingFailed,
 
     /// Spurious root detected (e.g., negative or near-zero geocentric distance).
-    #[error("Spurious root detected (e.g., negative or near-zero geocentric distance)")]
+    #[error("Spurious root detected (negative or near-zero geocentric distance)")]
     SpuriousRootDetected,
 
     /// Gauss method for initial orbit determination failed to find roots.
-    #[error("Gauss method failed to find roots")]
+    #[error("Initial orbit determination (Gauss method) failed to find valid roots")]
     GaussNoRootsFound,
 
     /// Invalid SPK segment data type in JPL ephemeris file.
-    #[error("Invalid SPK data type: {0}")]
+    #[error("Invalid SPK segment data type: {0}")]
     InvalidSpkDataType(i32),
 
     /// Invalid input parameter for initial orbit determination.
-    #[error("Invalid IOD parameter: {0}")]
+    #[error("Invalid parameter for initial orbit determination: {0}")]
     InvalidIODParameter(String),
 
     /// Invalid reference system or unsupported transformation request.
@@ -245,19 +247,19 @@ pub enum OutfitError {
     InvalidRefSystem(String),
 
     /// Failure during velocity correction procedure.
-    #[error("Velocity correction error: {0}")]
+    #[error("Velocity correction procedure failed: {0}")]
     VelocityCorrectionError(String),
 
     /// Invalid or inconsistent orbital elements/state vector.
-    #[error("Invalid orbit: {0}")]
+    #[error("Invalid orbital state or inconsistent elements: {0}")]
     InvalidOrbit(String),
 
     /// Generic invalid input error with a descriptive message.
-    #[error("Invalid input: {0}")]
+    #[error("Invalid input conversion: {0}")]
     InvalidConversion(String),
 
     /// Error indicating a floating-point value is NaN (Not a Number).
-    #[error("Invalid floating-point value: {0}")]
+    #[error("Invalid floating-point value (NaN encountered): {0}")]
     InvalidFloatValue(ordered_float::FloatIsNan),
 }
 
