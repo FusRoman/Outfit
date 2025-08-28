@@ -61,12 +61,16 @@
 //! ```rust, no_run
 //! use outfit::initial_orbit_determination::gauss::GaussObs;
 //! use nalgebra::Vector3;
+//! use outfit::outfit::Outfit;
+//! use outfit::error_models::ErrorModel;
+//!
+//! let env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
 //! // Build GaussObs (here positions are assumed precomputed)
 //! let gauss: GaussObs = unimplemented!("Construct GaussObs from RA/DEC/time and observer state");
 //!
 //! // Run the preliminary orbit computation
-//! let result = gauss.prelim_orbit().unwrap();
+//! let result = gauss.prelim_orbit(&env).unwrap();
 //! println!("Semi-major axis: {}", result.get_orbit().as_keplerian().unwrap().semi_major_axis);
 //! ```
 //!
@@ -95,9 +99,6 @@ use crate::orb_elem::eccentricity_control;
 use crate::orbit_type::OrbitalElements;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
-use crate::ref_system::rotpn;
-use crate::ref_system::RefEpoch;
-use crate::ref_system::RefSystem;
 use aberth::aberth;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
@@ -699,6 +700,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// ---------
+    /// * `state` – The outfit global state containing the rotation matrix
     /// * `asteroid_position` – Cartesian heliocentric position vector of the object (in AU), in equatorial J2000 frame.
     /// * `asteroid_velocity` – Cartesian heliocentric velocity vector of the object (in AU/day), in equatorial J2000 frame.
     /// * `reference_epoch` – Epoch (in MJD TT) corresponding to the state vector, used as the reference time for the elements.
@@ -726,17 +728,16 @@ impl GaussObs {
     /// * [`KeplerianElements`] – definition of the orbital elements struct.
     fn compute_orbit_from_state(
         &self,
+        state: &Outfit,
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
     ) -> Result<OrbitalElements, OutfitError> {
-        // Compute the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
-        let ref_sys1 = RefSystem::Equm(RefEpoch::J2000);
-        let ref_sys2 = RefSystem::Eclm(RefEpoch::J2000);
-        let roteqec = rotpn(&ref_sys1, &ref_sys2)?;
+        // get the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
+        let roteqec = state.get_rot_equmj2000_to_eclmj2000();
 
         // Apply the transformation to position and velocity vectors
-        let matrix_elc_transform = Matrix3::from(roteqec).transpose();
+        let matrix_elc_transform = roteqec.transpose();
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 
@@ -759,6 +760,10 @@ impl GaussObs {
     /// - Evaluation and filtering of roots based on physical criteria (e.g. eccentricity),
     /// - Optional iterative refinement of the orbit via velocity correction.
     ///
+    /// Arguments
+    /// ---------
+    /// * `state` – The outfit global state containing the rotation matrix
+    ///
     /// Returns
     /// --------
     /// * `Ok(GaussResult::PrelimOrbit)` if a valid solution is found but the correction step fails or is skipped.
@@ -770,7 +775,7 @@ impl GaussObs {
     /// * [`GaussResult`] – Enum indicating whether the orbit is preliminary or corrected.
     /// * [`GaussObs::pos_and_vel_correction`] – Performs the refinement step on the orbital state.
     /// * [`GaussObs::solve_8poly`] – Finds valid roots of the 8th-degree distance polynomial.
-    pub fn prelim_orbit(&self) -> Result<GaussResult, OutfitError> {
+    pub fn prelim_orbit(&self, state: &Outfit) -> Result<GaussResult, OutfitError> {
         // Compute core quantities: time intervals, direction matrix and its inverse, and coefficients
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) = self.gauss_prelim()?;
 
@@ -812,6 +817,7 @@ impl GaussObs {
         ) else {
             // If correction failed or diverged, return preliminary orbit
             return Ok(GaussResult::PrelimOrbit(self.compute_orbit_from_state(
+                state,
                 &asteroid_pos_all_time.column(1).into(),
                 &asteroid_vel,
                 reference_epoch,
@@ -820,6 +826,7 @@ impl GaussObs {
 
         // Correction succeeded; return refined orbit
         Ok(GaussResult::CorrectedOrbit(self.compute_orbit_from_state(
+            state,
             &corrected_pos.column(1).into(),
             &corrected_vel,
             corrected_epoch,
@@ -955,7 +962,10 @@ impl GaussObs {
 pub(crate) mod gauss_test {
 
     use super::*;
-    use crate::orbit_type::{keplerian_element::KeplerianElements, orbit_type_test::approx_equal};
+    use crate::{
+        orbit_type::{keplerian_element::KeplerianElements, orbit_type_test::approx_equal},
+        unit_test_global::OUTFIT_HORIZON_TEST,
+    };
 
     #[test]
     fn test_gauss_prelim() {
@@ -1225,6 +1235,7 @@ pub(crate) mod gauss_test {
 
     #[test]
     fn test_solve_orbit() {
+        let env = &OUTFIT_HORIZON_TEST.0;
         let tol = 1e-13;
 
         let gauss = GaussObs {
@@ -1253,7 +1264,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit().unwrap();
+        let binding = gauss.prelim_orbit(env).unwrap();
         let prelim_orbit = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
@@ -1287,7 +1298,7 @@ pub(crate) mod gauss_test {
             .into(),
         };
 
-        let binding = a.prelim_orbit().unwrap();
+        let binding = a.prelim_orbit(env).unwrap();
         let prelim_orbit_a = binding.get_orbit();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
@@ -1333,7 +1344,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit().unwrap();
+        let binding = gauss.prelim_orbit(env).unwrap();
         let prelim_orbit_b = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software

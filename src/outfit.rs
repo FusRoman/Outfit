@@ -61,6 +61,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use nalgebra::Matrix3;
 use once_cell::sync::OnceCell;
 
 use ordered_float::NotNan;
@@ -72,6 +73,7 @@ use crate::{
     jpl_ephem::download_jpl_file::EphemFileSource,
     observers::{observatories::Observatories, Observer},
     outfit_errors::OutfitError,
+    ref_system::{rotpn, RefEpoch, RefSystem},
 };
 
 use crate::jpl_ephem::JPLEphem;
@@ -83,6 +85,8 @@ pub struct Outfit {
     jpl_source: EphemFileSource,
     jpl_ephem: OnceCell<JPLEphem>,
     error_model: ErrorModelData,
+    rot_equmj2000_to_eclmj2000: Matrix3<f64>,
+    rot_eclmj2000_to_equmj2000: Matrix3<f64>,
 }
 
 impl Outfit {
@@ -107,13 +111,35 @@ impl Outfit {
     /// * [`get_jpl_ephem`](crate::outfit::Outfit::get_jpl_ephem) – Lazy initialization and access to the ephemeris handle.
     /// * [`ErrorModel::read_error_model_file`](crate::error_models::ErrorModel::read_error_model_file) – Underlying loader for the model data.
     pub fn new(jpl_file: &str, error_model: ErrorModel) -> Result<Self, OutfitError> {
+        let rot1 = rotpn(
+            &RefSystem::Equm(RefEpoch::J2000),
+            &RefSystem::Eclm(RefEpoch::J2000),
+        )?;
+
+        let rot2 = rotpn(
+            &RefSystem::Eclm(RefEpoch::J2000),
+            &RefSystem::Equm(RefEpoch::J2000),
+        )?;
+
         Ok(Outfit {
             env_state: OutfitEnv::new(),
             observatories: Observatories::new(),
             jpl_source: jpl_file.try_into()?,
             jpl_ephem: OnceCell::new(),
             error_model: error_model.read_error_model_file()?,
+            rot_equmj2000_to_eclmj2000: rot1,
+            rot_eclmj2000_to_equmj2000: rot2,
         })
+    }
+
+    /// Get the rotation matrix from equatorial J2000 to ecliptic J2000.
+    /// This matrix is used to transform coordinates from the equatorial frame to the ecliptic frame.
+    pub fn get_rot_equmj2000_to_eclmj2000(&self) -> &Matrix3<f64> {
+        &self.rot_equmj2000_to_eclmj2000
+    }
+
+    pub fn get_rot_eclmj2000_to_equmj2000(&self) -> &Matrix3<f64> {
+        &self.rot_eclmj2000_to_equmj2000
     }
 
     /// Get the lazily-initialized JPL ephemerides handle.
