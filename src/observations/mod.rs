@@ -471,6 +471,7 @@ mod test_observations {
                 None,
                 None,
             )
+            .unwrap()
         }
 
         /// Helper: simple circular equinoctial elements for a 1 AU, zero inclination orbit.
@@ -630,8 +631,9 @@ mod test_observations {
             /// - latitude in [-90, 90] degrees
             /// - elevation from 0 to 5 km
             fn arb_observer() -> impl Strategy<Value = Observer> {
-                (-180.0..180.0, -90.0..90.0, 0.0..5.0)
-                    .prop_map(|(lon, lat, elev)| Observer::new(lon, lat, elev, None, None, None))
+                (-180.0..180.0, -90.0..90.0, 0.0..5.0).prop_map(|(lon, lat, elev)| {
+                    Observer::new(lon, lat, elev, None, None, None).unwrap()
+                })
             }
 
             /// Strategy: generates equinoctial elements with a wide range,
@@ -677,6 +679,7 @@ mod test_observations {
                     None,
                     None,
                 )
+                .unwrap()
             }
 
             proptest! {
@@ -829,7 +832,7 @@ mod test_observations {
                     time: 59000.0,
                 };
 
-                let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+                let result = obs.compute_apparent_position(state, &equinoctial, &observer.unwrap());
                 assert!(
                     result.is_err(),
                     "Hyperbolic or parabolic orbits should currently return an error"
@@ -890,6 +893,7 @@ mod test_observations {
                 None,
                 None,
             )
+            .unwrap()
         }
 
         fn simple_equinoctial(epoch: f64) -> EquinoctialElements {
@@ -1087,8 +1091,9 @@ mod test_observations {
             use proptest::prelude::*;
 
             fn arb_observer() -> impl Strategy<Value = Observer> {
-                (-180.0..180.0, -90.0..90.0, 0.0..5.0)
-                    .prop_map(|(lon, lat, elev)| Observer::new(lon, lat, elev, None, None, None))
+                (-180.0..180.0, -90.0..90.0, 0.0..5.0).prop_map(|(lon, lat, elev)| {
+                    Observer::new(lon, lat, elev, None, None, None).unwrap()
+                })
             }
 
             fn arb_elliptical_equinoctial() -> impl Strategy<Value = EquinoctialElements> {
