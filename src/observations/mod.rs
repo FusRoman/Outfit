@@ -1,3 +1,90 @@
+//! # Observations: ingestion, representation, and sky-projection utilities
+//!
+//! This module defines the core types and helpers to **ingest**, **store**, and **use**
+//! optical astrometric observations for orbit determination workflows.
+//!
+//! ## What lives here?
+//!
+//! - [`Observation`] — a single astrometric measurement (RA/DEC at an epoch) with:
+//!   - the observing site identifier (`u16`),
+//!   - precomputed **geocentric** and **heliocentric** site positions at the epoch,
+//!   - astrometric uncertainties for RA/DEC.
+//!
+//! - Parsing & I/O:
+//!   - [`from_80col`] (private) and [`extract_80col`] — read **80-column MPC** formatted files.
+//!   - [`ades_reader`] — ADES ingestion utilities (XML/CSV).
+//!   - `parquet_reader` (private) — internal helpers to read columnar batches.
+//!
+//! - Batch/transform helpers:
+//!   - [`trajectory_ext`] — build batches of observations (RA/DEC/time + σ) and convert to [`Observation`]s.
+//!   - [`observations_ext`] — higher-level operations on collections (triplet selection, RMS windows, metrics).
+//!   - [`triplets_iod`] — construction of observation triplets for **Gauss IOD**.
+//!
+//! ## Units & reference frames
+//!
+//! - **Angles**: radians  
+//! - **Time**: MJD (TT scale)  
+//! - **Positions**: AU, **equatorial mean J2000** (J2000/ICRS-aligned)  
+//!
+//! These conventions are enforced by [`Observation::new`], which computes and stores both
+//! the **geocentric** and **heliocentric** site positions at the observation epoch using the
+//! [`Outfit`] environment (UT1 provider, JPL ephemerides, site database).
+//!
+//! ## Typical workflow
+//!
+//! 1. **Ingest** observations:
+//!    - From MPC 80-col: [`extract_80col`] → `Vec<Observation>` + object identifier.
+//!    - From ADES: via [`ades_reader`] into typed batches, then [`observation_from_batch`].
+//!
+//! 2. **Precompute/Access positions** per observation:
+//!    - `get_observer_earth_position()` — geocentric site vector at epoch.
+//!    - `get_observer_helio_position()` — heliocentric site vector at epoch.
+//!
+//! 3. **Project to sky** (prediction / fitting):
+//!    - [`Observation::compute_apparent_position`] — propagate an orbit (equinoctial elements),
+//!      apply frame transforms + aberration, and return apparent `(RA, DEC)`.
+//!    - [`Observation::ephemeris_error`] — normalized squared residual for a single observation.
+//!
+//! 4. **Build triplets and run IOD**:
+//!    - Use [`observations_ext`] / [`triplets_iod`] to form high-quality triplets and feed
+//!      them to the Gauss solver (see `initial_orbit_determination::gauss`).
+//!
+//! ## Key types & functions
+//!
+//! - [`Observation`] — single measurement with site & precomputed positions.
+//! - [`observation_from_batch`] — turn a batch (RA/DEC/time + σ) into `Vec<Observation>`.
+//! - [`extract_80col`] — parse an MPC 80-column file to `(Observations, ObjectNumber)`.
+//! - [`Observation::compute_apparent_position`] — apparent `(RA, DEC)` from an orbit.
+//! - [`Observation::ephemeris_error`] — per-observation χ²-like contribution.
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use outfit::observations::{extract_80col, Observation};
+//! use outfit::outfit::Outfit;
+//! use outfit::error_models::ErrorModel;
+//! use camino::Utf8Path;
+//!
+//! let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//!
+//! // 1) Load observations from an MPC 80-col file
+//! let (obs, object_id) = extract_80col(&mut env, Utf8Path::new("K09R05F.80c"))?;
+//!
+//! // 2) Predict apparent position for the first obs given some orbit
+//! // (equinoctial elements obtained elsewhere)
+//! # use outfit::orbit_type::equinoctial_element::EquinoctialElements;
+//! # let eq: EquinoctialElements = unimplemented!();
+//! let (ra, dec) = obs[0].compute_apparent_position(&env, &eq)?;
+//! println!("Predicted RA, DEC [rad]: {ra}, {dec}");
+//! # Ok::<(), outfit::outfit_errors::OutfitError>(())
+//! ```
+//!
+//! ## See also
+//!
+//! - [`initial_orbit_determination::gauss`] — Gauss IOD over observation triplets.
+//! - [`observers`] — site database, Earth-fixed coordinates, and transformations.
+//! - [`orbit_type::equinoctial_element::EquinoctialElements`] — propagation utilities used here.
+//! - [`cartesian_to_radec`] and [`correct_aberration`] — sky-projection helpers.
 pub mod ades_reader;
 pub mod observations_ext;
 mod parquet_reader;
@@ -20,16 +107,29 @@ use nalgebra::Vector3;
 use std::{f64::consts::PI, ops::Range, sync::Arc};
 use thiserror::Error;
 
-/// A struct containing the observer and the time, ra, dec, and rms of an observation
+/// Astrometric observation with site and precomputed observer positions.
 ///
-/// # Fields
+/// This structure represents a single optical astrometric measurement
+/// (right ascension/declination at a given epoch) together with:
+/// - the associated observing site identifier,
+/// - the observer’s **geocentric** position vector at the epoch, and
+/// - the observer’s **heliocentric** position vector at the epoch.
 ///
-/// * `observer` - The observer index (u16), unique identifier for the observer
-/// * `ra` - The right ascension of the observation in Radians
-/// * `error_ra` - The error in right ascension in Radians
-/// * `dec` - The declination of the observation in Radians
-/// * `error_dec` - The error in declination in Radians
-/// * `time` - The time of the observation
+/// Units & frames:
+/// - Angles are stored in **radians**.
+/// - Times are stored as **MJD (TT scale)**.
+/// - Position vectors are expressed in **AU**, in the **equatorial mean J2000** frame.
+///
+/// Fields
+/// -----------------
+/// * `observer` – Site identifier (`u16`) referencing an [`Observer`] known by the [`Outfit`] state.
+/// * `ra` – Right ascension `[rad]`.
+/// * `error_ra` – Uncertainty on right ascension `[rad]`.
+/// * `dec` – Declination `[rad]`.
+/// * `error_dec` – Uncertainty on declination `[rad]`.
+/// * `time` – Observation epoch as MJD (TT scale).
+/// * `observer_earth_position` – Geocentric position of the observer at `time` (AU, equatorial mean J2000).
+/// * `observer_helio_position` – Heliocentric position of the observer at `time` (AU, equatorial mean J2000).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Observation {
     pub(crate) observer: u16,
@@ -39,22 +139,43 @@ pub struct Observation {
     pub error_dec: Radian,
     pub time: MJD,
     observer_earth_position: Vector3<f64>,
+    observer_helio_position: Vector3<f64>,
 }
 
 impl Observation {
-    /// Create a new observation
+    /// Create a new astrometric observation and precompute observer positions.
+    ///
+    /// This constructor stores the astrometric angles and time, and computes the observer’s
+    /// **geocentric** and **heliocentric** position vectors at the same epoch using the
+    /// provided [`Outfit`] environment (UT1 provider, ephemerides, and site metadata).
     ///
     /// Arguments
-    /// ---------
-    /// * `observer`: the observer
-    /// * `ra`: the right ascension of the observation
-    /// * `dec`: the declination of the observation
-    /// * `time`: the time of the observation
+    /// -----------------
+    /// * `state` – Global environment providing ephemerides, UT1 provider and site database.
+    /// * `observer` – Site identifier (`u16`) referencing an [`Observer`] known by `state`.
+    /// * `ra` – Right ascension `[rad]`.
+    /// * `error_ra` – Uncertainty on right ascension `[rad]`.
+    /// * `dec` – Declination `[rad]`.
+    /// * `error_dec` – Uncertainty on declination `[rad]`.
+    /// * `time` – Observation epoch as **MJD (TT scale)**.
     ///
     /// Return
-    /// ------
-    /// * a new Observation struct
-    ///   The coordinates and the associated errors are converted from degrees and arcseconds respectively to radians.
+    /// ----------
+    /// * A `Result` with the newly created [`Observation`], or an [`OutfitError`] if:
+    ///   - the observer cannot be resolved in `state`,
+    ///   - the UT1 provider / ephemeris computation fails.
+    ///
+    /// Remarks
+    /// ------------
+    /// * `pvobs` computes the geocentric position (and velocity) of the observer from Earth rotation and site coordinates.
+    /// * `helio_position` converts the geocentric position to the heliocentric frame using the selected JPL ephemeris.
+    /// * Both positions are expressed in **AU**, **equatorial mean J2000**.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observer::pvobs`] – Geocentric position/velocity of the observing site.
+    /// * [`Observer::helio_position`] – Heliocentric position of the observing site.
+    /// * [`crate::observations::trajectory_ext::ObservationBatch`] – Batch operations on observations.
     pub fn new(
         state: &Outfit,
         observer: u16,
@@ -70,6 +191,12 @@ impl Observation {
             .get_observer_from_uint16(observer)
             .pvobs(&obs_mjd, state.get_ut1_provider())?;
 
+        let helio_obs_pos = state.get_observer_from_uint16(observer).helio_position(
+            state,
+            &obs_mjd,
+            &geo_obs_pos,
+        )?;
+
         Ok(Observation {
             observer,
             ra,
@@ -78,7 +205,51 @@ impl Observation {
             error_dec,
             time,
             observer_earth_position: geo_obs_pos,
+            observer_helio_position: helio_obs_pos,
         })
+    }
+
+    /// Get the observer heliocentric position at the observation epoch.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * *(none)* – Accessor method.
+    ///
+    /// Return
+    /// ----------
+    /// * A copy of the `3D` position vector (AU, equatorial mean J2000) of the observer
+    ///   at `self.time` (MJD TT).
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observation::new`] – Computes and stores this vector at construction.
+    /// * [`Observer::helio_position`] – Underlying routine used to compute the value.
+    pub fn get_observer_helio_position(&self) -> Vector3<f64> {
+        self.observer_helio_position
+    }
+
+    /// Get the observer geocentric position at the observation epoch.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * *(none)* – Accessor method.
+    ///
+    /// Return
+    /// ----------
+    /// * A copy of the `3D` position vector (AU, equatorial mean J2000) of the observer
+    ///   relative to the Earth’s center at `self.time` (MJD TT).
+    ///
+    /// Remarks
+    /// ------------
+    /// * This vector is computed at construction via [`Observer::pvobs`].
+    /// * Units are astronomical units (AU), in the equatorial mean J2000 frame.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observation::new`] – Computes and stores this vector at construction.
+    /// * [`Observer::pvobs`] – Underlying routine used to compute the value.
+    pub fn get_observer_earth_position(&self) -> Vector3<f64> {
+        self.observer_earth_position
     }
 
     /// Get the observer from the observation
@@ -95,70 +266,50 @@ impl Observation {
     }
 
     /// Compute the apparent equatorial coordinates (RA, DEC) of a solar system body
-    /// as seen by a specific observer at the observation time.
+    /// as seen by this observation’s site at its epoch.
     ///
-    /// # Overview
+    /// Overview
+    /// -----------------
+    /// This method determines the apparent sky position of a target body,
+    /// described by equinoctial orbital elements, as seen from the observing site
+    /// corresponding to this [`Observation`].
     ///
-    /// This function determines where an object (described by its equinoctial orbital elements)
-    /// will appear on the sky at the time of the current observation.
+    /// The computation steps are:
+    /// 1. **Orbit propagation** – Propagate the body’s state from its reference epoch to the observation epoch using a two-body model.
+    /// 2. **Reference frame handling** – Retrieve Earth’s barycentric position from the JPL ephemeris and transform to *ecliptic mean J2000*.
+    /// 3. **Observer position** – Compute the observer’s heliocentric position (Earth + site geocentric offset).
+    /// 4. **Light-time and aberration correction** – Form the observer–object vector and correct for aberration.
+    /// 5. **Conversion to equatorial coordinates** – Convert the corrected line-of-sight vector to (RA, DEC).
     ///
-    /// The computation involves:
+    /// Arguments
+    /// -----------------
+    /// * `state` – Global environment providing ephemerides, UT1 provider, and frame utilities.
+    /// * `equinoctial_element` – Orbital elements of the target body.
     ///
-    /// 1. **Orbit propagation**:
-    ///    Propagates the object's position and velocity from its reference epoch to the
-    ///    observation time using a two-body model.
+    /// Return
+    /// ----------
+    /// * `Result<(f64, f64), OutfitError>` – The apparent right ascension and declination `[rad]`.
     ///
-    /// 2. **Reference frame handling**:
-    ///    Retrieves Earth's barycentric position from a JPL ephemeris,
-    ///    and builds a rotation matrix to express positions in the *ecliptic mean J2000* frame.
+    /// Units
+    /// ----------
+    /// * Positions: AU  
+    /// * Velocities: AU/day  
+    /// * Angles: radians  
+    /// * Time: MJD TT  
     ///
-    /// 3. **Observer position**:
-    ///    Computes the geocentric position of the observer, adds Earth’s heliocentric position
-    ///    to obtain the full heliocentric position of the observer, and transforms it into the
-    ///    same frame.
+    /// Errors
+    /// ----------
+    /// Returns [`OutfitError`] if:
+    /// - Orbit propagation fails,
+    /// - Ephemeris data is unavailable,
+    /// - Reference-frame transformation fails.
     ///
-    /// 4. **Light-time and aberration corrections**:
-    ///    Forms the vector from the observer to the object and applies a simple aberration
-    ///    correction using the relative velocity of the object.
-    ///
-    /// 5. **Conversion to equatorial coordinates**:
-    ///    Converts the corrected line-of-sight vector into apparent right ascension (RA)
-    ///    and declination (DEC).
-    ///
-    /// # Arguments
-    ///
-    /// * `state` – Global application state providing JPL ephemerides, UT1 provider,
-    ///   and reference frame utilities.
-    /// * `equinoctial_element` – The equinoctial orbital elements of the target body,
-    ///   used to propagate its position at the observation time.
-    /// * `observer` – The observer's geodetic location on Earth, which determines
-    ///   the topocentric viewpoint.
-    ///
-    /// # Returns
-    ///
-    /// * `(alpha, delta)` – A tuple containing the **apparent right ascension** and
-    ///   **declination**, in **radians**.
-    ///
-    /// # Units
-    ///
-    /// * Positions: astronomical units (AU)
-    /// * Velocities: AU/day
-    /// * Angles: radians
-    /// * Time: Modified Julian Date (MJD)
-    ///
-    /// # Errors
-    ///
-    /// Returns an `OutfitError` if:
-    /// - Propagation of the orbit fails,
-    /// - JPL ephemeris data is unavailable,
-    /// - Reference frame transformation fails.
-    ///
-    /// # See also
-    ///
+    /// See also
+    /// ------------
     /// * [`EquinoctialElements::solve_two_body_problem`] – Orbit propagation.
-    /// * [`Observer::pvobs`] – Computes observer geocentric position including Earth rotation.
-    /// * [`correct_aberration`] – Corrects apparent direction due to observer motion.
-    /// * [`cartesian_to_radec`] – Converts a Cartesian vector to (RA, DEC).
+    /// * [`Observer::pvobs`] – Computes observer’s geocentric position.
+    /// * [`correct_aberration`] – Aberration correction.
+    /// * [`cartesian_to_radec`] – Convert Cartesian vectors to (RA, DEC).
     pub fn compute_apparent_position(
         &self,
         state: &Outfit,
@@ -205,40 +356,44 @@ impl Observation {
         Ok((alpha, delta))
     }
 
-    /// Compute the normalized squared astrometric residuals (RA/DEC) between an observed position and a propagated ephemeris.
+    /// Compute the normalized squared astrometric residuals (RA, DEC)
+    /// between an observed position and a propagated ephemeris.
     ///
-    /// This function compares the actual observed position (stored in `self`) to the expected astrometric position
-    /// derived from the propagation of equinoctial orbital elements using a two-body model, corrected for light aberration
-    /// and transformed into the appropriate equatorial reference frame. It returns a scalar value representing the sum of
-    /// squared, normalized residuals in RA and DEC.
+    /// Overview
+    /// -----------------
+    /// This method compares the actual astrometric measurement stored in `self`
+    /// against the expected position of the target body propagated from
+    /// equinoctial elements.  
+    /// It returns a scalar representing the sum of squared, normalized residuals
+    /// in RA and DEC.
     ///
-    /// # Arguments
-    /// ---------------
-    /// * `state` - The current application state providing ephemerides and time conversions.
-    /// * `equinoctial_element` - The orbital elements of the object used to propagate its position.
-    /// * `observer` - The observer's geographic location and observing context.
+    /// Arguments
+    /// -----------------
+    /// * `state` – Global environment providing ephemerides and time conversions.
+    /// * `equinoctial_element` – Orbital elements of the target body.
     ///
-    /// # Returns
+    /// Return
     /// ----------
-    /// * `Result<f64, OutfitError>` - A scalar value representing the weighted sum of squared residuals (dimensionless).
-    ///   This value is roughly equivalent to a reduced chi-squared contribution for a single observation (but not divided by 2).
+    /// * `Result<f64, OutfitError>` – Dimensionless scalar value representing the weighted sum
+    ///   of squared residuals. Equivalent to a chi² contribution for a single observation (without division by 2).
     ///
-    /// # Notes
+    /// Remarks
     /// ----------
-    /// - The residuals are normalized using the observation's astrometric uncertainties (`error_ra`, `error_dec`).
-    /// - Right ascension differences are corrected by `cos(dec)` to account for projection effects.
-    /// - The resulting value is **dimensionless**.
-    /// - Units: all angles are in **radians**.
+    /// * Residuals are normalized by the astrometric uncertainties `error_ra` and `error_dec`.
+    /// * RA residuals are multiplied by `cos(dec)` to account for projection effects.
+    /// * All angles are in radians.
     ///
-    /// # Errors
+    /// Errors
     /// ----------
-    /// Returns an `OutfitError` if ephemeris data or propagation fails (e.g. missing JPL ephemeris).
+    /// Returns [`OutfitError`] if propagation or ephemeris lookup fails.
     ///
-    /// # See also
-    /// * [`Observer::pvobs`] – Computes geocentric position of the observer including Earth rotation and nutation.
-    /// * [`correct_aberration`] – Applies aberration correction to the apparent direction of the body.
-    /// * [`cartesian_to_radec`] – Converts 3D Cartesian vectors into equatorial coordinates (RA/DEC).
-    /// * [`EquinoctialElements::solve_two_body_problem`] – Computes heliocentric position and velocity from orbital elements.
+    /// See also
+    /// ------------
+    /// * [`compute_apparent_position`] – Used internally to obtain predicted RA/DEC.
+    /// * [`Observer::pvobs`] – Computes observer’s geocentric position.
+    /// * [`correct_aberration`] – Applies aberration correction.
+    /// * [`cartesian_to_radec`] – Converts 3D vectors to (RA, DEC).
+    /// * [`EquinoctialElements::solve_two_body_problem`] – Two-body propagation.
     pub fn ephemeris_error(
         &self,
         state: &Outfit,
@@ -826,7 +981,13 @@ mod test_observations {
                     4.2560356749756634e-5,
                     -2.1126391698196086e-6
                 ]
-                .into()
+                .into(),
+                observer_helio_position: [
+                    -0.35113019606349866,
+                    -0.8726512942340473,
+                    -0.37829699890414364
+                ]
+                .into(),
             }
         );
 
@@ -855,7 +1016,13 @@ mod test_observations {
                     4.2531873012231404e-5,
                     -2.0988352183088593e-6
                 ]
-                .into()
+                .into(),
+                observer_helio_position: [
+                    -0.33522248840408125,
+                    -0.8780465618894304,
+                    -0.380635845615707
+                ]
+                .into(),
             }
         );
     }
@@ -947,6 +1114,7 @@ mod test_observations {
                 error_dec: 1e-3,
                 time: t_obs,
                 observer_earth_position: Vector3::zeros(),
+                observer_helio_position: Vector3::zeros(),
             };
             let (alpha, delta) = base_obs
                 .compute_apparent_position(state, &equinoctial)
@@ -961,6 +1129,7 @@ mod test_observations {
                 error_dec: 1e-3,
                 time: t_obs,
                 observer_earth_position: Vector3::zeros(),
+                observer_helio_position: Vector3::zeros(),
             };
 
             let err = obs_offset.ephemeris_error(state, &equinoctial).unwrap();
@@ -1143,6 +1312,12 @@ mod test_observations {
                     3.0499942822953885e-5,
                     -8.594304778250371e-6,
                     2.8491013919142154e-5
+                ]
+                .into(),
+                observer_helio_position: [
+                    0.9968138444702415,
+                    -0.12221921296802639,
+                    -0.05295724448160355
                 ]
                 .into(),
             }
