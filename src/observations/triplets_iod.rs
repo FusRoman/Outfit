@@ -72,9 +72,9 @@
 //! - [`triplet_weight`] – Spacing-based scoring rule.
 //! - [`GaussObs`] – Triplet container consumed by the Gauss IOD solver.
 //! - [`crate::observations::observations_ext::ObservationsExt::compute_triplets`] – Higher-level wrapper.
+use nalgebra::{Matrix3, Vector3};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use nalgebra::{Matrix3, Vector3};
 
 use crate::constants::Observations;
 use crate::initial_orbit_determination::gauss::GaussObs;
