@@ -1,23 +1,109 @@
-//! Triplet selection for initial orbit determination (Gauss method).
+//! # Triplet selection for Gauss Initial Orbit Determination (IOD)
 //!
-//! This module provides tools to:
-//! - Downsample a large set of observations to a representative subset,
-//! - Generate triplets of observations suitable for the Gauss IOD method,
-//! - Score triplets using a weight function that favors well-spaced times,
-//! - Select the best triplets using a heap-based pruning algorithm.
-
+//! Utilities to **thin**, **enumerate**, and **rank** triplets of astrometric
+//! observations prior to running the Gauss IOD solver.
+//!
+//! ## What this module does
+//!
+//! - **Downsample** dense time series to a representative subset while keeping endpoints,
+//! - **Generate** all valid triplets under configurable time-span constraints,
+//! - **Score** triplets with a spacing-based weight that favors near-uniform timing,
+//! - **Select** only the best candidates using a heap-based pruning strategy.
+//!
+//! The output is a small set of [`GaussObs`] triplets, ready to be passed to
+//! the Gauss preliminary-orbit routine.
+//!
+//! ## Workflow overview
+//!
+//! 1. **Sort in time** (in-place).
+//! 2. **Downsample** to at most *N* points with uniform coverage (always keep first/last).
+//! 3. **Enumerate** triplets `(i, j, k)` such that `dt_min ≤ t_k − t_i ≤ dt_max`.
+//! 4. **Score** each triplet with [`triplet_weight`], using `optimal_interval_time` as target spacing.
+//! 5. **Keep top-K** (lowest weight) using a `BinaryHeap` configured as a **max-heap**.
+//! 6. **Materialize** the winners as [`GaussObs`] with precomputed observer positions.
+//!
+//! ## Complexity & performance
+//!
+//! - Naïve enumeration scales as **O(n³)**.  
+//!   Downsampling plus early pruning reduces candidates dramatically for large `n`.
+//! - The heap keeps memory bounded to `O(max_triplet)`.
+//! - Weighting is **O(1)** per triplet.
+//!
+//! ## Configuration knobs (typical values)
+//!
+//! - `dt_min` *(days)*: **0.03** — minimum triplet span,
+//! - `dt_max` *(days)*: **150.0** — maximum triplet span,
+//! - `optimal_interval_time` *(days)*: **20.0** — ideal spacing for `(t₂−t₁)` and `(t₃−t₂)`,
+//! - `max_obs_for_triplets`: **100** — post-thinning observation cap,
+//! - `max_triplet`: **10** — number of best triplets to return.
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use outfit::constants::Observations;
+//! use outfit::observations::triplets_iod::generate_triplets;
+//!
+//! // Your observations loaded elsewhere:
+//! let mut obs: Observations = unimplemented!();
+//!
+//! // Build best triplets for Gauss IOD
+//! let triplets = generate_triplets(
+//!     &mut obs,
+//!     0.03,   // dt_min [days]
+//!     150.0,  // dt_max [days]
+//!     20.0,   // optimal_interval_time [days]
+//!     100,    // max_obs_for_triplets
+//!     10      // max_triplet
+//! )?;
+//!
+//! // Now pass `triplets` to your Gauss solver…
+//! # Ok::<(), outfit::outfit_errors::OutfitError>(())
+//! ```
+//!
+//! ## Guarantees & edge cases
+//!
+//! - Endpoints are **always preserved** by the downsampler.
+//! - If the input has fewer than three observations, triplet generation yields **no result**.
+//! - Triplet weights are strictly **lower-is-better**; ties are allowed.
+//!
+//! ## See also
+//!
+//! - [`generate_triplets`] – Core function assembling and ranking triplets.
+//! - [`triplet_weight`] – Spacing-based scoring rule.
+//! - [`GaussObs`] – Triplet container consumed by the Gauss IOD solver.
+//! - [`crate::observations::observations_ext::ObservationsExt::compute_triplets`] – Higher-level wrapper.
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use nalgebra::{Matrix3, Vector3};
 
 use crate::constants::Observations;
 use crate::initial_orbit_determination::gauss::GaussObs;
 use crate::observations::Observation;
-use crate::observers::Observer;
-use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 
-/// Internal structure used to store a weighted observation triplet during
-/// the selection process.
+/// Internal structure holding a weighted observation triplet during selection.
+///
+/// This container stores the indices `(i, j, k)` of a candidate triplet together
+/// with its scalar `weight`. The type implements ordering so it can be placed in a
+/// `BinaryHeap` acting as a **max-heap** on `weight`: the *worst* (largest weight)
+/// candidate sits at the top and is pruned first.
+///
+/// Fields
+/// -----------------
+/// * `weight` – Triplet score (lower is better).
+/// * `i`, `j`, `k` – Indices of the first, second, and third observation.
+///
+/// Remarks
+/// -----------------
+/// * Ordering treats larger `weight` as “greater”, enabling a max-heap.
+/// * `NaN` comparisons are mapped to `Ordering::Equal` (see `Ord` impl),
+///   which effectively groups `NaN` weights and prevents panics. Avoid `NaN`
+///   weights in normal operation.
+///
+/// See also
+/// ------------
+/// * [`generate_triplets`] – Produces and ranks triplets using this structure.
+/// * [`triplet_weight`] – Scoring function used to produce `weight`.
 #[derive(Debug)]
 struct WeightedTriplet {
     weight: f64,
@@ -48,18 +134,44 @@ impl PartialOrd for WeightedTriplet {
     }
 }
 
-/// Compute the "weight" of a triplet based on time spacing.
+/// Compute a spacing-based weight for a time-ordered observation triplet.
 ///
-/// The weight is low when the intervals between observations are close
-/// to the `dtw` (optimal interval), and larger when the intervals are
-/// unbalanced or far from `dtw`.
+/// The score penalizes **unbalanced** or **far-from-optimal** spacings between
+/// consecutive observations. A lower score means a more desirable (nearly uniform)
+/// spacing close to the target interval `dtw`.
 ///
-/// # Arguments
-/// * `time1`, `time2`, `time3` - times of the three observations (MJD).
-/// * `dtw` - Optimal desired time spacing between consecutive observations.
+/// Formula
+/// -----------------
+/// For consecutive time gaps `dt₁ = t₂ − t₁`, `dt₂ = t₃ − t₂`,
+/// the per-gap penalty is:
+/// ```text
+/// s(dt, dtw) = { dtw/dt,  if dt ≤ dtw
+///              { 1 + dt/dtw, otherwise
+/// ```
+/// and the total weight is:
+/// ```text
+/// weight = s(dt₁, dtw) + s(dt₂, dtw)
+/// ```
 ///
-/// # Returns
-/// A floating-point score (lower is better).
+/// Arguments
+/// -----------------
+/// * `time1`, `time2`, `time3` – Observation times (MJD), with `time1 < time2 < time3`.
+/// * `dtw` – Desired interval `[days]` between consecutive observations.
+///
+/// Return
+/// ----------
+/// * A scalar score (`f64`), **lower is better**.
+///
+/// Remarks
+/// -------------
+/// * Complexity: **O(1)**.
+/// * Behavior is monotonic in each gap: penalties grow when a gap shrinks well below
+///   `dtw` or grows far above it.
+/// * Assumes strictly increasing times; if not guaranteed by callers, sort beforehand.
+///
+/// See also
+/// ------------
+/// * [`generate_triplets`] – Uses this function to rank candidate triplets.
 pub fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     fn s3dtw(dt: f64, dtw: f64) -> f64 {
         if dt <= dtw {
@@ -75,23 +187,40 @@ pub fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
     s3dtw(dt1, dtw) + s3dtw(dt2, dtw)
 }
 
-/// Downsample a set of observations by returning a list of indices.
+/// Downsample observation indices while preserving endpoints and temporal coverage.
 ///
-/// If the dataset is large, only `max_keep` points are kept, distributed
-/// uniformly in time. The first and last observations are always included.
+/// If the input has more than `max_keep` points, this routine selects a subset of indices
+/// **uniformly in time** while always including the **first** and **last** observation.
+/// This reduces the `O(n³)` triplet explosion without losing global time-span information.
 ///
-/// * If `max_keep < 3`, the first, middle, and last indices are returned.
-/// * If `max_keep >= n`, all indices are returned.
+/// Behavior
+/// -----------------
+/// * If `n == 0`: returns `[]`.
+/// * If `max_keep >= n`: returns all indices `0..n`.
+/// * If `max_keep <= 3`: returns `[0, mid, n-1]` (with `mid = n/2`).
+///   For `n < 3`, indices may repeat (callers should handle deduplication if needed).
+/// * Otherwise: returns `max_keep` indices distributed uniformly between `1` and `n-2`,
+///   plus the endpoints `0` and `n-1`.
 ///
-/// This ensures a reasonable coverage of the time span without processing
-/// every single observation.
+/// Arguments
+/// -----------------
+/// * `n` – Total number of observations.
+/// * `max_keep` – Maximum number of indices to return.
 ///
-/// # Arguments
-/// * `n` - Total number of observations.
-/// * `max_keep` - Maximum number of indices to return.
+/// Return
+/// ----------
+/// * A `Vec<usize>` with the selected indices in **ascending** order.
 ///
-/// # Returns
-/// A vector of indices of the selected observations.
+/// Remarks
+/// -------------
+/// * Complexity: **O(max_keep)** after the trivial cases.
+/// * The selection is **index-uniform** over the span `[1, n-2]`; if strictly
+///   time-uniform selection is required, pre-sort observations by time first
+///   (as done in [`generate_triplets`]).
+///
+/// See also
+/// ------------
+/// * [`generate_triplets`] – Uses this function before triplet enumeration.
 fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize> {
     match n {
         0 => Vec::new(),
@@ -114,66 +243,61 @@ fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize
     }
 }
 
-/// Generate and select high-quality triplets of astrometric observations
-/// for initial orbit determination using the Gauss method.
+/// Generate and select optimized triplets of astrometric observations
+/// for Gauss initial orbit determination (IOD).
 ///
-/// This function implements the preprocessing stage of the IOD pipeline:
+/// Overview
+/// -----------------
+/// This function prepares the candidate triplets of observations that serve
+/// as input to the **Gauss method**. It reduces the combinatorial explosion
+/// of all possible `(i, j, k)` choices by combining temporal constraints and
+/// a spacing-based weight function:
 ///
-/// 1. **Temporal sorting** – Observations are sorted chronologically.
-/// 2. **Downsampling (optional)** – If the dataset is very large, only
-///    `max_obs_for_triplets` observations are retained using a uniform
-///    time distribution (always keeping the first and last).
-/// 3. **Triplet enumeration** – All index triplets `(i, j, k)` are generated
-///    from the reduced set, restricted to those where the time span between
-///    the first and last observation satisfies:
-///    `dt_min <= (t_k - t_i) <= dt_max`.
-/// 4. **Weight scoring** – Each valid triplet is assigned a weight using
-///    [`triplet_weight`], which favors evenly spaced observation times.
-/// 5. **Selection** – A max-heap is used to retain only the `max_triplet`
-///    triplets with the lowest weights (i.e., most promising for Gauss IOD).
-/// 6. **Output** – The selected triplets are converted into [`GaussObs`]
-///    structures, including their observer positions computed from [`Outfit`].
+/// 1. **Temporal sorting** – Observations are sorted chronologically (in-place).
+/// 2. **Downsampling (optional)** – If more than `max_obs_for_triplets` points are present,
+///    a uniformly spaced subset is selected (always retaining the first and last).
+/// 3. **Triplet enumeration** – All index triplets `(i, j, k)` are generated from
+///    the reduced set, subject to the constraint:
+///    `dt_min <= (t_k − t_i) <= dt_max`.
+/// 4. **Weight scoring** – Each valid triplet is assigned a weight via [`triplet_weight`],
+///    favoring evenly spaced observation times close to `optimal_interval_time`.
+/// 5. **Heap selection** – A max-heap retains only the `max_triplet` lowest-weight
+///    triplets (best candidates).
+/// 6. **Conversion** – The selected triplets are converted into [`GaussObs`] structures,
+///    with precomputed observer heliocentric positions (using [`Observation::get_observer_helio_position`]).
 ///
-/// This procedure drastically reduces the combinatorial explosion that
-/// arises when working with dense observation sets and ensures that the
-/// best geometrically spaced triplets are passed to the Gauss solver.
+/// Arguments
+/// -----------------
+/// * `observations` – Mutable vector of astrometric observations.  
+///   Sorted **in-place** by observation epoch before processing.
+/// * `dt_min` – Minimum allowed timespan `[days]` between first and last observation in a triplet.
+/// * `dt_max` – Maximum allowed timespan `[days]` between first and last observation in a triplet.
+/// * `optimal_interval_time` – Ideal spacing `[days]` between consecutive observations (used in weighting).
+/// * `max_obs_for_triplets` – Maximum number of observations to keep after downsampling.  
+///   Larger datasets are uniformly thinned in time (keeping endpoints).
+/// * `max_triplet` – Maximum number of best-scoring triplets to return.
 ///
-/// # Arguments
+/// Return
+/// ----------
+/// * `Result<Vec<GaussObs>, OutfitError>` – At most `max_triplet` triplets, sorted by ascending weight
+///   (best geometric distribution first).
 ///
-/// * `observations` - Mutable vector of astrometric observations. The vector
-///   is sorted in-place by observation time before processing.
-/// * `state` - Global [`Outfit`] context used to compute the observer's
-///   position at the time of each observation.
-/// * `dt_min` - Minimum time span (in days) allowed between the first and
-///   last observation of a triplet. Default: `0.03`.
-/// * `dt_max` - Maximum time span (in days) allowed between the first and
-///   last observation of a triplet. Default: `150.0`.
-/// * `optimal_interval_time` - Ideal time spacing (in days) between
-///   consecutive observations in a triplet, used when computing the
-///   triplet weight. Default: `20.0`.
-/// * `max_obs_for_triplets` - Maximum number of observations to keep after
-///   downsampling. If the input dataset is larger, a subset is selected
-///   uniformly in time. Default: `100`.
-/// * `max_triplet` - Maximum number of best triplets to return. Default: `10`.
+/// Remarks
+/// -------------
+/// * Complexity without pruning grows as **O(n³)**; downsampling and weight filtering
+///   are critical for large datasets (hundreds or thousands of observations).
+/// * The returned [`GaussObs`] can be passed directly to [`GaussObs::prelim_orbit`]
+///   to attempt orbit estimation.
+/// * This is usually the **first step** in Gauss IOD workflows,
+///   often wrapped by [`ObservationsExt::compute_triplets`](crate::observations::observations_ext::ObservationsExt::compute_triplets).
 ///
-/// # Returns
-///
-/// A `Vec<GaussObs>` containing at most `max_triplet` triplets, sorted in
-/// ascending order of weight (best first).
-///
-/// # Notes
-///
-/// * This function is typically the first step of the Gauss initial orbit
-///   determination process.
-/// * Downsampling is critical when the number of observations is very large
-///   (hundreds or thousands), as the total number of combinations grows as `O(n³)`.
-///
-/// # See also
-/// * [`GaussObs`] – Representation of a triplet ready for Gauss IOD.
-/// * [`triplet_weight`] – The scoring function used to rank triplets.
+/// See also
+/// -------------
+/// * [`GaussObs`] – Triplet structure used for Gauss orbit determination.
+/// * [`triplet_weight`] – Weighting function for scoring observation spacing.
+/// * [`ObservationsExt::compute_triplets`](crate::observations::observations_ext::ObservationsExt::compute_triplets) – Higher-level wrapper around this function.
 pub fn generate_triplets(
     observations: &mut Observations,
-    state: &Outfit,
     dt_min: f64,
     dt_max: f64,
     optimal_interval_time: f64,
@@ -189,8 +313,6 @@ pub fn generate_triplets(
 
     // 3. Build a reduced view using only selected indices
     let reduced: Vec<&Observation> = selected_indices.iter().map(|&i| &observations[i]).collect();
-    let precomputed_observers: Vec<&Observer> =
-        reduced.iter().map(|obs| obs.get_observer(state)).collect();
     let n = reduced.len();
 
     // Use a max-heap to keep only the best triplets (lowest weights)
@@ -251,16 +373,15 @@ pub fn generate_triplets(
             let idx3 = selected_indices[k];
 
             GaussObs::with_observer_position(
-                state,
-                nalgebra::Vector3::new(idx1, idx2, idx3),
-                nalgebra::Vector3::new(reduced[i].ra, reduced[j].ra, reduced[k].ra),
-                nalgebra::Vector3::new(reduced[i].dec, reduced[j].dec, reduced[k].dec),
-                nalgebra::Vector3::new(reduced[i].time, reduced[j].time, reduced[k].time),
-                [
-                    precomputed_observers[i],
-                    precomputed_observers[j],
-                    precomputed_observers[k],
-                ],
+                Vector3::new(idx1, idx2, idx3),
+                Vector3::new(reduced[i].ra, reduced[j].ra, reduced[k].ra),
+                Vector3::new(reduced[i].dec, reduced[j].dec, reduced[k].dec),
+                Vector3::new(reduced[i].time, reduced[j].time, reduced[k].time),
+                Matrix3::from_columns(&[
+                    reduced[i].get_observer_helio_position(),
+                    reduced[j].get_observer_helio_position(),
+                    reduced[k].get_observer_helio_position(),
+                ]),
             )
         })
         .collect()
@@ -306,8 +427,7 @@ mod triplets_iod_tests {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets =
-            generate_triplets(traj_mut, &env_state, 0.03, 150.0, 20.0, traj_len, 10).unwrap();
+        let triplets = generate_triplets(traj_mut, 0.03, 150.0, 20.0, traj_len, 10).unwrap();
 
         assert_eq!(
             triplets.len(),
@@ -321,7 +441,7 @@ mod triplets_iod_tests {
             ra: [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
             dec: [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
             time: [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
-            observer_position: [
+            observer_helio_position: [
                 [-0.2645666171486676, 0.8689351643673471, 0.3766996211112465],
                 [-0.5889735526502539, 0.7240117187952059, 0.3138734206791042],
                 [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
@@ -336,7 +456,7 @@ mod triplets_iod_tests {
             ra: [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
             dec: [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
             time: [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
-            observer_position: [
+            observer_helio_position: [
                 [-0.26413563361674103, 0.8690466209095019, 0.3767466856686271],
                 [-0.5891631852172257, 0.7238872516832191, 0.3138186516545291],
                 [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
@@ -362,6 +482,7 @@ mod triplets_iod_tests {
                     error_dec: 0.0,
                     time: i as f64,
                     observer_earth_position: Vector3::zeros(),
+                    observer_helio_position: Vector3::zeros(),
                 })
                 .collect()
         }
