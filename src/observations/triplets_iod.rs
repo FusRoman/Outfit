@@ -348,6 +348,8 @@ mod triplets_iod_tests {
     }
 
     mod downsampling_observations_tests {
+        use nalgebra::Vector3;
+
         use super::*;
 
         fn make_obs(n: usize) -> Observations {
@@ -359,6 +361,7 @@ mod triplets_iod_tests {
                     error_ra: 0.0,
                     error_dec: 0.0,
                     time: i as f64,
+                    observer_earth_position: Vector3::zeros(),
                 })
                 .collect()
         }

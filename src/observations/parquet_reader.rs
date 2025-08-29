@@ -112,13 +112,15 @@ pub(crate) fn parquet_to_trajset(
             ra.into_iter().zip(dec).zip(mjd_time.drain(..).zip(traj_id))
         {
             let obs = Observation::new(
+                env_state,
                 uint16_obs,
                 ra.expect("Expected RA"),
                 error_ra,
                 dec.expect("Expected DEC"),
                 error_dec,
                 mjd_time,
-            );
+            )
+            .expect("Failed to create observation during Parquet read");
 
             let traj_id = traj_id.expect("Expected TrajID");
             trajectories

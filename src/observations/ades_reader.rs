@@ -106,6 +106,7 @@ impl OpticalObs {
 
     fn to_observation(
         &self,
+        state: &Outfit,
         observer_idx: u16,
         error_ra: Option<ArcSec>,
         error_dec: Option<ArcSec>,
@@ -120,6 +121,7 @@ impl OpticalObs {
                 .unwrap_or_else(|| error_dec.expect("No error for Dec when parsing ADES file"))
         });
         Observation::new(
+            state,
             observer_idx,
             self.ra,
             error_ra,
@@ -127,6 +129,7 @@ impl OpticalObs {
             error_dec,
             self.obs_time,
         )
+        .expect("Failed to create observation from ADES")
     }
 }
 
@@ -173,7 +176,7 @@ fn parse_flat_ades(
     for optical in &flat_ades.opticals {
         let traj_id = optical.get_id();
         let observer = outfit.uint16_from_mpc_code(&optical.stn);
-        let observation = optical.to_observation(observer, error_ra, error_dec);
+        let observation = optical.to_observation(outfit, observer, error_ra, error_dec);
         trajs
             .entry(traj_id)
             .or_insert_with(|| SmallVec::with_capacity(10))
@@ -205,7 +208,7 @@ fn parse_structured_ades(
         let observer = outfit.uint16_from_mpc_code(mpc_code);
 
         for optical in &obs_block.obs_data.opticals {
-            let observation = optical.to_observation(observer, error_ra, error_dec);
+            let observation = optical.to_observation(outfit, observer, error_ra, error_dec);
             let traj_id = optical.get_id();
             trajs
                 .entry(traj_id)

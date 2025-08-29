@@ -17,7 +17,7 @@ impl Observatories {
         }
     }
 
-    pub(crate) fn add_observer(
+    pub(crate) fn create_observer(
         &mut self,
         longitude: Degree,
         latitude: Degree,
@@ -30,6 +30,11 @@ impl Observatories {
         self.obs_to_uint16
             .entry_or_insert_by_key(arc_observer.clone(), self.obs_to_uint16.len() as u16);
         arc_observer
+    }
+
+    pub(crate) fn add_observer(&mut self, observer: Arc<Observer>) -> u16 {
+        let obs_idx = self.obs_to_uint16.len() as u16;
+        *self.obs_to_uint16.entry_or_insert_by_key(observer, obs_idx)
     }
 
     /// Get an observer from an observer index
@@ -70,7 +75,7 @@ mod observatories_test {
     #[test]
     fn test_observatories() {
         let mut observatories = Observatories::new();
-        let obs = observatories.add_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
+        let obs = observatories.create_observer(1.0, 2.0, 3.0, Some("Test".to_string()));
         assert_eq!(obs.longitude, 1.0);
         assert_eq!(obs.rho_cos_phi, 0.999395371426802);
         assert_eq!(obs.rho_sin_phi, 0.0346660237964843);
@@ -79,7 +84,7 @@ mod observatories_test {
         let observer = observatories.get_observer_from_uint16(0);
         assert_eq!(observer.name, Some("Test".to_string()));
 
-        observatories.add_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
+        observatories.create_observer(4.0, 5.0, 6.0, Some("Test2".to_string()));
         assert_eq!(observatories.obs_to_uint16.len(), 2);
         let observer = observatories.get_observer_from_uint16(1);
         assert_eq!(observer.name, Some("Test2".to_string()));
