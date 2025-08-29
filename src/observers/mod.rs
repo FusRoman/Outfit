@@ -65,7 +65,7 @@
 //! let (_x_ecl, _v_ecl) = site.pvobs(&t, state.get_ut1_provider())?;
 //!
 //! // 3) Heliocentric position (equatorial J2000)
-//! let r_helio_eq = site.helio_position(&t, &state)?;
+//! let r_helio_eq = site.helio_position(&state, &t, &Vector3::identity())?;
 //!
 //! // 4) Batch (3 observers, 3 epochs)
 //! let tmjd = Vector3::new(57028.479297592596, 57049.24514759259, 57063.97711759259);
@@ -431,52 +431,46 @@ impl Observer {
         Ok((dx, dv))
     }
 
-    /// Compute the heliocentric position of this observer in the **equatorial J2000 frame**.
+    /// Compute the observer’s heliocentric position in the **equatorial mean J2000** frame.
     ///
-    /// This method combines the observer’s **geocentric position** (computed from Earth rotation,
-    /// orientation, and the observer’s fixed geographic coordinates) with the Earth's **heliocentric
-    /// barycentric position** from the JPL ephemerides, to obtain the observer’s full heliocentric
-    /// position vector.
+    /// This method forms the full heliocentric position of the observing site by combining:
+    /// - the site **geocentric** position vector at `epoch`, and
+    /// - the Earth’s **heliocentric** position from the JPL ephemerides.
     ///
-    /// # Reference frame
-    /// The output vector is expressed in the **mean equatorial J2000 frame (ICRS-aligned)**,
-    /// with units in astronomical units (AU).
+    /// The input geocentric vector is assumed to be expressed in the **ecliptic mean J2000** frame
+    /// (AU). It is rotated to **equatorial mean J2000**, then added to Earth’s heliocentric
+    /// position (also in equatorial mean J2000).
     ///
     /// Arguments
-    /// ---------
-    /// * `epoch` – Epoch of observation (TT time scale).
-    /// * `state` – [`Outfit`] providing:
-    ///   * A JPL planetary ephemeris via [`Outfit::get_jpl_ephem`],
-    ///   * A UT1 provider via [`Outfit::get_ut1_provider`].
+    /// -----------------
+    /// * `state` – [`Outfit`] environment providing JPL ephemerides and frame rotations.
+    /// * `epoch` – Observation epoch in the **TT** time scale.
+    /// * `observer_geocentric_position` – Geocentric site position **in ecliptic mean J2000** (AU).
     ///
-    /// Returns
-    /// -------
-    /// * `Vector3<f64>` – The heliocentric position of this observer at the specified epoch,
-    ///   in AU and in the equatorial J2000 frame.
+    /// Return
+    /// ----------
+    /// * `Result<Vector3<f64>, OutfitError>` – Observer’s **heliocentric** position at `epoch`,
+    ///   in **AU**, expressed in **equatorial mean J2000**.
     ///
-    /// Algorithm
-    /// ---------
-    /// 1. Compute the observer’s **geocentric position** in the ecliptic J2000 frame using [`Observer::pvobs`].
-    /// 2. Query the JPL ephemerides for the Earth's heliocentric position.
-    /// 3. Transform the geocentric position from **ecliptic J2000** to **equatorial J2000** using [`rotpn`].
-    /// 4. Add the Earth’s heliocentric position and the transformed geocentric vector to obtain the
-    ///    observer’s heliocentric position.
+    /// Remarks
+    /// -------------
+    /// * If your geocentric site vector is already in **equatorial** J2000, rotate it to
+    ///   **ecliptic** before calling this method, or adapt the rotation accordingly.
+    /// * This routine is typically used internally when constructing per-observation geometry
+    ///   (e.g., within `Observation::new`), ensuring consistent frames for Gauss IOD.
     ///
     /// See also
-    /// --------
-    /// * [`Observer::pvobs`] – Geocentric position of the observer
-    /// * [`rotpn`] – Frame transformation between ecliptic and equatorial J2000
-    /// * [`Outfit::get_jpl_ephem`] – Access to planetary ephemerides
+    /// ------------
+    /// * [`Observer::pvobs`] – Geocentric position (and velocity) of the site at `epoch`.
+    /// * [`Outfit::get_jpl_ephem`] – Access Earth’s heliocentric state from JPL ephemerides.
+    /// * [`Outfit::get_rot_eclmj2000_to_equmj2000`] – Rotation between ecliptic and equatorial J2000.
     pub fn helio_position(
         &self,
-        epoch: &Epoch,
         state: &Outfit,
+        epoch: &Epoch,
+        observer_geocentric_position: &Vector3<f64>,
     ) -> Result<Vector3<f64>, OutfitError> {
-        let ut1_provider = state.get_ut1_provider();
         let jpl = state.get_jpl_ephem().unwrap();
-
-        // Geocentric position in ecliptic J2000
-        let obs_pos_ecl = self.pvobs(epoch, ut1_provider)?.0;
 
         // Earth's heliocentric position
         let earth_pos = jpl.earth_ephemeris(epoch, false).0;
@@ -484,7 +478,7 @@ impl Observer {
         // Transform observer position from ecliptic to equatorial J2000
         let rot_matrix = state.get_rot_eclmj2000_to_equmj2000().transpose();
 
-        Ok(earth_pos + rot_matrix * obs_pos_ecl)
+        Ok(earth_pos + rot_matrix * observer_geocentric_position)
     }
 }
 
@@ -585,45 +579,55 @@ pub fn geodetic_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     (rho_cos_phi, rho_sin_phi)
 }
 
-/// Compute the heliocentric equatorial positions of three different observers at their respective observation times.
+/// Compute the heliocentric positions of three observers at their respective epochs,
+/// expressed in the **equatorial mean J2000** frame (ICRS-aligned).
 ///
-/// This function returns the heliocentric positions of three ground-based observers at three distinct epochs,
-/// expressed in the equatorial mean J2000 frame (ICRS-aligned), by combining:
-/// - the barycentric position of the Earth (from a JPL planetary ephemeris),
-/// - the geocentric position of each observer (accounting for Earth orientation and rotation).
+/// Overview
+/// -----------------
+/// This routine builds a `3×3` matrix of observer positions by combining:
+/// - the **geocentric site position** of each observer (from [`Observer::pvobs`]),
+/// - the Earth’s **heliocentric barycentric position** from JPL ephemerides,
+/// - a frame transformation from **ecliptic mean J2000** (site positions) to
+///   **equatorial mean J2000** (final output).
 ///
-/// Each observer is paired with a corresponding time: `observers[0]` ↔ `mjd_tt.x`, `observers[1]` ↔ `mjd_tt.y`, `observers[2]` ↔ `mjd_tt.z`.
+/// The result is a compact representation where each column corresponds to one
+/// observer/epoch pair:  
+/// `observers[0] ↔ mjd_tt.x`,  
+/// `observers[1] ↔ mjd_tt.y`,  
+/// `observers[2] ↔ mjd_tt.z`.
 ///
 /// Arguments
-/// ---------
-/// * `observers`: an array of references `[&Observer; 3]`, each containing the geodetic parameters
-///   (longitude, normalized radius components) of one observer.
-/// * `mjd_tt`: a [`Vector3<MJD>`] of observation epochs in Terrestrial Time (TT), one per observer.
-/// * `state`: an [`Outfit`] providing access to:
-///     - the JPL planetary ephemeris (`get_jpl_ephem()`),
-///     - the UT1 provider (`get_ut1_provider()`).
+/// -----------------
+/// * `observers` – Array of three [`Observer`] references, each encoding the site geometry
+///   (longitude, normalized geocentric radius components, etc.).
+/// * `mjd_tt` – [`Vector3<MJD>`] of observation epochs in Terrestrial Time (TT), one per observer.
+/// * `state` – [`Outfit`] environment providing:
+///   - JPL planetary ephemerides (via [`Outfit::get_jpl_ephem`]),
+///   - UT1 provider for Earth rotation/orientation (via [`Outfit::get_ut1_provider`]).
 ///
-/// Returns
-/// --------
-/// * `Matrix3<f64>`: a 3×3 matrix where each column is the heliocentric position vector of the corresponding observer:
-///     - Columns: `[r₁, r₂, r₃]` for observers at epochs `mjd_tt.x`, `mjd_tt.y`, `mjd_tt.z`
-///     - Units: astronomical units (AU)
-///     - Frame: equatorial mean J2000 (ICRS-aligned)
+/// Return
+/// ----------
+/// * `Result<Matrix3<f64>, OutfitError>` – A 3×3 matrix of observer heliocentric positions, with:  
+///   - **Columns** = `[r₁, r₂, r₃]`, one per observer/epoch,  
+///   - **Units** = astronomical units (AU),  
+///   - **Frame** = equatorial mean J2000 (ICRS-aligned).
 ///
 /// Remarks
-/// -------
-/// * This function performs the following steps for each observer/time pair:
-///     1. Computes the observer’s geocentric position in the ecliptic mean J2000 frame via [`Observer::pvobs`].
-///     2. Retrieves the heliocentric Earth position from the JPL ephemeris.
-///     3. Transforms the observer’s position from the ecliptic mean J2000 frame to the equatorial mean J2000 frame using [`rotpn`].
-///     4. Computes the heliocentric observer position by summing the Earth and transformed observer vectors.
+/// -------------
+/// * For each observer/time pair:
+///   1. The site’s **geocentric position** is computed via [`Observer::pvobs`] (AU, ecliptic J2000).
+///   2. Earth’s heliocentric position is retrieved from the JPL ephemeris.
+///   3. The site position is rotated into **equatorial mean J2000** using the frame rotation.
+///   4. The Earth + rotated site vectors give the full heliocentric observer position.
+/// * This function is mainly used during **Gauss IOD** preparation to populate the
+///   observer position matrix stored in [`GaussObs`](crate::initial_orbit_determination::gauss::GaussObs).
 ///
-///
-/// # See also
-/// * [`Observer::pvobs`] – computes the observer’s geocentric position in the ecliptic mean J2000 frame
-/// * [`rotpn`] – transforms vectors between celestial reference frames (e.g., Eclm to Equm)
-/// * [`Outfit::get_jpl_ephem`] – accesses planetary ephemerides for Earth position
-/// * [`Outfit::get_ut1_provider`] – provides Earth orientation parameters (e.g., ΔUT1)
+/// See also
+/// ------------
+/// * [`Observer::pvobs`] – Geocentric observer position at a given epoch (ecliptic J2000).
+/// * [`Observer::helio_position`] – Per-observer heliocentric position (equatorial J2000).
+/// * [`Outfit::get_jpl_ephem`] – Access to planetary ephemerides (Earth state).
+/// * [`Outfit::get_ut1_provider`] – Provides Earth orientation parameters (ΔUT1).
 pub fn helio_obs_pos(
     observers: [&Observer; 3],
     mjd_tt: &Vector3<MJD>,
@@ -635,10 +639,14 @@ pub fn helio_obs_pos(
         Epoch::from_mjd_in_time_scale(mjd_tt.z, hifitime::TimeScale::TT),
     ];
 
+    let pvobs1 = observers[0].pvobs(&epochs[0], state.get_ut1_provider())?;
+    let pvobs2 = observers[1].pvobs(&epochs[1], state.get_ut1_provider())?;
+    let pvobs3 = observers[2].pvobs(&epochs[2], state.get_ut1_provider())?;
+
     let positions = [
-        observers[0].helio_position(&epochs[0], state)?,
-        observers[1].helio_position(&epochs[1], state)?,
-        observers[2].helio_position(&epochs[2], state)?,
+        observers[0].helio_position(state, &epochs[0], &pvobs1.0)?,
+        observers[1].helio_position(state, &epochs[1], &pvobs2.0)?,
+        observers[2].helio_position(state, &epochs[2], &pvobs3.0)?,
     ];
 
     Ok(Matrix3::from_columns(&positions))
