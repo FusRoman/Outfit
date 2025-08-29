@@ -93,8 +93,6 @@ use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::initial_orbit_determination::gauss_result::GaussResult;
 use crate::kepler::velocity_correction;
-use crate::observers::helio_obs_pos;
-use crate::observers::Observer;
 use crate::orb_elem::eccentricity_control;
 use crate::orbit_type::OrbitalElements;
 use crate::outfit::Outfit;
@@ -103,38 +101,45 @@ use aberth::aberth;
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 
-/// Observation triplet structure for Gauss's initial orbit determination.
+/// Observation triplet structure for Gauss's initial orbit determination (IOD).
 ///
-/// This struct holds the minimal set of data required to apply the classical Gauss method
-/// for orbit determination using three optical astrometric observations taken from the same site.
+/// This struct encapsulates the minimal set of information needed to apply the
+/// classical **Gauss method** for orbit determination, based on three optical
+/// astrometric observations taken from the same observatory site.
 ///
 /// Fields
-/// -------
-/// * `idx_obs`: indices of the three observations in the full dataset (typically used for traceability).
-/// * `ra`: right ascensions \[radians\] of the three observations, in the ICRS frame.
-/// * `dec`: declinations \[radians\] of the three observations, in the ICRS frame.
-/// * `time`: observation times \[MJD TT\], i.e., Modified Julian Dates in Terrestrial Time scale.
-/// * `observer_position`: 3×3 matrix of the observer’s heliocentric position vectors at each observation time,
-///   with:
-///   - columns = observation epochs,
-///   - units = astronomical units (AU),
-///   - frame = equatorial mean J2000 (same as ICRS).
+/// -----------------
+/// * `idx_obs`: Indices of the three observations in the full dataset (useful for traceability).
+/// * `ra`: Right ascensions `[rad]` of the three observations, expressed in the ICRS frame.
+/// * `dec`: Declinations `[rad]` of the three observations, expressed in the ICRS frame.
+/// * `time`: Observation epochs in Modified Julian Date (TT scale).
+/// * `observer_helio_position`: `3×3` matrix of heliocentric observer position vectors, with:
+///   - **columns** = observation epochs (1 column per observation),
+///   - **units** = astronomical units (AU),
+///   - **frame** = equatorial mean J2000 (aligned with ICRS).
+///
+/// Return
+/// ----------
+/// * A lightweight container [`GaussObs`] holding triplet data and observer positions,
+///   ready to be passed to the Gauss IOD solver.
 ///
 /// Remarks
-/// -------
-/// * All three observations are assumed to come from the same observing site.
-/// * The observer position matrix is computed via [`helio_obs_pos`] during construction.
+/// -------------
+/// * All three observations are assumed to be acquired from the same observing site.
+/// * The observer heliocentric position matrix is typically computed via [`helio_obs_pos`]
+///   during construction, ensuring consistency with the J2000 reference frame.
 ///
-/// # See also
-/// * [`GaussObs::with_observer_position`] – constructor that computes this struct from RA/DEC/times
-/// * [`helio_obs_pos`] – computes heliocentric observer positions
+/// See also
+/// -------------
+/// * [`GaussObs::with_observer_position`] – Constructor from RA/DEC/epochs with explicit observer positions.
+/// * [`helio_obs_pos`] – Computes the heliocentric observer position at a given epoch.
 #[derive(Debug, PartialEq, Clone)]
 pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
     pub(crate) ra: Vector3<Radian>,
     pub(crate) dec: Vector3<Radian>,
     pub(crate) time: Vector3<f64>,
-    pub(crate) observer_position: Matrix3<f64>,
+    pub(crate) observer_helio_position: Matrix3<f64>,
 }
 
 type GaussPrelimResult = Result<
@@ -150,51 +155,50 @@ type GaussPrelimResult = Result<
 >;
 
 impl GaussObs {
-    /// Construct a `GaussObs` object from observation data and observer position.
+    /// Construct a `GaussObs` object from an observation triplet and corresponding observer positions.
     ///
-    /// This constructor initializes a `GaussObs` instance using raw observational inputs (RA/DEC/time)
-    /// and computes the heliocentric position of the observer at each observation epoch.
+    /// This constructor builds a [`GaussObs`] instance directly from pre-computed inputs:  
+    /// indices of the selected observations, their right ascension/declination, the observation epochs,
+    /// and the heliocentric positions of the observer at each epoch.
     ///
     /// Arguments
-    /// ---------
-    /// * `state`: reference to the [`Outfit`] context, providing access to JPL ephemerides and Earth orientation.
-    /// * `idx_obs`: index triplet identifying the observation triplet used for initial orbit determination.
-    /// * `ra`: vector of right ascension values \[radians\] corresponding to the three observations.
-    /// * `dec`: vector of declination values \[radians\] corresponding to the three observations.
-    /// * `mjd_time`: observation times in Modified Julian Date (TT scale).
-    /// * `observer`: reference to the [`Observer`] corresponding to the observing site.
+    /// -----------------
+    /// * `idx_obs`: Triplet of indices identifying the three observations used for initial orbit determination.
+    /// * `ra`: Right ascension values `[rad]` for the three observations.
+    /// * `dec`: Declination values `[rad]` for the three observations.
+    /// * `mjd_time`: Observation times in Modified Julian Date (TT scale).
+    /// * `observer_helio_position`: Matrix `3×3` of heliocentric observer positions, each column corresponding
+    ///   to the observer position (in AU) at the epoch of the matching observation.
     ///
-    /// Returns
-    /// --------
-    /// * A `GaussObs` struct populated with:
-    ///     - the input observation indices, RA/DEC, and times,
-    ///     - the observer's heliocentric position matrix computed via [`helio_obs_pos`] (3×3).
+    /// Return
+    /// ----------
+    /// * A `Result` containing a [`GaussObs`] struct populated with:
+    ///   - the input indices, RA/DEC, and epochs,
+    ///   - the provided heliocentric observer positions.
     ///
     /// Remarks
-    /// -------
-    /// * The observer positions are expressed in the equatorial mean J2000 frame (in AU),
-    ///   consistent with the requirements of Gauss’s method for orbit determination.
-    /// * The order of `ra`, `dec`, `time`, and `observer_position` is consistent: element `i` in each
-    ///   vector corresponds to a single astrometric observation.
+    /// ------------
+    /// * The reference frame is the equatorial mean J2000 system (AU units).
+    /// * Element `i` in `ra`, `dec`, `mjd_time`, and the `i`-th column of `observer_helio_position`
+    ///   all correspond to the same astrometric observation.
     ///
-    /// # See also
-    /// * [`GaussObs`] – data structure for storing triplet-based IOD input
-    /// * [`helio_obs_pos`] – used internally to compute heliocentric observer positions
+    /// See also
+    /// ------------
+    /// * [`GaussObs`] – Data structure for storing triplet-based IOD input.
+    /// * [`helio_obs_pos`] – Function that computes heliocentric observer positions.
     pub fn with_observer_position(
-        state: &Outfit,
         idx_obs: Vector3<usize>,
         ra: Vector3<f64>,
         dec: Vector3<f64>,
         mjd_time: Vector3<f64>,
-        observer: [&Observer; 3],
+        observer_helio_position: Matrix3<f64>,
     ) -> Result<GaussObs, OutfitError> {
-        let observer_position = helio_obs_pos(observer, &mjd_time, state)?;
         Ok(GaussObs {
             idx_obs,
             ra,
             dec,
             time: mjd_time,
-            observer_position,
+            observer_helio_position,
         })
     }
 
@@ -265,7 +269,7 @@ impl GaussObs {
                 ra: Vector3::from_column_slice(&ra_vec),
                 dec: Vector3::from_column_slice(&dec_vec),
                 time: self.time,
-                observer_position: self.observer_position,
+                observer_helio_position: self.observer_helio_position,
             })
         });
 
@@ -425,9 +429,9 @@ impl GaussObs {
         vector_a: &Vector3<f64>,
         vector_b: &Vector3<f64>,
     ) -> (f64, f64, f64) {
-        let observer_position_t = self.observer_position.transpose();
-        let ra = self.observer_position * vector_a;
-        let rb = self.observer_position * vector_b;
+        let observer_position_t = self.observer_helio_position.transpose();
+        let ra = self.observer_helio_position * vector_a;
+        let rb = self.observer_helio_position * vector_b;
 
         let second_row_t = unit_invmatrix.row(1).transpose();
         let a2star = second_row_t.dot(&ra);
@@ -540,7 +544,7 @@ impl GaussObs {
         unit_matinv: &Matrix3<f64>,
         vector_c: &Vector3<f64>,
     ) -> Result<(Matrix3<f64>, f64), OutfitError> {
-        let obs_pos_t = self.observer_position;
+        let obs_pos_t = self.observer_helio_position;
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(vector_c);
@@ -982,7 +986,7 @@ pub(crate) mod gauss_test {
                 57_049.245_147_592_59,
                 57_063.977_117_592_59,
             ),
-            observer_position: Matrix3::zeros(),
+            observer_helio_position: Matrix3::zeros(),
         };
 
         let (tau1, tau3, unit_matrix, inv_unit_matrix, vector_a, vector_b) =
@@ -1057,7 +1061,7 @@ pub(crate) mod gauss_test {
                 57_049.245_147_592_59,
                 57_063.977_117_592_59,
             ),
-            observer_position: Matrix3::new(
+            observer_helio_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
                 0.376_699_621_109_192_2,
@@ -1089,7 +1093,7 @@ pub(crate) mod gauss_test {
             ra: Vector3::zeros(),
             dec: Vector3::zeros(),
             time: Vector3::zeros(),
-            observer_position: Matrix3::zeros(),
+            observer_helio_position: Matrix3::zeros(),
         };
 
         let polynomial = [
@@ -1127,7 +1131,7 @@ pub(crate) mod gauss_test {
                 57_049.245_147_592_59,
                 57_063.977_117_592_59,
             ),
-            observer_position: Matrix3::new(
+            observer_helio_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
                 0.376_699_621_109_192_2,
@@ -1204,7 +1208,7 @@ pub(crate) mod gauss_test {
                 57_049.245_147_592_59,
                 57_063.977_117_592_59,
             ),
-            observer_position: Matrix3::zeros(),
+            observer_helio_position: Matrix3::zeros(),
         };
         let (tau1, tau3, _, _, _, _) = gauss.gauss_prelim().unwrap();
 
@@ -1251,7 +1255,7 @@ pub(crate) mod gauss_test {
                 57_049.231_857_592_59,
                 57_063.959_487_592_59,
             ),
-            observer_position: Matrix3::new(
+            observer_helio_position: Matrix3::new(
                 -0.264_135_633_607_079,
                 -0.588_973_552_650_573_5,
                 -0.774_192_148_350_372,
@@ -1290,7 +1294,7 @@ pub(crate) mod gauss_test {
             ra: [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
             dec: [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
             time: [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
-            observer_position: [
+            observer_helio_position: [
                 [-0.2645666171486676, 0.8689351643673471, 0.3766996211112465],
                 [-0.5889735526502539, 0.7240117187952059, 0.3138734206791042],
                 [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
@@ -1331,7 +1335,7 @@ pub(crate) mod gauss_test {
                 57_049.231_857_592_59,
                 57_063.959_487_592_59,
             ),
-            observer_position: Matrix3::new(
+            observer_helio_position: Matrix3::new(
                 -0.264_135_633_607_079,
                 -0.588_973_552_650_573_5,
                 -0.774_192_148_350_372,
@@ -1379,7 +1383,7 @@ pub(crate) mod gauss_test {
                 57_049.245_147_592_59,
                 57_063.977_117_592_59,
             ),
-            observer_position: Matrix3::new(
+            observer_helio_position: Matrix3::new(
                 -0.26456661713915464,
                 0.868_935_164_369_495,
                 0.376_699_621_109_192_2,
@@ -1491,7 +1495,7 @@ pub(crate) mod gauss_test {
                 ra: vector![1.0, 2.0, 3.0],
                 dec: vector![0.1, 0.2, 0.3],
                 time: vector![59000.0, 59001.0, 59002.0],
-                observer_position: Matrix3::identity(),
+                observer_helio_position: Matrix3::identity(),
             };
 
             let errors_ra = vector![1e-6, 1e-6, 1e-6];
@@ -1526,7 +1530,7 @@ pub(crate) mod gauss_test {
                 ra: vector![1.5, 1.6, 1.7],
                 dec: vector![0.9, 1.0, 1.1],
                 time: vector![59000.0, 59001.0, 59002.0],
-                observer_position: Matrix3::identity(),
+                observer_helio_position: Matrix3::identity(),
             };
 
             let errors_ra = vector![0.0, 0.0, 0.0];
@@ -1551,7 +1555,7 @@ pub(crate) mod gauss_test {
                 ra: vector![1.5, 1.6, 1.7],
                 dec: vector![0.9, 1.0, 1.1],
                 time: vector![59000.0, 59001.0, 59002.0],
-                observer_position: Matrix3::identity(),
+                observer_helio_position: Matrix3::identity(),
             };
 
             let errors_ra = vector![0.0, 0.0, 0.0];
@@ -1574,7 +1578,7 @@ pub(crate) mod gauss_test {
                 ra: vector![1.0, 1.1, 1.2],
                 dec: vector![0.5, 0.6, 0.7],
                 time: vector![59000.0, 59001.0, 59002.0],
-                observer_position: Matrix3::identity(),
+                observer_helio_position: Matrix3::identity(),
             };
 
             let errors_ra = vector![1e-6, 1e-6, 1e-6];
