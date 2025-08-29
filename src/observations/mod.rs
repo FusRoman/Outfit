@@ -5,20 +5,20 @@
 //!
 //! ## What lives here?
 //!
-//! - [`Observation`] — a single astrometric measurement (RA/DEC at an epoch) with:
+//! - [`Observation`](crate::observations::Observation) — a single astrometric measurement (RA/DEC at an epoch) with:
 //!   - the observing site identifier (`u16`),
 //!   - precomputed **geocentric** and **heliocentric** site positions at the epoch,
 //!   - astrometric uncertainties for RA/DEC.
 //!
 //! - Parsing & I/O:
-//!   - [`from_80col`] (private) and [`extract_80col`] — read **80-column MPC** formatted files.
-//!   - [`ades_reader`] — ADES ingestion utilities (XML/CSV).
+//!   - `from_80col` (private) and `extract_80col` (private) — read **80-column MPC** formatted files.
+//!   - [`ades_reader`](crate::observations::ades_reader) — ADES ingestion utilities (XML/CSV).
 //!   - `parquet_reader` (private) — internal helpers to read columnar batches.
 //!
 //! - Batch/transform helpers:
-//!   - [`trajectory_ext`] — build batches of observations (RA/DEC/time + σ) and convert to [`Observation`]s.
-//!   - [`observations_ext`] — higher-level operations on collections (triplet selection, RMS windows, metrics).
-//!   - [`triplets_iod`] — construction of observation triplets for **Gauss IOD**.
+//!   - [`trajectory_ext`](crate::observations::trajectory_ext) — build batches of observations (RA/DEC/time + σ) and convert to [`Observation`](crate::observations::Observation)s.
+//!   - [`observations_ext`](crate::observations::observations_ext) — higher-level operations on collections (triplet selection, RMS windows, metrics).
+//!   - [`triplets_iod`](crate::observations::triplets_iod) — construction of observation triplets for **Gauss IOD**.
 //!
 //! ## Units & reference frames
 //!
@@ -26,36 +26,34 @@
 //! - **Time**: MJD (TT scale)  
 //! - **Positions**: AU, **equatorial mean J2000** (J2000/ICRS-aligned)  
 //!
-//! These conventions are enforced by [`Observation::new`], which computes and stores both
+//! These conventions are enforced by [`Observation::new`](crate::observations::Observation::new), which computes and stores both
 //! the **geocentric** and **heliocentric** site positions at the observation epoch using the
-//! [`Outfit`] environment (UT1 provider, JPL ephemerides, site database).
+//! [`Outfit`](crate::outfit::Outfit) environment (UT1 provider, JPL ephemerides, site database).
 //!
 //! ## Typical workflow
 //!
 //! 1. **Ingest** observations:
-//!    - From MPC 80-col: [`extract_80col`] → `Vec<Observation>` + object identifier.
-//!    - From ADES: via [`ades_reader`] into typed batches, then [`observation_from_batch`].
+//!    - From MPC 80-col: \[`extract_80col`\] → `Vec<Observation>` + object identifier.
+//!    - From ADES: via [`ades_reader`](crate::observations::ades_reader) into typed batches, then \[`observation_from_batch`\].
 //!
 //! 2. **Precompute/Access positions** per observation:
 //!    - `get_observer_earth_position()` — geocentric site vector at epoch.
 //!    - `get_observer_helio_position()` — heliocentric site vector at epoch.
 //!
 //! 3. **Project to sky** (prediction / fitting):
-//!    - [`Observation::compute_apparent_position`] — propagate an orbit (equinoctial elements),
+//!    - [`Observation::compute_apparent_position`](crate::observations::Observation::compute_apparent_position) — propagate an orbit (equinoctial elements),
 //!      apply frame transforms + aberration, and return apparent `(RA, DEC)`.
-//!    - [`Observation::ephemeris_error`] — normalized squared residual for a single observation.
+//!    - [`Observation::ephemeris_error`](crate::observations::Observation::ephemeris_error) — normalized squared residual for a single observation.
 //!
 //! 4. **Build triplets and run IOD**:
-//!    - Use [`observations_ext`] / [`triplets_iod`] to form high-quality triplets and feed
+//!    - Use [`observations_ext`](crate::observations::observations_ext) / [`triplets_iod`](crate::observations::triplets_iod) to form high-quality triplets and feed
 //!      them to the Gauss solver (see `initial_orbit_determination::gauss`).
 //!
 //! ## Key types & functions
 //!
-//! - [`Observation`] — single measurement with site & precomputed positions.
-//! - [`observation_from_batch`] — turn a batch (RA/DEC/time + σ) into `Vec<Observation>`.
-//! - [`extract_80col`] — parse an MPC 80-column file to `(Observations, ObjectNumber)`.
-//! - [`Observation::compute_apparent_position`] — apparent `(RA, DEC)` from an orbit.
-//! - [`Observation::ephemeris_error`] — per-observation χ²-like contribution.
+//! - [`Observation`](crate::observations::Observation) — single measurement with site & precomputed positions.
+//! - [`Observation::compute_apparent_position`](crate::observations::Observation::compute_apparent_position) — apparent `(RA, DEC)` from an orbit.
+//! - [`Observation::ephemeris_error`](crate::observations::Observation::ephemeris_error) — per-observation χ²-like contribution.
 //!
 //! ## Example
 //!
@@ -84,7 +82,7 @@
 //! - [`initial_orbit_determination::gauss`] — Gauss IOD over observation triplets.
 //! - [`observers`] — site database, Earth-fixed coordinates, and transformations.
 //! - [`orbit_type::equinoctial_element::EquinoctialElements`] — propagation utilities used here.
-//! - [`cartesian_to_radec`] and [`correct_aberration`] — sky-projection helpers.
+//! - [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) and [`correct_aberration`](crate::observations::correct_aberration) — sky-projection helpers.
 pub mod ades_reader;
 pub mod observations_ext;
 mod parquet_reader;
@@ -389,7 +387,7 @@ impl Observation {
     ///
     /// See also
     /// ------------
-    /// * [`compute_apparent_position`] – Used internally to obtain predicted RA/DEC.
+    /// * [`compute_apparent_position`](crate::observations::Observation::compute_apparent_position) – Used internally to obtain predicted RA/DEC.
     /// * [`Observer::pvobs`] – Computes observer’s geocentric position.
     /// * [`correct_aberration`] – Applies aberration correction.
     /// * [`cartesian_to_radec`] – Converts 3D vectors to (RA, DEC).
