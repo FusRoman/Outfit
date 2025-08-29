@@ -58,22 +58,29 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use outfit::observations::{extract_80col, Observation};
+//! use outfit::observations::Observation;
 //! use outfit::outfit::Outfit;
 //! use outfit::error_models::ErrorModel;
-//! use camino::Utf8Path;
+//! use outfit::constants::RADSEC;
+//!
+//! # use outfit::orbit_type::equinoctial_element::EquinoctialElements;
 //!
 //! let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
 //!
-//! // 1) Load observations from an MPC 80-col file
-//! let (obs, object_id) = extract_80col(&mut env, Utf8Path::new("K09R05F.80c"))?;
+//! // Example: build one Observation manually
+//! let obs = Observation::new(
+//!     &env,
+//!     0,
+//!     1.234,          // RA [rad]
+//!     0.5 * RADSEC,   // σ_RA [rad]
+//!     0.567,          // DEC [rad]
+//!     0.5 * RADSEC,   // σ_DEC [rad]
+//!     60300.0,        // MJD (TT)
+//! )?;
 //!
-//! // 2) Predict apparent position for the first obs given some orbit
-//! // (equinoctial elements obtained elsewhere)
-//! # use outfit::orbit_type::equinoctial_element::EquinoctialElements;
+//! // Predict apparent position for this observation given an orbit
 //! # let eq: EquinoctialElements = unimplemented!();
-//! let (ra, dec) = obs[0].compute_apparent_position(&env, &eq)?;
-//! println!("Predicted RA, DEC [rad]: {ra}, {dec}");
+//! # let (_ra, _dec) = obs.compute_apparent_position(&env, &eq)?;
 //! # Ok::<(), outfit::outfit_errors::OutfitError>(())
 //! ```
 //!
