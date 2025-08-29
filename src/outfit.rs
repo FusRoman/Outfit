@@ -353,7 +353,15 @@ impl Outfit {
         name: Option<String>,
     ) -> Arc<Observer> {
         self.observatories
-            .add_observer(longitude, latitude, elevation, name)
+            .create_observer(longitude, latitude, elevation, name)
+    }
+
+    pub(crate) fn add_observer_internal(&mut self, observer: Arc<Observer>) -> u16 {
+        self.observatories.add_observer(observer)
+    }
+
+    pub fn add_observer(&mut self, observer: Arc<Observer>) {
+        self.add_observer_internal(observer);
     }
 }
 

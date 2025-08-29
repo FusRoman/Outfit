@@ -38,6 +38,7 @@ pub struct Observation {
     pub dec: Radian,
     pub error_dec: Radian,
     pub time: MJD,
+    observer_earth_position: Vector3<f64>,
 }
 
 impl Observation {
@@ -55,21 +56,29 @@ impl Observation {
     /// * a new Observation struct
     ///   The coordinates and the associated errors are converted from degrees and arcseconds respectively to radians.
     pub fn new(
+        state: &Outfit,
         observer: u16,
         ra: Radian,
         error_ra: Radian,
         dec: Radian,
         error_dec: Radian,
         time: MJD,
-    ) -> Self {
-        Observation {
+    ) -> Result<Self, OutfitError> {
+        // Observation time in TT
+        let obs_mjd = Epoch::from_mjd_in_time_scale(time, hifitime::TimeScale::TT);
+        let (geo_obs_pos, _) = state
+            .get_observer_from_uint16(observer)
+            .pvobs(&obs_mjd, state.get_ut1_provider())?;
+
+        Ok(Observation {
             observer,
             ra,
             error_ra,
             dec,
             error_dec,
             time,
-        }
+            observer_earth_position: geo_obs_pos,
+        })
     }
 
     /// Get the observer from the observation
@@ -154,7 +163,6 @@ impl Observation {
         &self,
         state: &Outfit,
         equinoctial_element: &EquinoctialElements,
-        observer: &Observer,
     ) -> Result<(f64, f64), OutfitError> {
         // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
         if equinoctial_element.eccentricity() >= 1.0 {
@@ -184,7 +192,7 @@ impl Observation {
         let cart_pos_vel_eclj2000 = matrix_elc_transform * cart_pos_vel;
 
         // 5. Observer heliocentric position
-        let (geo_obs_pos, _) = observer.pvobs(&obs_mjd, state.get_ut1_provider())?;
+        let geo_obs_pos = self.observer_earth_position;
         let xobs = geo_obs_pos + earth_pos_eclj2000;
         let obs_on_earth = matrix_elc_transform * xobs;
 
@@ -235,10 +243,8 @@ impl Observation {
         &self,
         state: &Outfit,
         equinoctial_element: &EquinoctialElements,
-        observer: &Observer,
     ) -> Result<f64, OutfitError> {
-        let (alpha, delta) =
-            self.compute_apparent_position(state, equinoctial_element, observer)?;
+        let (alpha, delta) = self.compute_apparent_position(state, equinoctial_element)?;
 
         // ΔRA with wrapping to [-π, π]
         let mut diff_alpha = (self.ra - alpha) % DPI;
@@ -368,13 +374,14 @@ fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, OutfitE
     );
 
     let observation = Observation::new(
+        env_state,
         observer_id,
         ra.to_radians(),
         ra_error,
         dec_radians,
         dec_error,
         time,
-    );
+    )?;
     Ok(observation)
 }
 
@@ -445,7 +452,16 @@ pub(crate) fn observation_from_batch(
         .zip(batch.dec.iter())
         .zip(batch.time.iter())
         .map(|((ra, dec), time)| {
-            Observation::new(obs_uin16, *ra, batch.error_ra, *dec, batch.error_dec, *time)
+            Observation::new(
+                env_state,
+                obs_uin16,
+                *ra,
+                batch.error_ra,
+                *dec,
+                batch.error_dec,
+                *time,
+            )
+            .expect("Failed to create observation from batch")
         })
         .collect()
 }
@@ -453,26 +469,16 @@ pub(crate) fn observation_from_batch(
 #[cfg(test)]
 mod test_observations {
 
+    use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
     use super::*;
 
     #[cfg(feature = "jpl-download")]
     mod tests_compute_apparent_position {
+
         use super::*;
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
         use approx::assert_relative_eq;
-
-        /// Helper: construct a standard observer at Haleakalā Observatory.
-        fn haleakala_observer() -> Observer {
-            Observer::new(
-                203.744083, // longitude in degrees east
-                20.706944,  // latitude in degrees
-                3.05,       // elevation in km
-                Some("Haleakala".to_string()),
-                None,
-                None,
-            )
-            .unwrap()
-        }
 
         /// Helper: simple circular equinoctial elements for a 1 AU, zero inclination orbit.
         fn simple_circular_elements(epoch: f64) -> EquinoctialElements {
@@ -489,22 +495,16 @@ mod test_observations {
 
         #[test]
         fn test_compute_apparent_position_nominal() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_obs = 59000.0; // MJD
             let equinoctial = simple_circular_elements(t_obs);
 
-            let obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 0.0,
-                dec: 0.0,
-                error_dec: 0.0,
-                time: t_obs,
-            };
+            let obs = Observation::new(state, observer_code, 0.0, 0.0, 0.0, 0.0, t_obs).unwrap();
 
             let (ra, dec) = obs
-                .compute_apparent_position(state, &equinoctial, &observer)
+                .compute_apparent_position(state, &equinoctial)
                 .expect("Computation should succeed");
 
             assert!(ra.is_finite());
@@ -515,26 +515,16 @@ mod test_observations {
 
         #[test]
         fn test_compute_apparent_position_same_epoch() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_epoch = 60000.0;
             let equinoctial = simple_circular_elements(t_epoch);
 
-            let obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 0.0,
-                dec: 0.0,
-                error_dec: 0.0,
-                time: t_epoch,
-            };
+            let obs = Observation::new(state, observer_code, 0.0, 0.0, 0.0, 0.0, t_epoch).unwrap();
 
-            let (ra1, dec1) = obs
-                .compute_apparent_position(state, &equinoctial, &observer)
-                .unwrap();
-            let (ra2, dec2) = obs
-                .compute_apparent_position(state, &equinoctial, &observer)
-                .unwrap();
+            let (ra1, dec1) = obs.compute_apparent_position(state, &equinoctial).unwrap();
+            let (ra2, dec2) = obs.compute_apparent_position(state, &equinoctial).unwrap();
 
             // The same input should always produce the same result
             assert_relative_eq!(ra1, ra2, epsilon = 1e-14);
@@ -543,25 +533,18 @@ mod test_observations {
 
         #[test]
         fn test_apparent_position_for_distant_object() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
             let t_obs = 59000.0;
             let mut equinoctial = simple_circular_elements(t_obs);
 
-            // Objet très éloigné
+            // Objet far away
             equinoctial.semi_major_axis = 100.0;
 
-            let obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 0.0,
-                dec: 0.0,
-                error_dec: 0.0,
-                time: t_obs,
-            };
+            let obs = Observation::new(state, observer_code, 0.0, 0.0, 0.0, 0.0, t_obs).unwrap();
 
             let (ra, dec) = obs
-                .compute_apparent_position(state, &equinoctial, &observer)
+                .compute_apparent_position(state, &equinoctial)
                 .expect("Should compute apparent position for distant object");
 
             assert!(ra.is_finite());
@@ -570,8 +553,8 @@ mod test_observations {
 
         #[test]
         fn test_compute_apparent_position_propagation_failure() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
 
             // Invalid orbital elements to force failure in solve_two_body_problem
             let equinoctial = EquinoctialElements {
@@ -584,16 +567,9 @@ mod test_observations {
                 mean_longitude: 0.0,
             };
 
-            let obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 0.0,
-                dec: 0.0,
-                error_dec: 0.0,
-                time: 59000.0,
-            };
+            let obs = Observation::new(state, observer_code, 0.0, 0.0, 0.0, 0.0, 59000.0).unwrap();
 
-            let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+            let result = obs.compute_apparent_position(state, &equinoctial);
             assert!(result.is_err(), "Invalid elements should trigger an error");
         }
 
@@ -669,19 +645,6 @@ mod test_observations {
                     )
             }
 
-            /// Returns a fixed observer located at Haleakalā Observatory.
-            fn fixed_observer() -> Observer {
-                Observer::new(
-                    203.744083,
-                    20.706944,
-                    3.05,
-                    Some("Haleakala".to_string()),
-                    None,
-                    None,
-                )
-                .unwrap()
-            }
-
             proptest! {
                 /// Property test: RA and DEC are always finite and in the expected ranges.
                 #[test]
@@ -689,19 +652,20 @@ mod test_observations {
                     equinoctial in arb_equinoctial_elements(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
-                    let observer = fixed_observer();
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
 
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.0,
-                        error_ra: 0.0,
-                        dec: 0.0,
-                        error_dec: 0.0,
-                        time: obs_time,
-                    };
+                    let obs = Observation::new(
+                        state,
+                        observer_code,
+                         0.0,
+                         0.0,
+                         0.0,
+                         0.0,
+                         obs_time,
+                    ).unwrap();
 
-                    let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+                    let result = obs.compute_apparent_position(state, &equinoctial);
 
                     if let Ok((ra, dec)) = result {
                         // Invariant: returned values must be finite
@@ -721,19 +685,21 @@ mod test_observations {
                     equinoctial in arb_equinoctial_elements(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
-                    let observer = fixed_observer();
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.0,
-                        error_ra: 0.0,
-                        dec: 0.0,
-                        error_dec: 0.0,
-                        time: obs_time,
-                    };
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
 
-                    let r1 = obs.compute_apparent_position(state, &equinoctial, &observer);
-                    let r2 = obs.compute_apparent_position(state, &equinoctial, &observer);
+                    let obs = Observation::new(
+                        state,
+                        observer_code,
+                         0.0,
+                         0.0,
+                         0.0,
+                         0.0,
+                         obs_time,
+                    ).unwrap();
+
+                    let r1 = obs.compute_apparent_position(state, &equinoctial);
+                    let r2 = obs.compute_apparent_position(state, &equinoctial);
 
                     // Invariant: repeated computation with the same input should be identical
                     prop_assert_eq!(r1, r2);
@@ -746,24 +712,26 @@ mod test_observations {
                     equinoctial in arb_equinoctial_elements(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
-                    let observer = fixed_observer();
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.0,
-                        error_ra: 0.0,
-                        dec: 0.0,
-                        error_dec: 0.0,
-                        time: obs_time,
-                    };
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
+                    let obs = Observation::new(
+                        state,
+                        observer_code,
+                         0.0,
+                         0.0,
+                         0.0,
+                         0.0,
+                         obs_time,
+                    ).unwrap();
 
                     let obs_eps = Observation {
                         time: obs_time + 1e-3, // shift by 1.4 minutes
                         ..obs.clone()
                     };
 
-                    let r1 = obs.compute_apparent_position(state, &equinoctial, &observer);
-                    let r2 = obs_eps.compute_apparent_position(state, &equinoctial, &observer);
+                    let r1 = obs.compute_apparent_position(state, &equinoctial);
+                    let r2 = obs_eps.compute_apparent_position(state, &equinoctial);
 
                     if let (Ok((ra1, dec1)), Ok((ra2, dec2))) = (r1, r2) {
                         let dra = (ra1 - ra2).abs();
@@ -784,18 +752,20 @@ mod test_observations {
                     observer in arb_observer(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.add_observer_internal(Arc::new(observer));
 
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.0,
-                        error_ra: 0.0,
-                        dec: 0.0,
-                        error_dec: 0.0,
-                        time: obs_time,
-                    };
+                    let obs = Observation::new(
+                        state,
+                        observer_code,
+                         0.0,
+                         0.0,
+                         0.0,
+                         0.0,
+                         obs_time,
+                    ).unwrap();
 
-                    let result = obs.compute_apparent_position(state, &equinoctial, &observer);
+                    let result = obs.compute_apparent_position(state, &equinoctial);
 
                     if let Ok((ra, dec)) = result {
                         // Values must be finite
@@ -810,8 +780,11 @@ mod test_observations {
 
             #[test]
             fn test_hyperbolic_orbit_returns_error() {
-                let state = &OUTFIT_HORIZON_TEST.0;
-                let observer = Observer::new(0.0, 0.0, 0.0, None, None, None);
+                let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
+                let obs =
+                    Observation::new(state, observer_code, 0.0, 0.0, 0.0, 0.0, 59000.0).unwrap();
 
                 let equinoctial = EquinoctialElements {
                     reference_epoch: 59000.0,
@@ -823,16 +796,7 @@ mod test_observations {
                     mean_longitude: 0.0,
                 };
 
-                let obs = Observation {
-                    observer: 0,
-                    ra: 0.0,
-                    error_ra: 0.0,
-                    dec: 0.0,
-                    error_dec: 0.0,
-                    time: 59000.0,
-                };
-
-                let result = obs.compute_apparent_position(state, &equinoctial, &observer.unwrap());
+                let result = obs.compute_apparent_position(state, &equinoctial);
                 assert!(
                     result.is_err(),
                     "Hyperbolic or parabolic orbits should currently return an error"
@@ -843,27 +807,39 @@ mod test_observations {
 
     #[test]
     fn test_new_observation() {
-        let observation = Observation::new(1, 1.0, 0.1, 2.0, 0.2, 59000.0);
+        let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+        let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
+        let observation =
+            Observation::new(state, observer_code, 1.0, 0.1, 2.0, 0.2, 59000.0).unwrap();
         assert_eq!(
             observation,
             Observation {
-                observer: 1,
+                observer: 2,
                 ra: 1.0,
                 error_ra: 0.1,
                 dec: 2.0,
                 error_dec: 0.2,
-                time: 59000.0
+                time: 59000.0,
+                observer_earth_position: [
+                    -1.4662164592060655e-6,
+                    4.2560356749756634e-5,
+                    -2.1126391698196086e-6
+                ]
+                .into()
             }
         );
 
         let observation_2 = Observation::new(
+            state,
             2,
             343.097_375,
             2.777_777_777_777_778E-6,
             -14.784833333333333,
             2.777_777_777_777_778E-5,
             59001.0,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             observation_2,
@@ -873,7 +849,13 @@ mod test_observations {
                 error_ra: 2.777777777777778e-6,
                 dec: -14.784833333333333,
                 error_dec: 2.777777777777778e-5,
-                time: 59001.0
+                time: 59001.0,
+                observer_earth_position: [
+                    -2.1521316017998277e-6,
+                    4.2531873012231404e-5,
+                    -2.0988352183088593e-6
+                ]
+                .into()
             }
         );
     }
@@ -883,18 +865,6 @@ mod test_observations {
         use super::*;
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
         use approx::assert_relative_eq;
-
-        fn haleakala_observer() -> Observer {
-            Observer::new(
-                203.744083,
-                20.706944,
-                3.05,
-                Some("Haleakala".to_string()),
-                None,
-                None,
-            )
-            .unwrap()
-        }
 
         fn simple_equinoctial(epoch: f64) -> EquinoctialElements {
             EquinoctialElements {
@@ -910,18 +880,19 @@ mod test_observations {
 
         #[test]
         fn test_ephem_error() {
-            let obs = Observation {
-                observer: 0,
-                ra: 1.7899347771316527,
-                error_ra: 1.770_024_520_608_546E-6,
-                dec: 0.778_996_538_107_973_6,
-                error_dec: 1.259_582_891_829_317_7E-6,
-                time: 57070.262067592594,
-            };
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
 
-            let observer = OUTFIT_HORIZON_TEST
-                .0
-                .get_observer_from_mpc_code(&"F51".to_string());
+            let obs = Observation::new(
+                state,
+                observer_code,
+                1.7899347771316527,
+                1.770_024_520_608_546E-6,
+                0.778_996_538_107_973_6,
+                1.259_582_891_829_317_7E-6,
+                57070.262067592594,
+            )
+            .unwrap();
 
             let equinoctial_element = EquinoctialElements {
                 reference_epoch: 57_049.242_334_573_75,
@@ -933,8 +904,7 @@ mod test_observations {
                 mean_longitude: 1.6936970079414786,
             };
 
-            let rms_error =
-                obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element, &observer);
+            let rms_error = obs.ephemeris_error(&OUTFIT_HORIZON_TEST.0, &equinoctial_element);
             assert_eq!(rms_error.unwrap(), 75.00445641224026);
         }
 
@@ -942,58 +912,44 @@ mod test_observations {
         /// the ephemeris_error must be zero.
         #[test]
         fn test_zero_error_when_positions_match() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_obs = 59000.0;
             let equinoctial = simple_equinoctial(t_obs);
 
             // Compute the propagated position
-            let obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 1e-6,
-                dec: 0.0,
-                error_dec: 1e-6,
-                time: t_obs,
-            };
-            let (alpha, delta) = obs
-                .compute_apparent_position(state, &equinoctial, &observer)
-                .unwrap();
+            let obs = Observation::new(state, observer_code, 0.0, 1e-6, 0.0, 1e-6, t_obs).unwrap();
+            let (alpha, delta) = obs.compute_apparent_position(state, &equinoctial).unwrap();
 
             // New observation with exact same RA/DEC
-            let obs_match = Observation {
-                observer: 0,
-                ra: alpha,
-                error_ra: 1e-6,
-                dec: delta,
-                error_dec: 1e-6,
-                time: t_obs,
-            };
+            let obs_match =
+                Observation::new(state, observer_code, alpha, 1e-6, delta, 1e-6, t_obs).unwrap();
 
-            let error = obs_match
-                .ephemeris_error(state, &equinoctial, &observer)
-                .unwrap();
+            let error = obs_match.ephemeris_error(state, &equinoctial).unwrap();
             assert_relative_eq!(error, 0.0, epsilon = 1e-14);
         }
 
         /// Error grows if RA is off by a known amount
         #[test]
         fn test_error_increases_with_offset() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_obs = 59000.0;
             let equinoctial = simple_equinoctial(t_obs);
 
             let base_obs = Observation {
-                observer: 0,
+                observer: observer_code,
                 ra: 0.0,
                 error_ra: 1e-3,
                 dec: 0.0,
                 error_dec: 1e-3,
                 time: t_obs,
+                observer_earth_position: Vector3::zeros(),
             };
             let (alpha, delta) = base_obs
-                .compute_apparent_position(state, &equinoctial, &observer)
+                .compute_apparent_position(state, &equinoctial)
                 .unwrap();
 
             // Same dec, but RA offset by 1 milliradian
@@ -1004,81 +960,72 @@ mod test_observations {
                 dec: delta,
                 error_dec: 1e-3,
                 time: t_obs,
+                observer_earth_position: Vector3::zeros(),
             };
 
-            let err = obs_offset
-                .ephemeris_error(state, &equinoctial, &observer)
-                .unwrap();
+            let err = obs_offset.ephemeris_error(state, &equinoctial).unwrap();
             assert!(err > 0.0);
         }
 
         /// Check that wrapping of RA (close to 2π) does not affect the error
         #[test]
         fn test_ra_wrapping_invariance() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_obs = 59000.0;
             let equinoctial = simple_equinoctial(t_obs);
 
-            let base_obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 1e-6,
-                dec: 0.0,
-                error_dec: 1e-6,
-                time: t_obs,
-            };
+            let base_obs =
+                Observation::new(state, observer_code, 0.0, 1e-6, 0.0, 1e-6, t_obs).unwrap();
             let (alpha, delta) = base_obs
-                .compute_apparent_position(state, &equinoctial, &observer)
+                .compute_apparent_position(state, &equinoctial)
                 .unwrap();
 
             // Same position but RA shifted by ±2π
-            let obs_wrapped = Observation {
-                observer: 0,
-                ra: alpha + std::f64::consts::TAU,
-                error_ra: 1e-6,
-                dec: delta,
-                error_dec: 1e-6,
-                time: t_obs,
-            };
+            let obs_wrapped = Observation::new(
+                state,
+                observer_code,
+                alpha + std::f64::consts::TAU,
+                1e-6,
+                delta,
+                1e-6,
+                t_obs,
+            )
+            .unwrap();
 
-            let err1 = obs_wrapped
-                .ephemeris_error(state, &equinoctial, &observer)
-                .unwrap();
+            let err1 = obs_wrapped.ephemeris_error(state, &equinoctial).unwrap();
             assert_relative_eq!(err1, 0.0, epsilon = 1e-12);
         }
 
         /// When RA/DEC uncertainties are very large, error is small even with a mismatch.
         #[test]
         fn test_large_uncertainty_downweights_error() {
-            let state = &OUTFIT_HORIZON_TEST.0;
-            let observer = haleakala_observer();
+            let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+            let observer_code = state.uint16_from_mpc_code(&"F51".to_string());
+
             let t_obs = 59000.0;
             let equinoctial = simple_equinoctial(t_obs);
 
-            let base_obs = Observation {
-                observer: 0,
-                ra: 0.0,
-                error_ra: 1.0,
-                dec: 0.0,
-                error_dec: 1.0,
-                time: t_obs,
-            };
+            let base_obs =
+                Observation::new(state, observer_code, 0.0, 1.0, 0.0, 1.0, t_obs).unwrap();
             let (alpha, delta) = base_obs
-                .compute_apparent_position(state, &equinoctial, &observer)
+                .compute_apparent_position(state, &equinoctial)
                 .unwrap();
 
-            let obs_large_uncertainty = Observation {
-                observer: 0,
-                ra: alpha + 0.1,
-                error_ra: 10.0,
-                dec: delta + 0.1,
-                error_dec: 10.0,
-                time: t_obs,
-            };
+            let obs_large_uncertainty = Observation::new(
+                state,
+                observer_code,
+                alpha + 0.1,
+                10.0,
+                delta + 0.1,
+                10.0,
+                t_obs,
+            )
+            .unwrap();
 
             let err = obs_large_uncertainty
-                .ephemeris_error(state, &equinoctial, &observer)
+                .ephemeris_error(state, &equinoctial)
                 .unwrap();
             assert!(
                 err < 1.0,
@@ -1128,17 +1075,16 @@ mod test_observations {
                     observer in arb_observer(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.0,
-                        error_ra: 1e-3,
-                        dec: 0.0,
-                        error_dec: 1e-3,
-                        time: obs_time,
-                    };
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.add_observer_internal(Arc::new(observer));
+                    let obs = Observation::new(state, observer_code,
+                         0.0,
+                         1e-3,
+                         0.0,
+                         1e-3,
+                         obs_time,).unwrap();
 
-                    let result = obs.ephemeris_error(state, &equinoctial, &observer);
+                    let result = obs.ephemeris_error(state, &equinoctial);
                     if let Ok(val) = result {
                         prop_assert!(val.is_finite());
                         prop_assert!(val >= 0.0);
@@ -1152,17 +1098,16 @@ mod test_observations {
                     observer in arb_observer(),
                     obs_time in 58000.0f64..62000.0
                 ) {
-                    let state = &OUTFIT_HORIZON_TEST.0;
-                    let obs = Observation {
-                        observer: 0,
-                        ra: 0.5,
-                        error_ra: 100.0,
-                        dec: 0.5,
-                        error_dec: 100.0,
-                        time: obs_time,
-                    };
+                    let state = &mut OUTFIT_HORIZON_TEST.0.clone();
+                    let observer_code = state.add_observer_internal(Arc::new(observer));
+                    let obs = Observation::new(state, observer_code,
+                        0.5,
+                        100.0,
+                        0.5,
+                        100.0,
+                        obs_time,).unwrap();
 
-                    let result = obs.ephemeris_error(state, &equinoctial, &observer);
+                    let result = obs.ephemeris_error(state, &equinoctial);
                     if let Ok(val) = result {
                         prop_assert!(val < 1.0);
                     }
@@ -1193,7 +1138,13 @@ mod test_observations {
                 error_ra: 1.2535340843609459e-6,
                 dec: -0.25803335512429054,
                 error_dec: 1.0181086985431635e-6,
-                time: 55089.23509601851
+                time: 55089.23509601851,
+                observer_earth_position: [
+                    3.0499942822953885e-5,
+                    -8.594304778250371e-6,
+                    2.8491013919142154e-5
+                ]
+                .into(),
             }
         );
     }

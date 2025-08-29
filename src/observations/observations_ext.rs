@@ -504,7 +504,7 @@ impl ObservationsExt for Observations {
 
         let rms_all_obs = self[start_obs_rms..=end_obs_rms]
             .iter()
-            .map(|obs| obs.ephemeris_error(state, orbit_element, obs.get_observer(state)))
+            .map(|obs| obs.ephemeris_error(state, orbit_element))
             .try_fold(0.0, |acc, rms_obs| rms_obs.map(|rms| acc + rms))?;
 
         Ok((rms_all_obs / (2. * (end_obs_rms - start_obs_rms + 1) as f64)).sqrt())
@@ -778,6 +778,7 @@ mod test_obs_ext {
                 dec: 0.5,
                 error_dec: 2e-6,
                 time,
+                observer_earth_position: Vector3::zeros(),
             }
         }
 
@@ -907,6 +908,7 @@ mod test_obs_ext {
                     error_ra: 1e-6,
                     error_dec: 2e-6,
                     time: 59000.0,
+                    observer_earth_position: Vector3::zeros(),
                 },
                 Observation {
                     observer: 0,
@@ -915,6 +917,7 @@ mod test_obs_ext {
                     error_ra: 3e-6,
                     error_dec: 4e-6,
                     time: 59000.1,
+                    observer_earth_position: Vector3::zeros(),
                 },
                 Observation {
                     observer: 0,
@@ -923,6 +926,7 @@ mod test_obs_ext {
                     error_ra: 5e-6,
                     error_dec: 6e-6,
                     time: 59000.2,
+                    observer_earth_position: Vector3::zeros(),
                 },
             ]
         }
