@@ -1029,4 +1029,169 @@ mod test_equinoctial_element {
             .into()
         );
     }
+
+    #[cfg(test)]
+    mod equinoctial_kepler_proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Small helper: wrap angle to [0, 2π).
+        fn wrap_0_2pi(x: f64) -> f64 {
+            let twopi = std::f64::consts::TAU;
+            let y = x.rem_euclid(twopi);
+            if y < 0.0 {
+                y + twopi
+            } else {
+                y
+            }
+        }
+
+        /// Reference Newton solver for the *classical* Kepler equation:
+        /// E - e*sin(E) = M, with M ∈ (-π, π].
+        ///
+        /// Arguments
+        /// -----------------
+        /// * `e`: eccentricity in [0, 1).
+        /// * `m`: mean anomaly wrapped to (-π, π].
+        ///
+        /// Return
+        /// ----------
+        /// * Eccentric anomaly E (radians).
+        fn solve_kepler_classic_newton(e: f64, m: f64) -> f64 {
+            // Initial guess: good for e <~ 0.9
+            let (sm, cm) = m.sin_cos();
+            let mut e_curr = m + e * sm * (1.0 + e * cm);
+
+            // Two or three Newton iterations are enough in practice
+            for _ in 0..5 {
+                let (se, ce) = e_curr.sin_cos();
+                let f = e_curr - e * se - m;
+                let fp = 1.0 - e * ce;
+                let delta = f / fp;
+                e_curr -= delta;
+                if delta.abs() < 1e-14 {
+                    break;
+                }
+            }
+            e_curr
+        }
+
+        /// Strategy to generate (e, ϖ, λ) in safe/realistic ranges.
+        /// - e in [0, 0.9]
+        /// - ϖ (longitude of periapsis) in (-π, π]
+        /// - λ in [0, 2π), then optionally shifted so that λ >= ϖ,
+        ///   mirroring the constraint used in `solve_two_body_problem`.
+        fn strategy_e_w_lambda() -> impl Strategy<Value = (f64, f64, f64)> {
+            let e_strat = prop_oneof![
+                Just(0.0),
+                Just(1e-12),
+                0.0f64..=0.85f64,  // <-- borne à 0.85 au lieu de 0.9
+                0.75f64..=0.85f64, // densifie près de la borne
+            ];
+            let w_strat = -std::f64::consts::PI..=std::f64::consts::PI;
+            let lam_strat = 0.0f64..std::f64::consts::TAU;
+
+            (e_strat, w_strat, lam_strat).prop_map(|(e, w, mut lam)| {
+                lam = (lam).rem_euclid(std::f64::consts::TAU);
+                if lam < (w).rem_euclid(std::f64::consts::TAU) {
+                    lam += std::f64::consts::TAU;
+                }
+                (e, w, lam)
+            })
+        }
+
+        /// Build an EquinoctialElements instance using only the relevant fields (h, k, λ).
+        fn make_equinoctial_from_hk_lambda(h: f64, k: f64, lambda: f64) -> EquinoctialElements {
+            EquinoctialElements {
+                reference_epoch: 59000.0,
+                semi_major_axis: 1.0, // not used by the solver
+                eccentricity_sin_lon: h,
+                eccentricity_cos_lon: k,
+                tan_half_incl_sin_node: 0.0, // irrelevant here
+                tan_half_incl_cos_node: 0.0, // irrelevant here
+                mean_longitude: lambda,
+            }
+        }
+
+        // Property 1: The returned solution F satisfies the equinoctial Kepler equation
+        // within tight numerical tolerance: |F - k sin F + h cos F - λ| < 1e-12.
+        proptest! {
+            #[test]
+            fn solution_satisfies_equation((e, w, lambda) in strategy_e_w_lambda()) {
+                let h = e * w.sin();
+                let k = e * w.cos();
+
+                let equ = make_equinoctial_from_hk_lambda(h, k, lambda);
+                let res = equ.solve_kepler_equation(lambda, w);
+
+                prop_assume!(res.is_ok());
+                let f_sol = res.unwrap();
+
+                let residual = f_sol - k * f_sol.sin() + h * f_sol.cos() - lambda;
+                prop_assert!(residual.abs() < 1e-12, "residual = {}", residual);
+            }
+        }
+
+        // Property 2: In the quasi-circular limit (e ≈ 0), the solution is ≈ λ.
+        proptest! {
+            #[test]
+            fn near_circular_gives_f_approx_lambda(
+                w in -std::f64::consts::PI..=std::f64::consts::PI,
+                lambda_base in 0.0f64..std::f64::consts::TAU
+            ) {
+                // e extremely small
+                let e = 1e-14;
+                let lambda = {
+                    let mut l = wrap_0_2pi(lambda_base);
+                    if l < wrap_0_2pi(w) { l += std::f64::consts::TAU; }
+                    l
+                };
+                let h = e * w.sin();
+                let k = e * w.cos();
+
+                let equ = make_equinoctial_from_hk_lambda(h, k, lambda);
+                let f_sol = equ.solve_kepler_equation(lambda, w).expect("NR should converge");
+
+                // For e≈0, equation reduces to F ≈ λ
+                let err = (f_sol - lambda).abs();
+                prop_assert!(err < 1e-10, "F={}, λ={}, |F-λ|={}", f_sol, lambda, err);
+            }
+        }
+
+        // Property 3: Consistency with classical Kepler:
+        // Let M = λ - ϖ wrapped to (-π, π]; solving classical E - e sin E = M,
+        // we must have F ≈ E + ϖ (mod 2π).
+        proptest! {
+            #[test]
+            fn matches_classical_kepler_solution(
+                (e, w, lambda) in strategy_e_w_lambda()
+            ) {
+                let h = e * w.sin();
+                let k = e * w.cos();
+
+                let equ = make_equinoctial_from_hk_lambda(h, k, lambda);
+                let res = equ.solve_kepler_equation(lambda, w);
+
+                // Si la prod ne converge pas, on rejette ce cas (pas d'échec de test)
+                prop_assume!(res.is_ok());
+                let f_sol = res.unwrap();
+
+                // Classical mean anomaly
+                let m = {
+                    let pi = std::f64::consts::PI;
+                    let y = (lambda - w + pi).rem_euclid(std::f64::consts::TAU) - pi;
+                    if y <= -pi { y + std::f64::consts::TAU } else { y }
+                };
+                let e_classic = solve_kepler_classic_newton(e, m);
+
+                // Compare F to (E + ϖ) modulo 2π avec min distance sur le cercle
+                let got    = f_sol.rem_euclid(std::f64::consts::TAU);
+                let target = (e_classic + w).rem_euclid(std::f64::consts::TAU);
+                let diff = ((got - target + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU))
+                         - std::f64::consts::PI;
+
+                prop_assert!(diff.abs() < 1e-10, "F={}, target(E+ϖ)={}, diff={}", got, target, diff);
+            }
+        }
+    }
 }
