@@ -64,6 +64,7 @@
 //! use nalgebra::Vector3;
 //! use outfit::outfit::Outfit;
 //! use outfit::error_models::ErrorModel;
+//! use outfit::initial_orbit_determination::gauss_result::GaussResult;
 //!
 //! let env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
@@ -75,8 +76,8 @@
 //!
 //! // Match on the returned orbital-element representation
 //! match result {
-//!     outfit::initial_orbit_determination::gauss::GaussResult::PrelimOrbit(oe)
-//!     | outfit::initial_orbit_determination::gauss::GaussResult::CorrectedOrbit(oe) => {
+//!     GaussResult::PrelimOrbit(oe)
+//!     | GaussResult::CorrectedOrbit(oe) => {
 //!         match oe {
 //!             OrbitalElements::Keplerian(kepl) => {
 //!                 println!("a [AU] = {}", kepl.semi_major_axis);
