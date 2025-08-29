@@ -1,65 +1,66 @@
 //! # Gauss Method for Initial Orbit Determination
 //!
-//! This module implements the **classical Gauss method** for initial orbit determination (IOD)
-//! using three optical astrometric observations taken from the same observing site.
+//! This module provides an implementation of the **classical Gauss method** for
+//! initial orbit determination (IOD) using three optical astrometric observations
+//! acquired from the same observing site.
 //!
-//! ## Main structure: [`GaussObs`]
+//! ## Core structure: [`GaussObs`]
 //!
-//! The [`GaussObs`] struct stores all the data required to apply the Gauss algorithm:
+//! The [`GaussObs`] struct encapsulates all the data required to apply the Gauss algorithm:
 //!
 //! * Indices of the three selected observations,
-//! * Right ascensions and declinations (in radians),
-//! * Observation times (MJD, TT),
-//! * Observer heliocentric positions at each epoch (computed via [`helio_obs_pos`] during construction).
+//! * Right ascension and declination angles `[rad]`,
+//! * Observation epochs (MJD, TT scale),
+//! * Observer heliocentric positions at each epoch (in AU, equatorial mean J2000).
 //!
-//! This struct provides all methods to:
-//! 1. Prepare geometric quantities,
-//! 2. Solve the polynomial equations for topocentric distance,
-//! 3. Compute preliminary orbital elements,
-//! 4. Optionally refine the solution.
+//! It serves as the central container for preparing the geometry, solving the
+//! Gauss polynomial, and recovering a preliminary orbit.
 //!
 //! ## Main functionalities
 //!
-//! - **Construction:**
-//!   * [`GaussObs::with_observer_position`] – Build a `GaussObs` from observation data and an [`Outfit`] state.
+//! - **Construction**
+//!   * [`GaussObs::with_observer_position`] – Build from RA/DEC/epochs with explicit observer positions.
 //!
-//! - **Geometry preparation:**
-//!   * Compute the 3×3 matrix of line-of-sight unit vectors,
-//!   * Build the time-scaled coefficients and `a`, `b` vectors for the 8th-degree Gauss polynomial.
+//! - **Geometry preparation**
+//!   * Assemble the `3×3` matrix of line-of-sight unit vectors,
+//!   * Build the time-scaled coefficients and the `a`, `b` vectors required by the Gauss polynomial.
 //!
-//! - **Orbit determination:**
-//!   * Solve the 8th-degree polynomial using the Aberth method,
-//!   * Compute preliminary heliocentric positions,
-//!   * Estimate velocity via **Gibbs' method**,
-//!   * Return a [`GaussResult`] (PrelimOrbit or CorrectedOrbit) containing classical [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements).
+//! - **Orbit determination**
+//!   * Solve the 8th-degree Gauss polynomial for the central topocentric distance,
+//!   * Reconstruct heliocentric positions,
+//!   * Estimate velocity via **Gibbs’ method**,
+//!   * Return a [`GaussResult`] containing preliminary [`OrbitalElements`] (not necessarily Keplerian).
 //!
-//! - **Orbit refinement:**
-//!   * [`GaussObs::pos_and_vel_correction`] – Iterative refinement of positions and velocities,
-//!   * Apply physical filters (eccentricity, perihelion distance) using [`eccentricity_control`].
+//! - **Orbit refinement**
+//!   * [`GaussObs::pos_and_vel_correction`] – Iterative update of positions and velocities,
+//!   * Apply filters on eccentricity and perihelion distance via [`eccentricity_control`].
 //!
-//! - **Monte Carlo perturbations:**
-//!   * [`GaussObs::generate_noisy_realizations`] – Generate multiple noisy triplets by adding Gaussian noise to RA and DEC,
-//!     useful for uncertainty studies and robustness tests.
+//! - **Monte Carlo perturbations**
+//!   * [`GaussObs::generate_noisy_realizations`] – Generate perturbed triplets by adding Gaussian noise
+//!     to RA/DEC, useful for uncertainty propagation and robustness analysis.
 //!
 //! ## Algorithm outline
 //!
-//! 1. Compute **unit direction vectors** from the three RA/DEC observations.
-//! 2. Invert the direction matrix to solve the **linear system** for topocentric distances.
-//! 3. Solve the **8th-degree polynomial** for the central distance `ρ₂` using Aberth’s method.
-//! 4. Reconstruct heliocentric positions and estimate velocity via **Gibbs' method**.
-//! 5. Convert the resulting position/velocity to **Keplerian orbital elements**.
-//! 6. Optionally refine the orbit iteratively if required.
+//! 1. Compute unit direction vectors from the three RA/DEC observations.
+//! 2. Invert the direction matrix to solve the linear system for topocentric distances.
+//! 3. Solve the **8th-degree polynomial** for the central distance `ρ₂` (Aberth’s method).
+//! 4. Reconstruct heliocentric positions and estimate velocity via **Gibbs’ method**.
+//! 5. Convert position/velocity to **orbital elements** (which may be Keplerian, Equinoctial, or Cometary).
+//! 6. Optionally apply iterative corrections.
 //!
 //! ## Output
 //!
-//! The main result is a [`GaussResult`] which contains the computed orbit as
-//! a [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) object. It can be either preliminary (direct result)
-//! or corrected (after refinement).
+//! The primary result is a [`GaussResult`] which stores the computed orbit as
+//! a generic [`OrbitalElements`] value.  
+//! Depending on refinement, this may represent either:
+//! * a **Preliminary orbit** (direct Gauss solution), or
+//! * a **Corrected orbit** (after iteration).
 //!
 //! ## Example
 //!
 //! ```rust, no_run
 //! use outfit::initial_orbit_determination::gauss::GaussObs;
+//! use outfit::orbit_type::{OrbitalElements, keplerian_element::KeplerianElements};
 //! use nalgebra::Vector3;
 //! use outfit::outfit::Outfit;
 //! use outfit::error_models::ErrorModel;
@@ -71,19 +72,36 @@
 //!
 //! // Run the preliminary orbit computation
 //! let result = gauss.prelim_orbit(&env).unwrap();
-//! println!("Semi-major axis: {}", result.get_orbit().as_keplerian().unwrap().semi_major_axis);
+//!
+//! // Match on the returned orbital-element representation
+//! match result {
+//!     outfit::initial_orbit_determination::gauss::GaussResult::PrelimOrbit(oe)
+//!     | outfit::initial_orbit_determination::gauss::GaussResult::CorrectedOrbit(oe) => {
+//!         match oe {
+//!             OrbitalElements::Keplerian(kepl) => {
+//!                 println!("a [AU] = {}", kepl.semi_major_axis);
+//!             }
+//!             OrbitalElements::Equinoctial(eq) => {
+//!                 println!("lambda [rad] = {}", eq.mean_longitude);
+//!             }
+//!             OrbitalElements::Cometary(com) => {
+//!                 println!("q [AU] = {}", com.perihelion_distance);
+//!             }
+//!         }
+//!     }
+//! }
 //! ```
 //!
 //! ## References
 //!
 //! * Milani & Gronchi (2010) – *Theory of Orbit Determination*
-//! * The original Fortran implementation in [OrbFit](http://adams.dm.unipi.it/orbfit/).
 //!
 //! ## See also
 //!
+//! - [`GaussObs`]
 //! - [`GaussResult`]
+//! - [`OrbitalElements`]
 //! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
-//! - [`helio_obs_pos`]
 use aberth::StopReason;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
@@ -123,16 +141,9 @@ use rand_distr::{Distribution, Normal};
 /// * A lightweight container [`GaussObs`] holding triplet data and observer positions,
 ///   ready to be passed to the Gauss IOD solver.
 ///
-/// Remarks
-/// -------------
-/// * All three observations are assumed to be acquired from the same observing site.
-/// * The observer heliocentric position matrix is typically computed via [`helio_obs_pos`]
-///   during construction, ensuring consistency with the J2000 reference frame.
-///
 /// See also
 /// -------------
 /// * [`GaussObs::with_observer_position`] – Constructor from RA/DEC/epochs with explicit observer positions.
-/// * [`helio_obs_pos`] – Computes the heliocentric observer position at a given epoch.
 #[derive(Debug, PartialEq, Clone)]
 pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
@@ -185,7 +196,6 @@ impl GaussObs {
     /// See also
     /// ------------
     /// * [`GaussObs`] – Data structure for storing triplet-based IOD input.
-    /// * [`helio_obs_pos`] – Function that computes heliocentric observer positions.
     pub fn with_observer_position(
         idx_obs: Vector3<usize>,
         ra: Vector3<f64>,
