@@ -1,3 +1,87 @@
+//! # Observation extensions for orbit determination
+//!
+//! This module extends the base [`Observations`] collection with methods
+//! essential for **initial orbit determination (IOD)** and orbit quality
+//! assessment.  
+//! It provides two core traits:
+//!
+//! ## [`ObservationsExt`]
+//!
+//! High-level utilities for processing and analyzing sets of [`Observation`]s:
+//!
+//! - **Triplet generation**: [`compute_triplets`](ObservationsExt::compute_triplets)  
+//!   Build optimized triplets of three observations for Gauss IOD.
+//!
+//! - **RMS evaluation**: [`select_rms_interval`](ObservationsExt::select_rms_interval),  
+//!   [`rms_orbit_error`](ObservationsExt::rms_orbit_error)  
+//!   Select subsets of observations around a triplet and compute RMS residuals
+//!   for candidate orbits.
+//!
+//! - **Error handling**: [`apply_batch_rms_correction`](ObservationsExt::apply_batch_rms_correction)  
+//!   Apply statistical corrections to observational errors based on temporal clustering.
+//!
+//! - **Uncertainty extraction**: [`extract_errors`](ObservationsExt::extract_errors)  
+//!   Retrieve RA/DEC uncertainties for a given triplet.
+//!
+//! ## [`ObservationIOD`]
+//!
+//! A high-level trait encapsulating the full **initial orbit determination workflow**:
+//!
+//! 1. Apply uncertainty calibration with [`ObservationsExt::apply_batch_rms_correction`],  
+//! 2. Generate candidate triplets with [`ObservationsExt::compute_triplets`],  
+//! 3. Perform Monte Carlo perturbations to simulate astrometric noise,  
+//! 4. Run the Gauss method on each triplet,  
+//! 5. Select the orbit with the lowest RMS over the full arc using [`ObservationsExt::rms_orbit_error`].  
+//!
+//! This workflow is designed for **short arcs** (newly discovered asteroids, comets, NEOs),
+//! where only a handful of observations are available.
+//!
+//! ## Typical usage
+//!
+//! ```rust, no_run
+//! use rand::{rngs::StdRng, SeedableRng};
+//! use outfit::initial_orbit_determination::IODParams;
+//! use outfit::constants::Observations;
+//! use outfit::observations::observations_ext::ObservationIOD;
+//!
+//! let params = IODParams::builder()
+//!     .n_noise_realizations(50)
+//!     .noise_scale(1.0)
+//!     .dtmax(30.0)
+//!     .max_triplets(20)
+//!     .build().unwrap();
+//!
+//! let observations: Observations = unimplemented!(); // Load observations here
+//! let state = unimplemented!();                      // Outfit environment
+//! let error_model = unimplemented!();                // Astrometric error model
+//! let mut rng = StdRng::seed_from_u64(123);
+//!
+//! let (best_orbit, rms) = observations.estimate_best_orbit(
+//!     &state, &error_model, &mut rng, &params
+//! ).unwrap();
+//!
+//! if let Some(orbit) = best_orbit {
+//!     println!("Best preliminary orbit RMS = {rms}");
+//! }
+//! ```
+//!
+//! ## References
+//!
+//! * Danby, J.M.A. (1992). *Fundamentals of Celestial Mechanics* (2nd ed.).  
+//!   Willmann-Bell. Classic reference for Gauss, Laplace, and related IOD methods.
+//!
+//! * Milani, A., & Gronchi, G. F. (2009). *Theory of Orbit Determination*.  
+//!   Cambridge University Press. [doi:10.1017/CBO9781139175371](https://doi.org/10.1017/CBO9781139175371)
+//!
+//! * Carpino, M., Milani, A., & Chesley, S. R. (2003). *OrbFit: Software for Preliminary Orbit Determination*.  
+//!   [https://adams.dm.unipi.it/orbfit/](https://adams.dm.unipi.it/orbfit/)
+//!
+//! ## See also
+//!
+//! - [`Observation`] – Representation of a single astrometric measurement.
+//! - [`GaussObs`] – Structure encoding a triplet of observations for Gauss IOD.
+//! - [`GaussResult`] – Output of the Gauss preliminary orbit solver.
+//! - [`IODParams`] – Parameters controlling IOD (triplet constraints, noise realizations).
 use itertools::Itertools;
 use nalgebra::Vector3;
 use std::collections::VecDeque;
@@ -78,44 +162,47 @@ use crate::{
 /// This trait is central to orbit determination pipelines and is designed
 /// to work with small batches of observations (often < 100 per object).
 pub trait ObservationsExt {
-    /// Compute triplets of observations for initial orbit determination.
+    /// Compute candidate triplets of observations for Gauss initial orbit determination (IOD).
     ///
-    /// This method is a thin wrapper around [`generate_triplets`] that calls it
-    /// with the current observation set (`self`) and forwards all parameters.
+    /// Overview
+    /// -----------------
+    /// This method builds a set of observation triplets optimized for the **Gauss method** of IOD.
+    /// It is a convenience wrapper around [`generate_triplets`], operating directly on the current
+    /// observation set (`self`).
     ///
-    /// The generated triplets are used as input for the Gauss initial orbit
-    /// determination method. The selection algorithm sorts the observations by
-    /// time, optionally downsamples them to a manageable subset, enumerates all
-    /// valid triplets within the time-span constraints, scores them using a
-    /// spacing-based weight function, and returns only the best candidates.
+    /// The procedure:
+    /// 1. Sort the available observations by epoch.
+    /// 2. Optionally downsample them to a manageable subset (`max_obs_for_triplets`).
+    /// 3. Enumerate all possible triplets respecting the time-span limits (`dt_min`..`dt_max`).
+    /// 4. Score each triplet using a spacing-based weight function (compared to `optimal_interval_time`).
+    /// 5. Return the best-ranked candidates up to `max_triplet`.
     ///
-    /// See [`generate_triplets`] for the full description of the algorithm and
-    /// parameter details.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` – Global [`Outfit`] state providing ephemerides and observer positions.
-    /// * `dt_min`, `dt_max` – Time-span limits (in days) between the first and last
-    ///   observation of a triplet.
-    /// * `optimal_interval_time` – Ideal spacing (in days) between consecutive observations
-    ///   in a triplet (used for weighting).
-    /// * `max_obs_for_triplets` – Maximum number of observations to consider after
-    ///   uniform downsampling.
+    /// Arguments
+    /// -----------------
+    /// * `dt_min` – Minimum allowed timespan `[days]` between the first and last observation of a triplet.
+    /// * `dt_max` – Maximum allowed timespan `[days]` between the first and last observation of a triplet.
+    /// * `optimal_interval_time` – Ideal interval `[days]` between consecutive observations in a triplet
+    ///   (used to compute the weight).
+    /// * `max_obs_for_triplets` – Maximum number of observations to retain after uniform downsampling.
     /// * `max_triplet` – Maximum number of triplets to return.
     ///
-    /// # Returns
+    /// Return
+    /// ----------
+    /// * `Result<Vec<GaussObs>, OutfitError>` – A collection of [`GaussObs`] triplets, sorted
+    ///   from best to worst by their weight.
     ///
-    /// A `Vec<GaussObs>` containing the selected triplets, sorted from best to worst
-    /// according to their weight.
+    /// Remarks
+    /// ------------
+    /// * This is the **preferred high-level entry point** when working with a set of observations
+    ///   implementing [`ObservationsExt`].
+    /// * Use [`generate_triplets`] directly if you want to run the algorithm on a standalone `Vec<Observation>`.
     ///
-    /// # Notes
-    ///
-    /// This is the preferred high-level entry point when working with a set of
-    /// observations that implements [`ObservationsExt`]. Use [`generate_triplets`]
-    /// directly when you want to work with a standalone `Vec<Observation>`.
+    /// See also
+    /// ------------
+    /// * [`GaussObs`] – Triplet structure used as input for Gauss IOD.
+    /// * [`generate_triplets`] – Low-level function implementing the triplet generation and scoring.
     fn compute_triplets(
         &mut self,
-        state: &Outfit,
         dt_min: f64,
         dt_max: f64,
         optimal_interval_time: f64,
@@ -416,7 +503,6 @@ pub trait ObservationIOD {
 impl ObservationsExt for Observations {
     fn compute_triplets(
         &mut self,
-        state: &Outfit,
         dt_min: f64,
         dt_max: f64,
         optimal_interval_time: f64,
@@ -425,7 +511,6 @@ impl ObservationsExt for Observations {
     ) -> Result<Vec<GaussObs>, OutfitError> {
         generate_triplets(
             self,
-            state,
             dt_min,
             dt_max,
             optimal_interval_time,
@@ -585,7 +670,6 @@ impl ObservationIOD for Observations {
 
         // Generate candidate triplets (3-observation sets) based on temporal constraints
         let triplets = self.compute_triplets(
-            state,
             params.dt_min,
             params.dt_max_triplet,
             params.optimal_interval_time,
@@ -682,7 +766,7 @@ mod test_obs_ext {
             .expect("Failed to get trajectory");
 
         let triplets = traj
-            .compute_triplets(&env_state, 0.03, 150.0, 20.0, traj_len, 10)
+            .compute_triplets(0.03, 150.0, 20.0, traj_len, 10)
             .unwrap();
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
@@ -743,7 +827,7 @@ mod test_obs_ext {
                 57070.262067592594,
             ]]
             .into(),
-            observer_position: Matrix3::zeros(),
+            observer_helio_position: Matrix3::zeros(),
         };
 
         let kepler = KeplerianElements {
@@ -779,6 +863,7 @@ mod test_obs_ext {
                 error_dec: 2e-6,
                 time,
                 observer_earth_position: Vector3::zeros(),
+                observer_helio_position: Vector3::zeros(),
             }
         }
 
@@ -909,6 +994,7 @@ mod test_obs_ext {
                     error_dec: 2e-6,
                     time: 59000.0,
                     observer_earth_position: Vector3::zeros(),
+                    observer_helio_position: Vector3::zeros(),
                 },
                 Observation {
                     observer: 0,
@@ -918,6 +1004,7 @@ mod test_obs_ext {
                     error_dec: 4e-6,
                     time: 59000.1,
                     observer_earth_position: Vector3::zeros(),
+                    observer_helio_position: Vector3::zeros(),
                 },
                 Observation {
                     observer: 0,
@@ -927,6 +1014,7 @@ mod test_obs_ext {
                     error_dec: 6e-6,
                     time: 59000.2,
                     observer_earth_position: Vector3::zeros(),
+                    observer_helio_position: Vector3::zeros(),
                 },
             ]
         }
