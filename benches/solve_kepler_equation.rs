@@ -93,7 +93,6 @@ fn bench_high_e(c: &mut Criterion) {
             |cases| {
                 for (h, k, lambda, w) in cases {
                     let equ = make_equinoctial(h, k, lambda);
-                    // Ne panique pas si le NR de prod échoue (rare) : on compte le coût essayé
                     let _ = equ.solve_kepler_equation(black_box(lambda), black_box(w));
                 }
             },

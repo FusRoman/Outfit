@@ -103,9 +103,12 @@
 //! - [`GaussResult`]
 //! - [`OrbitalElements`]
 //! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
+use std::ops::ControlFlow;
+
 use aberth::StopReason;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
+use smallvec::SmallVec;
 
 use crate::constants::Radian;
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
@@ -764,88 +767,310 @@ impl GaussObs {
         ))
     }
 
-    /// Estimate an initial orbit using Gauss’s method from three astrometric observations.
+    // ---------------------------
+    // Associated constants (usage avec Self::CONSTANT)
+    // ---------------------------
+    const MAX_ECC: f64 = 5.0;
+    const MAX_Q_AU: f64 = 1.0e3;
+    const NEWTON_EPS: f64 = 1.0e-10;
+    const NEWTON_MAX_IT: usize = 50; // <— usize plutôt que i32
+    const ROOT_IMAG_EPS: f64 = 1.0e-6;
+
+    // Optionnel : bornes de plausibilité pour r2 (AU). À ajuster/paramétrer si besoin.
+    const R2_MIN: f64 = 0.05; // éviter Soleil-grazing
+    const R2_MAX: f64 = 200.0; // TNO extrême, à élargir si nécessaire
+
+    /// Visit all real-positive roots of the fixed 8th-degree Gauss polynomial and call a visitor for each candidate.
     ///
-    /// This method performs a full Gauss orbit determination on a triplet of observations (`GaussObs`),
-    /// returning either a preliminary or a corrected orbital solution. The process includes:
+    /// This helper runs the Aberth–Ehrlich solver on a degree-8 polynomial (coefficients `[a, b, ..., x^8]`),
+    /// then iterates **once** over the computed complex roots without allocating. For each root whose
+    /// imaginary part is below `root_imag_eps` in magnitude and whose real part is strictly positive,
+    /// the visitor `on_root` is invoked with the real value `r`.
     ///
-    /// - Computation of direction vectors and time intervals,
-    /// - Construction of the 8th-degree polynomial for the topocentric distance,
-    /// - Root solving using the Aberth method,
-    /// - Evaluation and filtering of roots based on physical criteria (e.g. eccentricity),
-    /// - Optional iterative refinement of the orbit via velocity correction.
+    /// The visitor controls iteration:
+    /// return `ControlFlow::Continue(())` to keep scanning, or `ControlFlow::Break(())` to short-circuit
+    /// as soon as a satisfactory root has been processed.
     ///
     /// Arguments
-    /// ---------
-    /// * `state` – The outfit global state containing the rotation matrix
+    /// -----------------
+    /// * `poly`: The 9 coefficients of the 8th-degree polynomial `[c0, c1, …, c8]`.
+    /// * `max_iterations`: Upper bound on Aberth iterations.
+    /// * `aberth_epsilon`: Convergence threshold for Aberth updates (delta on roots).
+    /// * `root_imag_eps`: Tolerance on `|Im(z)|` used to deem a complex root “real”.
+    /// * `on_root`: Visitor called for each real-positive root (in solver order).  
+    ///   Return `ControlFlow::Break(())` to stop early, or `ControlFlow::Continue(())` to keep iterating.
     ///
-    /// Returns
-    /// --------
-    /// * `Ok(GaussResult::PrelimOrbit)` if a valid solution is found but the correction step fails or is skipped.
-    /// * `Ok(GaussResult::CorrectedOrbit)` if the solution converges after correction.
-    /// * `Err(OutfitError)` if no valid root is found or the direction matrix is singular.
+    /// Return
+    /// ----------
+    /// * `Ok(())` if the solver converged or reached `max_iterations` (all admissible roots were visited).
+    /// * `Err(OutfitError::PolynomialRootFindingFailed)` if Aberth reported failure (NaN/Inf, etc.).
     ///
-    /// # See also
-    /// * [`GaussObs`] – Struct holding the observation triplet used in this computation.
-    /// * [`GaussResult`] – Enum indicating whether the orbit is preliminary or corrected.
-    /// * [`GaussObs::pos_and_vel_correction`] – Performs the refinement step on the orbital state.
-    /// * [`GaussObs::solve_8poly`] – Finds valid roots of the 8th-degree distance polynomial.
+    /// Notes
+    /// ----------
+    /// * Only **real** (within `root_imag_eps`) and **positive** roots are passed to the visitor.
+    /// * The order of visited roots is the solver’s order and is not guaranteed to be sorted by magnitude.
+    /// * This function performs no heap allocation and visits each root at most once.
+    ///
+    /// See also
+    /// ------------
+    /// * [`aberth::aberth`] – Const-generic Aberth–Ehrlich root finder.
+    /// * [`GaussObs::coeff_eight_poly`] – Builds the (sparse) coefficients of the degree-8 polynomial.
+    /// * [`GaussObs::prelim_orbit_all`] – Scans all roots and collects up to three Gauss solutions.
+    /// * [`GaussObs::prelim_orbit`] – Picks a single “best” solution (corrected preferred).
+    /// * [`GaussObs::accept_root`] – Physical admissibility test and preliminary state construction.
+    #[inline]
+    fn visit_real_positive_roots(
+        poly: &[f64; 9],
+        max_iterations: u32,
+        aberth_epsilon: f64,
+        root_imag_eps: f64,
+        mut on_root: impl FnMut(f64) -> ControlFlow<(), ()>,
+    ) -> Result<(), OutfitError> {
+        let roots = aberth(poly, max_iterations, aberth_epsilon);
+
+        match roots.stop_reason {
+            aberth::StopReason::Converged(_) | aberth::StopReason::MaxIteration(_) => {
+                for z in roots.iter() {
+                    if z.re > 0.0 && z.im.abs() < root_imag_eps {
+                        if let ControlFlow::Break(()) = on_root(z.re) {
+                            break;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            aberth::StopReason::Failed(_) => Err(OutfitError::PolynomialRootFindingFailed),
+        }
+    }
+
+    /// Try to accept a single Gauss root and build a preliminary dynamical state `(r(t_i), v(t2), epoch)`.
+    ///
+    /// Given a candidate heliocentric distance at the central epoch `t2` (`r2`), this helper applies the
+    /// same physical/admissibility checks as [`accept_root`] and, if successful, reconstructs:
+    /// - the heliocentric positions of the body at the three observation epochs (columns correspond to `t1,t2,t3`),
+    /// - the heliocentric velocity at `t2`,
+    /// - and the reference epoch used to interpret the state.
+    ///
+    /// No heap allocation is performed; inputs are passed by reference and the function is `#[inline]`.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `r2`: Heliocentric distance at the second epoch `t2` (AU).
+    /// * `unit_m`: Direction (line-of-sight) matrix `S`, columns are the unit vectors for each observation.
+    /// * `inv_unit_m`: Precomputed inverse of `S`.  
+    ///   _Note_: consider passing a linear-system solver (e.g. LU/QR) instead of an explicit inverse for better numerical stability.
+    /// * `a`, `b`: Gauss interpolation vectors (depend on `tau1`, `tau3`).
+    /// * `tau1`, `tau3`: Time offsets (`gk * (t1 - t2)` and `gk * (t3 - t2)`) in Gauss units.
+    ///
+    /// Return
+    /// ----------
+    /// * `Some((positions_all_times, velocity_t2, epoch_ref))` if the root passes physical checks and reconstruction succeeds.  
+    ///   - `positions_all_times`: `3×3` matrix of heliocentric positions (AU), columns = `[t1 | t2 | t3]`.  
+    ///   - `velocity_t2`: heliocentric velocity at `t2` (AU/day).  
+    ///   - `epoch_ref`: reference epoch used for the state (usually MJD(TT)).
+    /// * `None` if the root is rejected (e.g. spurious geometry, `rho2` too small, eccentricity/perihelion limits).
+    ///
+    /// Notes
+    /// ----------
+    /// * The acceptance criteria are delegated to [`accept_root`] (e.g. positivity of ranges, minimum `rho2`,
+    ///   eccentricity and perihelion bounds, and geometric consistency).
+    /// * The middle column `positions_all_times.column(1)` corresponds to the state at `t2`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`accept_root`] – Physical admissibility check and preliminary state construction.
+    /// * [`coeff_eight_poly`] – Builds the sparse coefficients of the 8th-degree Gauss polynomial.
+    /// * [`prelim_orbit_all`] – Scans all admissible roots and collects up to three solutions.
+    /// * [`velocity_correction`] – Lagrange-based velocity update from the three-epoch geometry.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn try_accept_root(
+        &self,
+        r2: f64,
+        unit_m: &Matrix3<f64>,
+        inv_unit_m: &Matrix3<f64>,
+        a: &Vector3<f64>,
+        b: &Vector3<f64>,
+        tau1: f64,
+        tau3: f64,
+    ) -> Option<(nalgebra::Matrix3<f64>, Vector3<f64>, f64)> {
+        self.accept_root(r2, unit_m, inv_unit_m, a, b, tau1, tau3)
+    }
+
+    /// Build a `GaussResult` from a position/velocity state at `t2`, applying aberration timing in
+    /// [`compute_orbit_from_state`]. Returns `None` if orbit construction fails.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `pos_all_time`: `3×3` heliocentric positions at `t1|t2|t3` (AU).
+    /// * `vel_t2`: heliocentric velocity at `t2` (AU/day).
+    /// * `epoch`: reference epoch for the state (MJD TT).
+    /// * `corrected`: set `true` if the state is post-correction, `false` if preliminary.
+    ///
+    /// Return
+    /// ----------
+    /// * `Some(GaussResult::CorrectedOrbit|PrelimOrbit)` on success, `None` otherwise.
+    ///
+    /// See also
+    /// ------------
+    /// * [`compute_orbit_from_state`] – Converts `(r(t2), v(t2), epoch)` to orbital elements with aberration.
+    #[inline]
+    fn build_result(
+        &self,
+        state: &Outfit,
+        pos_all_time: &Matrix3<f64>,
+        vel_t2: &Vector3<f64>,
+        epoch: f64,
+        corrected: bool,
+    ) -> Option<GaussResult> {
+        let r_t2: Vector3<f64> = pos_all_time.column(1).into();
+        match self.compute_orbit_from_state(state, &r_t2, vel_t2, epoch) {
+            Ok(orbit) if corrected => Some(GaussResult::CorrectedOrbit(orbit)),
+            Ok(orbit) => Some(GaussResult::PrelimOrbit(orbit)),
+            Err(_) => None,
+        }
+    }
+
+    /// Scan all real-positive roots of the Gauss polynomial and collect up to three acceptable orbits.
+    ///
+    /// This routine enumerates admissible roots of the 8th-degree distance polynomial, reconstructs a
+    /// preliminary state for each candidate root, attempts a velocity correction, then records either the
+    /// corrected orbit (on success) or the preliminary one (if correction fails). The collection is capped
+    /// at three solutions to keep the output concise and representative.
+    ///
+    /// Algorithm
+    /// -----------------
+    /// 1. Compute core quantities for Gauss’ method: direction matrix `S` (unit line-of-sight vectors),
+    ///    its inverse, time offsets `tau₁, tau₃`, and the interpolation vectors `A/B`.
+    /// 2. Build the sparse 8th-degree polynomial coefficients `(c₆, c₃, c₀)`.
+    /// 3. Visit real-positive roots using the Aberth–Ehrlich solver; optionally reject via a cheap `r₂`
+    ///    plausibility window before expensive checks.
+    /// 4. For each root:
+    ///    - Apply geometric/physical tests and reconstruct positions `(t₁ | t₂ | t₃)`, `v(t₂)`, and the epoch.
+    ///    - Attempt an iterative velocity correction; on success, store a **CorrectedOrbit**, otherwise a **PrelimOrbit**.
+    /// 5. Stop when three solutions have been collected or when all roots are exhausted.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `state`: Global context (ephemerides, constants, settings).
+    ///
+    /// Return
+    /// ----------
+    /// * `Ok(Vec<GaussResult>)` containing **1..=3** solutions in discovery order.
+    /// * `Err(OutfitError::GaussNoRootsFound)` if no admissible root yields a solution.
+    ///
+    /// Notes
+    /// ----------
+    /// * Only roots with `Im(z)` below `ROOT_IMAG_EPS` and `Re(z) > 0` are considered; a light plausibility filter
+    ///   `[R2_MIN, R2_MAX]` may further prune candidates.
+    /// * Numerical stability downstream can improve by replacing `inv(S)` with a linear solve (LU/QR).
+    /// * Root scanning does not allocate; solution accumulation uses a `SmallVec<[..; 3]>`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit) – Picks a single “best” solution (corrected preferred).
+    /// * [`pos_and_vel_correction`](crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction) – Iterative velocity update (Lagrange f/g).
+    pub fn prelim_orbit_all(&self, state: &Outfit) -> Result<Vec<GaussResult>, OutfitError> {
+        // 1) Core Gauss quantities
+        let (tau1, tau3, unit_m, inv_unit_m, vec_a, vec_b) = self.gauss_prelim()?;
+
+        // 2) Degree-8 polynomial (only 3 non-zero coefficients)
+        let (c6, c3, c0) = self.coeff_eight_poly(&unit_m, &inv_unit_m, &vec_a, &vec_b);
+        let poly = [c0, 0.0, 0.0, c3, 0.0, 0.0, c6, 0.0, 1.0];
+
+        // Accumulate up to three solutions (stack-first, then into_vec())
+        let mut solutions: SmallVec<[GaussResult; 3]> = SmallVec::new();
+
+        // 3–5) Enumerate admissible roots → accept → correct (if possible) → push
+        Self::visit_real_positive_roots(&poly, 50, 1e-6, Self::ROOT_IMAG_EPS, |r2| {
+            // Cheap plausibility filter on r2 (optional)
+            if !(Self::R2_MIN..=Self::R2_MAX).contains(&r2) {
+                return ControlFlow::Continue(());
+            }
+
+            match self.try_accept_root(r2, &unit_m, &inv_unit_m, &vec_a, &vec_b, tau1, tau3) {
+                None => ControlFlow::Continue(()),
+
+                Some((pos_all, v_pre, epoch_ref)) => {
+                    // Attempt velocity correction first; prefer corrected orbits
+                    if let Some((pos_cor, v_cor, epoch_cor)) = self.pos_and_vel_correction(
+                        &pos_all,
+                        &v_pre,
+                        &unit_m,
+                        &inv_unit_m,
+                        Self::MAX_Q_AU,
+                        Self::MAX_ECC,
+                        Self::NEWTON_EPS,
+                        Self::NEWTON_MAX_IT,
+                    ) {
+                        if let Some(res) =
+                            self.build_result(state, &pos_cor, &v_cor, epoch_cor, true)
+                        {
+                            if solutions.len() < 3 {
+                                solutions.push(res);
+                            }
+                        }
+                    } else if let Some(res) =
+                        self.build_result(state, &pos_all, &v_pre, epoch_ref, false)
+                    {
+                        if solutions.len() < 3 {
+                            solutions.push(res);
+                        }
+                    }
+
+                    if solutions.len() >= 3 {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                }
+            }
+        })?;
+
+        if solutions.is_empty() {
+            Err(OutfitError::GaussNoRootsFound)
+        } else {
+            Ok(solutions.into_vec())
+        }
+    }
+
+    /// Estimate a single initial orbit from three astrometric observations using Gauss’ method.
+    ///
+    /// This wrapper delegates to [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all) to enumerate and evaluate all admissible
+    /// roots of the 8th-degree Gauss polynomial, then applies a simple selection policy to
+    /// return **one** orbit:
+    /// 1) prefer any **corrected** solution (velocity correction converged),
+    /// 2) otherwise return the first **preliminary** solution.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `state`: The global context (ephemerides, constants, settings).
+    ///
+    /// Return
+    /// ----------
+    /// * `Ok(GaussResult::CorrectedOrbit)` if at least one corrected solution exists.
+    /// * `Ok(GaussResult::PrelimOrbit)` if no corrected solution exists but a preliminary one does.
+    /// * `Err(OutfitError::GaussNoRootsFound)` if no admissible root yields a solution.
+    ///
+    /// Notes
+    /// ----------
+    /// * The ordering of candidates is the discovery order used in [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all).
+    /// * If you need access to **all** acceptable solutions (for scoring, diagnostics, or tie-breaking),
+    ///   call [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all) directly and implement your own selection.
+    ///
+    /// See also
+    /// ------------
+    /// * [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all) – Enumerates and returns up to three acceptable solutions.
+    /// * [`pos_and_vel_correction`](crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction) – Iterative velocity update (Lagrange f/g).
     pub fn prelim_orbit(&self, state: &Outfit) -> Result<GaussResult, OutfitError> {
-        // Compute core quantities: time intervals, direction matrix and its inverse, and coefficients
-        let (tau1, tau3, unit_matrix, inv_unit_matrix, vect_a, vect_b) = self.gauss_prelim()?;
-
-        // Build the coefficients of the 8th-degree polynomial in r2
-        let (coeff_6, coeff_3, coeff_0) =
-            self.coeff_eight_poly(&unit_matrix, &inv_unit_matrix, &vect_a, &vect_b);
-        let polynomial = [coeff_0, 0.0, 0.0, coeff_3, 0.0, 0.0, coeff_6, 0.0, 1.0];
-
-        // Solve for real, positive roots using the Aberth method
-        let roots = self.solve_8poly(&polynomial, 50, 1e-6, 1e-6)?;
-
-        // Try to find the first physically valid root (rho2 > 0.01, eccentricity bounds, etc.)
-        let Some((asteroid_pos_all_time, asteroid_vel, reference_epoch)) =
-            roots.into_iter().find_map(|root| {
-                self.accept_root(
-                    root,
-                    &unit_matrix,
-                    &inv_unit_matrix,
-                    &vect_a,
-                    &vect_b,
-                    tau1,
-                    tau3,
-                )
-            })
-        else {
-            return Err(OutfitError::GaussNoRootsFound);
-        };
-
-        // Try to refine the orbital state through iterative velocity correction
-        let Some((corrected_pos, corrected_vel, corrected_epoch)) = self.pos_and_vel_correction(
-            &asteroid_pos_all_time,
-            &asteroid_vel,
-            &unit_matrix,
-            &inv_unit_matrix,
-            1e3,   // perihelion max
-            5.0,   // eccentricity max
-            1e-10, // convergence threshold
-            50,    // max iterations
-        ) else {
-            // If correction failed or diverged, return preliminary orbit
-            return Ok(GaussResult::PrelimOrbit(self.compute_orbit_from_state(
-                state,
-                &asteroid_pos_all_time.column(1).into(),
-                &asteroid_vel,
-                reference_epoch,
-            )?));
-        };
-
-        // Correction succeeded; return refined orbit
-        Ok(GaussResult::CorrectedOrbit(self.compute_orbit_from_state(
-            state,
-            &corrected_pos.column(1).into(),
-            &corrected_vel,
-            corrected_epoch,
-        )?))
+        let all = self.prelim_orbit_all(state)?;
+        if let Some(best_corr) = all
+            .iter()
+            .find(|s| matches!(s, GaussResult::CorrectedOrbit(_)))
+        {
+            return Ok(best_corr.clone());
+        }
+        all.into_iter().next().ok_or(OutfitError::GaussNoRootsFound)
     }
 
     /// Iteratively refine the asteroid's velocity and position at the central observation time.
@@ -892,7 +1117,7 @@ impl GaussObs {
         peri_max: f64,
         ecc_max: f64,
         err_max: f64,
-        itmax: i32,
+        itmax: usize,
     ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
         // Initialize state with uncorrected values
         let mut previous_ast_pos = *asteroid_position;
