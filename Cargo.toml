@@ -69,6 +69,10 @@ harness = false
 name = "solve_kepler_equation"
 harness = false
 
+[[bench]]
+name = "gauss_prelim_orbit"
+harness = false
+
 [profile.bench]
 opt-level = 3
 lto = "thin"
