@@ -1075,38 +1075,32 @@ impl GaussObs {
 
     /// Iteratively refine the asteroid's velocity and position at the central observation time.
     ///
-    /// This function performs the correction loop of Gauss’s method by adjusting the velocity
-    /// estimate using Lagrange coefficients and recomputing the corresponding positions.
-    /// The iterations continue until the position correction converges or until the iteration
-    /// limit is reached.
+    /// Perform Gauss’s correction loop:
+    /// 1) Update velocity from Lagrange coefficients using the 1st and 3rd observations,
+    /// 2) Recompute topocentric distances and positions,
+    /// 3) Check dynamic acceptability and convergence.
     ///
     /// Arguments
-    /// ---------
-    /// * `asteroid_position` – Initial 3×3 matrix of asteroid positions at each observation time (in AU).
-    /// * `asteroid_velocity` – Initial velocity vector at the central time (in AU/day).
-    /// * `unit_matrix` – 3×3 matrix of line-of-sight unit vectors from observer to object.
-    /// * `inv_unit_matrix` – Inverse of the unit direction matrix.
-    /// * `peri_max` – Maximum allowed perihelion distance (used in eccentricity filtering).
-    /// * `ecc_max` – Maximum allowed orbital eccentricity.
-    /// * `err_max` – Relative convergence threshold on position vectors.
-    /// * `itmax` – Maximum number of iterations allowed.
+    /// -----------------
+    /// * `asteroid_position`: Initial 3×3 asteroid positions at the three epochs (AU).
+    /// * `asteroid_velocity`: Initial velocity at the central epoch (AU/day).
+    /// * `unit_matrix`: 3×3 matrix of line-of-sight unit vectors (observer→object).
+    /// * `inv_unit_matrix`: Inverse of `unit_matrix`.
+    /// * `peri_max`: Maximum allowed perihelion distance (AU).
+    /// * `ecc_max`: Maximum allowed eccentricity.
+    /// * `err_max`: Relative convergence threshold on positions (Frobenius norm).
+    /// * `itmax`: Maximum iterations.
     ///
-    /// Returns
-    /// --------
-    /// * `Some((corrected_positions, corrected_velocity, corrected_epoch))` if convergence succeeded
-    /// * `None` if the solution failed due to divergence or non-physical orbits (e.g., hyperbolic).
+    /// Return
+    /// ----------
+    /// * `Some((corrected_positions, corrected_velocity, corrected_epoch))` on success.
+    /// * `None` if correction diverges or orbit is dynamically rejected.
     ///
-    /// Remarks
-    /// --------
-    /// * Each iteration updates the velocity using Lagrange coefficient matching (`velocity_correction`)
-    ///   and recomputes the associated topocentric distances and positions.
-    /// * The updated position matrix is compared to the previous one using relative RMS error.
-    /// * This routine corresponds to the velocity refinement loop in OrbFit’s `gaussn.f90`.
-    ///
-    /// # See also
+    /// See also
+    /// ------------
     /// * [`velocity_correction`] – Lagrange-based velocity update.
     /// * [`eccentricity_control`] – Filters solutions based on dynamic acceptability.
-    /// * [`GaussObs::position_vector_and_reference_epoch`] – Recomputes full asteroid positions at each epoch.
+    /// * [`GaussObs::position_vector_and_reference_epoch`] – Recomputes positions per epoch.
     #[allow(clippy::too_many_arguments)]
     pub fn pos_and_vel_correction(
         &self,
@@ -1119,82 +1113,81 @@ impl GaussObs {
         err_max: f64,
         itmax: usize,
     ) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
-        // Initialize state with uncorrected values
-        let mut previous_ast_pos = *asteroid_position;
-        let mut previous_ast_vel = *asteroid_velocity;
-        let mut corrected_epoch = 0.0;
+        // --- Loop state
+        let mut pos = *asteroid_position;
+        let mut vel = *asteroid_velocity;
+        let mut epoch = 0.0_f64;
 
-        // Main correction loop
-        for _ in 0..itmax {
-            // Compute velocity correction using first observation
-            let Ok((ast_vel1, f1, g1)) = velocity_correction(
-                &previous_ast_pos.column(0).into(),
-                &previous_ast_pos.column(1).into(),
-                &previous_ast_vel,
-                self.time[0] - self.time[1],
-                peri_max,
-                ecc_max,
-            ) else {
-                continue; // skip iteration if invalid geometry
+        // Precompute time offsets relative to central observation (2 ≡ index 1).
+        let dt_01 = self.time[0] - self.time[1];
+        let dt_21 = self.time[2] - self.time[1];
+
+        // Use Frobenius relative error for positions.
+        // Stop early if error improves below threshold.
+        for _iter in 0..itmax {
+            // Grab the three position columns as stack-owned Vector3 (no heap).
+            let r1 = pos.column(0).into_owned();
+            let r2 = pos.column(1).into_owned();
+            let r3 = pos.column(2).into_owned();
+
+            // Two velocity corrections (using obs #1 and #3 around the central #2).
+            let (res1, res2) = (
+                velocity_correction(&r1, &r2, &vel, dt_01, peri_max, ecc_max),
+                velocity_correction(&r3, &r2, &vel, dt_21, peri_max, ecc_max),
+            );
+
+            let ((v1, f1, g1), (v2, f2, g2)) = match (res1, res2) {
+                (Ok(a), Ok(b)) => (a, b),
+                _ => {
+                    continue;
+                } // invalid local geometry this iteration
             };
 
-            // Compute velocity correction using third observation
-            let Ok((ast_vel2, f2, g2)) = velocity_correction(
-                &previous_ast_pos.column(2).into(),
-                &previous_ast_pos.column(1).into(),
-                &previous_ast_vel,
-                self.time[2] - self.time[1],
-                peri_max,
-                ecc_max,
-            ) else {
-                continue; // skip iteration if invalid geometry
+            // Average the two velocity estimates (robust to local asymmetry).
+            let new_vel = (v1 + v2) * 0.5;
+
+            // Build Gauss C-vector (with one reciprocal to avoid two divisions).
+            let fl = f1 * g2 - f2 * g1;
+            if !fl.is_finite() || fl.abs() < f64::EPSILON {
+                continue;
+            }
+            let inv_f = 1.0 / fl;
+            let c_vec = Vector3::new(g2 * inv_f, -1.0, -g1 * inv_f);
+
+            // Recompute asteroid positions + light-time-corrected epoch.
+            let (new_pos, new_epoch) = match self.position_vector_and_reference_epoch(
+                unit_matrix,
+                inv_unit_matrix,
+                &c_vec,
+            ) {
+                Ok(v) => v,
+                _ => {
+                    continue;
+                } // e.g., degenerate rho2
             };
 
-            // Average the two velocity estimates
-            let corrected_velocity = (ast_vel1 + ast_vel2) / 2.0;
-
-            // Compute updated vector C (Gauss coefficients)
-            let f_lagrange = f1 * g2 - f2 * g1;
-            let c_vector = Vector3::new(g2 / f_lagrange, -1.0, -(g1 / f_lagrange));
-
-            // Recompute asteroid positions and light-time-corrected epoch
-            let Some((new_ast_pos, it_epoch)) = self
-                .position_vector_and_reference_epoch(unit_matrix, inv_unit_matrix, &c_vector)
-                .ok()
-            else {
-                continue; // skip if positions are invalid (e.g., rho2 too small)
+            // Dynamic acceptability (use middle epoch).
+            let r_mid = new_pos.column(1).into_owned();
+            let accepted = match eccentricity_control(&r_mid, &new_vel, 1e3, 5.0) {
+                Some((ok, _, _, _)) => ok,
+                None => return None,
             };
-
-            // Compute relative error between new and previous position matrices
-            let diff_pos = new_ast_pos - previous_ast_pos;
-            let diff_pos_squared = diff_pos.component_mul(&diff_pos).sum();
-            let sca = new_ast_pos.component_mul(&new_ast_pos).sum();
-            let ast_pos_err = (diff_pos_squared / sca).sqrt();
-
-            // Check orbital acceptability (eccentricity, energy, perihelion)
-            let Some((is_accepted, _, _, _)) =
-                eccentricity_control(&new_ast_pos.column(1).into(), &corrected_velocity, 1e3, 5.0)
-            else {
-                return None; // orbit is dynamically invalid
-            };
-
-            if !is_accepted {
+            if !accepted {
                 return None;
             }
 
-            // Update state for next iteration or final output
-            previous_ast_pos = new_ast_pos;
-            previous_ast_vel = corrected_velocity;
-            corrected_epoch = it_epoch;
+            // Convergence check: relative Frobenius norm of position delta.
+            let rel_err = (new_pos - pos).norm() / new_pos.norm();
+            pos = new_pos;
+            vel = new_vel;
+            epoch = new_epoch;
 
-            // Check convergence
-            if ast_pos_err <= err_max {
+            if rel_err <= err_max {
                 break;
             }
         }
 
-        // Return the refined state if successful
-        Some((previous_ast_pos, previous_ast_vel, corrected_epoch))
+        Some((pos, vel, epoch))
     }
 }
 

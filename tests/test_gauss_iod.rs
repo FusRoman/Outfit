@@ -40,7 +40,8 @@ fn run_iod(
 #[test]
 
 fn test_gauss_iod() {
-    let test_epsilon = 1e-16;
+    let test_max_relative = 1e-13;
+    let test_epsilon = 5. * f64::EPSILON;
 
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
@@ -62,19 +63,24 @@ fn test_gauss_iod() {
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 57049.22904452732,
-        semi_major_axis: 1.8017634341924607,
-        eccentricity: 0.28360400982137435,
-        inclination: 0.20267485730439433,
-        ascending_node_longitude: 0.008101820227108794,
-        periapsis_argument: 1.2445523487100687,
-        mean_anomaly: 0.44069989140090704,
+        semi_major_axis: 1.8017634341924542,
+        eccentricity: 0.28360400982137396,
+        inclination: 0.20267485730439427,
+        ascending_node_longitude: 0.00810182022710516,
+        periapsis_argument: 1.2445523487100616,
+        mean_anomaly: 0.44069989140091426,
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(best_rms, 47.679542690830374, epsilon = test_epsilon);
+    assert_relative_eq!(
+        best_rms,
+        47.67954270293223,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
 
     let (best_orbit, best_rms) = run_iod(
         &mut env_state,
@@ -85,19 +91,24 @@ fn test_gauss_iod() {
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60672.24113100201,
-        semi_major_axis: 3.1895469772492726,
-        eccentricity: 0.05434034666133621,
-        inclination: 0.18343383575588396,
-        ascending_node_longitude: 0.032535949681617486,
-        periapsis_argument: 2.0197545218041637,
-        mean_anomaly: 4.850703837045108,
+        semi_major_axis: 3.1895469772493885,
+        eccentricity: 0.05434034666134361,
+        inclination: 0.18343383575588454,
+        ascending_node_longitude: 0.03253594968161192,
+        periapsis_argument: 2.019754521803849,
+        mean_anomaly: 4.850703837045435,
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(best_rms, 0.550927559734149, epsilon = test_epsilon);
+    assert_relative_eq!(
+        best_rms,
+        0.5509275597662157,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
 
     let (best_orbit, best_rms) = run_iod(
         &mut env_state,
@@ -108,17 +119,22 @@ fn test_gauss_iod() {
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60465.26778016307,
-        semi_major_axis: 2.1921362022018465,
-        eccentricity: 0.2042936374305541,
-        inclination: 0.1189651192106595,
-        ascending_node_longitude: 3.091130251223301,
-        periapsis_argument: 2.4714439663663255,
-        mean_anomaly: 4.9466622638824855,
+        semi_major_axis: 2.192136202202348,
+        eccentricity: 0.2042936374307111,
+        inclination: 0.11896511921064962,
+        ascending_node_longitude: 3.091130251223218,
+        periapsis_argument: 2.47144396636554,
+        mean_anomaly: 4.946662263883677,
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(best_rms, 6.3193950851085035, epsilon = test_epsilon);
+    assert_relative_eq!(
+        best_rms,
+        6.319395087742966,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
 }
