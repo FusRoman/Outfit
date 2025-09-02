@@ -10,6 +10,10 @@ arrow-array = { version = "54.3.1", default-features = false }
 camino = { version = "1.1.9", default-features = false }
 directories = "6.0.0"
 
+# hifitime = { version = "4.1.3", default-features = false, features = [
+#     "ut1",
+#     "std",
+# ] }
 hifitime = { git = "https://github.com/nyx-space/hifitime", rev = "aa4e5aed52ffaa4bb8be3901e04625e353788d4d", default-features = false, features = [
     "ut1",
     "std",
@@ -38,6 +42,8 @@ rand = { version = "0.9.2", default-features = false, features = ["std_rng"] }
 rand_distr = { version = "0.5.1", default-features = false }
 
 reqwest = { version = "0.12.15", default-features = false, optional = true, features = [
+    "http2",
+    "rustls-tls",
     "stream",
 ] }
 tokio = { version = "1.44.1", default-features = false, optional = true, features = [
@@ -49,16 +55,38 @@ tokio = { version = "1.44.1", default-features = false, optional = true, feature
 tokio-stream = { version = "0.1.17", default-features = false, optional = true }
 
 [dev-dependencies]
-approx = { version = "0.5.1", default-features = false } # hifitime = { version = "4.1.3", default-features = false, features = [
-#     "ut1",
-#     "std",
-# ] }
+approx = { version = "0.5.1", default-features = false }
 criterion = { version = "0.5.1", features = ["html_reports"] }
 husky-rs = "0.1.5"
 proptest = "1.7.0"
 
 [features]
 jpl-download = ["dep:reqwest", "dep:tokio", "dep:tokio-stream"]
+
+[[test]]
+name = "reader_80col_test"
+path = "tests/reader_80col_test.rs"
+required-features = ["jpl-download"]
+
+[[test]]
+name = "test_read_ades"
+path = "tests/test_read_ades.rs"
+required-features = ["jpl-download"]
+
+[[test]]
+name = "test_large_parquet"
+path = "tests/trajectories_from_parquet.rs"
+required-features = ["jpl-download"]
+
+[[test]]
+name = "test_trajectories_from_vec"
+path = "tests/trajectories_from_vec.rs"
+required-features = ["jpl-download"]
+
+[[example]]
+name = "gauss_iod_once"
+path = "examples/gauss_iod_once.rs"
+required-features = ["jpl-download"]
 
 [[bench]]
 name = "load_parquet"

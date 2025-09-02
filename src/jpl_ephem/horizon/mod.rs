@@ -62,7 +62,7 @@
 //! | IPT[15][3] (u32)                 |  Index Pointer Table per body:                 |
 //! |   for b = 0..14:                 |    IPT[b] = [ offset, n_coeff, n_sub ]         |
 //! |                                  |    - offset  : start position (in 4-byte words |
-//! |                                  |                 from beginning of DATA RECORD)  |
+//! |                                  |                 from beginning of DATA RECORD) |
 //! |                                  |    - n_coeff : #Chebyshev coeff. per component |
 //! |                                  |    - n_sub   : #sub-intervals per block        |
 //! | LPT patch (u32 × 3)              |  Special replacement for IPT[12] (libration)   |
@@ -90,19 +90,19 @@
 //! |  Body 0 payload (at offset IPT[0][0] * 4 bytes from DATA RECORD start)            |
 //! |    For sub = 0 .. IPT[0][2]-1:                                                    |
 //! |      For comp = 0 .. dim(0)-1:                                                    |
-//! |        Chebyshev coeffs[ IPT[0][1] ]  (f64 × n_coeff)                              |
+//! |        Chebyshev coeffs[ IPT[0][1] ]  (f64 × n_coeff)                             |
 //! |                                                                                   |
 //! |  Body 1 payload (at offset IPT[1][0] * 4)                                         |
 //! |    For sub = 0 .. IPT[1][2]-1:                                                    |
 //! |      For comp = 0 .. dim(1)-1:                                                    |
-//! |        Chebyshev coeffs[ IPT[1][1] ]  (f64 × n_coeff)                              |
+//! |        Chebyshev coeffs[ IPT[1][1] ]  (f64 × n_coeff)                             |
 //! |                                                                                   |
 //! |  ...                                                                              |
 //! |                                                                                   |
 //! |  Body 14 payload (at offset IPT[14][0] * 4)                                       |
 //! |    For sub = 0 .. IPT[14][2]-1:                                                   |
 //! |      For comp = 0 .. dim(14)-1:                                                   |
-//! |        Chebyshev coeffs[ IPT[14][1] ]  (f64 × n_coeff)                             |
+//! |        Chebyshev coeffs[ IPT[14][1] ]  (f64 × n_coeff)                            |
 //! +-----------------------------------------------------------------------------------+
 //!
 //! +-----------------------------------------------------------------------------------+
