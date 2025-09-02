@@ -627,13 +627,13 @@ pub(crate) fn observation_from_batch(
 }
 
 #[cfg(test)]
+#[cfg(feature = "jpl-download")]
 mod test_observations {
 
     use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
     use super::*;
 
-    #[cfg(feature = "jpl-download")]
     mod tests_compute_apparent_position {
 
         use super::*;
@@ -1032,7 +1032,6 @@ mod test_observations {
         );
     }
 
-    #[cfg(feature = "jpl-download")]
     mod tests_ephemeris_error {
         use super::*;
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
@@ -1291,7 +1290,6 @@ mod test_observations {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_from_80col_valid_line() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
@@ -1330,7 +1328,6 @@ mod test_observations {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_from_80col_too_short_line() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
@@ -1347,7 +1344,6 @@ mod test_observations {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_from_80col_invalid_date() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
@@ -1365,7 +1361,6 @@ mod test_observations {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_from_80col_invalid_ra_dec() {
         use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
