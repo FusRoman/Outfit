@@ -16,6 +16,7 @@ use nalgebra::{Matrix3, Vector3};
 
 use outfit::initial_orbit_determination::gauss::GaussObs;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
+use outfit::initial_orbit_determination::IODParams;
 use outfit::outfit::Outfit;
 use outfit::outfit_errors::OutfitError;
 use rand::SeedableRng;
@@ -94,7 +95,7 @@ fn bench_prelim_orbit(c: &mut Criterion) {
     // 1) Single call
     group.bench_function("single_call", |b| {
         b.iter(|| {
-            let res = gauss.prelim_orbit(black_box(&state));
+            let res = gauss.prelim_orbit(black_box(&state), &IODParams::default());
             match res {
                 Ok(GaussResult::PrelimOrbit(_)) | Ok(GaussResult::CorrectedOrbit(_)) => {}
                 Err(e) => panic!("prelim_orbit failed: {e:?}"),
@@ -108,7 +109,7 @@ fn bench_prelim_orbit(c: &mut Criterion) {
             || gauss.clone(),
             |g| {
                 for _ in 0..100 {
-                    let res = g.prelim_orbit(&state);
+                    let res = g.prelim_orbit(&state, &IODParams::default());
                     black_box(&res);
                 }
             },
@@ -135,7 +136,7 @@ fn bench_prelim_orbit(c: &mut Criterion) {
                     .expect("noisy realizations");
 
                 for gg in noisy {
-                    let res = gg.prelim_orbit(&state);
+                    let res = gg.prelim_orbit(&state, &IODParams::default());
                     black_box(&res);
                 }
             },

@@ -1,7 +1,4 @@
-#![cfg_attr(not(feature = "jpl-download"), allow(dead_code))]
-#[cfg(not(feature = "jpl-download"))]
-compile_error!("This example requires the `jpl-download` feature. Run with: cargo run --release --features jpl-download --example gauss_iod_once");
-
+#![cfg(feature = "jpl-download")]
 use std::env;
 
 use camino::Utf8Path;

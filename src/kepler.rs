@@ -134,7 +134,7 @@
 //! let v2 = Vector3::new(0.0, 0.017, 0.0); // v(t2) in AU/day
 //! let dt = 1.0;                           // t2 - t1 in days
 //!
-//! let (v2_corr, f, g) = velocity_correction(&x1, &x2, &v2, dt, 5.0, 0.9)?;
+//! let (v2_corr, f, g) = velocity_correction(&x1, &x2, &v2, dt, 5.0, 0.9, 1e-12)?;
 //! // v2_corr is the corrected velocity at t2 using the universal-variable f–g solution.
 //! # Ok::<(), outfit::outfit_errors::OutfitError>(())
 //! ```
@@ -878,12 +878,13 @@ pub fn velocity_correction(
     dt: f64,
     peri_max: f64,
     ecc_max: f64,
+    eps: f64,
 ) -> Result<(Vector3<f64>, f64, f64), OutfitError> {
     // Delegate to the more general implementation with warm-start capability,
     // but here we pass `None` for both the χ guess and the solver tolerance
     // to keep the legacy, minimal interface.
     let (velocity_corrected, f, g, _) =
-        velocity_correction_with_guess(x1, x2, v2, dt, peri_max, ecc_max, None, None)?;
+        velocity_correction_with_guess(x1, x2, v2, dt, peri_max, ecc_max, None, eps)?;
     Ok((velocity_corrected, f, g))
 }
 
@@ -931,7 +932,7 @@ pub fn velocity_correction_with_guess(
     peri_max: f64,
     ecc_max: f64,
     chi_guess: Option<f64>,
-    eps: Option<f64>,
+    eps: f64,
 ) -> Result<(Vector3<f64>, f64, f64, f64), OutfitError> {
     // --- Constants
     let mu = GAUSS_GRAV_SQUARED;
@@ -964,11 +965,8 @@ pub fn velocity_correction_with_guess(
         e0: ecc,
     };
 
-    // Solver tolerance: user override or default
-    let tol = eps.unwrap_or(1e3 * f64::EPSILON);
-
     // --- Step 3: Solve the universal Kepler equation (with optional χ warm-start)
-    let (_chi, _c2, _c3, s2, s3) = solve_kepuni_with_guess(&params, Some(tol), chi_guess).ok_or(
+    let (_chi, _c2, _c3, s2, s3) = solve_kepuni_with_guess(&params, Some(eps), chi_guess).ok_or(
         OutfitError::VelocityCorrectionError("Universal Kepler solver did not converge".into()),
     )?;
 
@@ -1539,6 +1537,8 @@ mod kepler_test {
         use approx::assert_relative_eq;
         use nalgebra::Vector3;
 
+        const KEP_EPS: f64 = 1e3 * f64::EPSILON;
+
         /// Helper function: easily build a 3D vector.
         fn v(x: f64, y: f64, z: f64) -> Vector3<f64> {
             Vector3::new(x, y, z)
@@ -1555,7 +1555,7 @@ mod kepler_test {
             let peri_max = 5.0;
             let ecc_max = 0.9;
 
-            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max);
+            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max, KEP_EPS);
             assert!(result.is_ok(), "Velocity correction should succeed");
 
             let (vcorr, f, g) = result.unwrap();
@@ -1582,7 +1582,7 @@ mod kepler_test {
             let peri_max = 0.001;
             let ecc_max = 0.001;
 
-            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max);
+            let result = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max, KEP_EPS);
             assert!(
                 result.is_err(),
                 "Velocity correction should fail on an invalid orbit"
@@ -1601,9 +1601,10 @@ mod kepler_test {
             let peri_max = 5.0;
             let ecc_max = 0.9;
 
-            let result1 = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+            let result1 =
+                velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max, KEP_EPS).unwrap();
             let result2 =
-                velocity_correction(&x1_shifted, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+                velocity_correction(&x1_shifted, &x2, &v2, dt, peri_max, ecc_max, KEP_EPS).unwrap();
 
             let (v_corr1, _, _) = result1;
             let (v_corr2, _, _) = result2;
@@ -1626,7 +1627,8 @@ mod kepler_test {
             let peri_max = 5.0;
             let ecc_max = 0.9;
 
-            let (v_corr, f, g) = velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max).unwrap();
+            let (v_corr, f, g) =
+                velocity_correction(&x1, &x2, &v2, dt, peri_max, ecc_max, KEP_EPS).unwrap();
             assert!(
                 !v_corr.iter().any(|x| x.is_nan()),
                 "Corrected velocity vector contains NaN"
@@ -1656,7 +1658,7 @@ mod kepler_test {
             );
             let dt = 14.731970000000729;
 
-            let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1.).unwrap();
+            let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1., KEP_EPS).unwrap();
 
             assert_eq!(f, 0.988_164_877_097_290_6);
             assert_eq!(g, 14.674676076120734);
@@ -1710,7 +1712,7 @@ mod kepler_test {
                 fn prop_velocity_correction_no_panic(
                     (x1,x2,v2,dt,peri_max,ecc_max) in arb_orbit_params()
                 ) {
-                    let res = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max);
+                    let res = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max, KEP_EPS);
 
                     match res {
                         Ok((vcorr, f, g)) => {
@@ -1737,8 +1739,8 @@ mod kepler_test {
                     let mut x1_shifted = x1;
                     x1_shifted[0] += 0.01;
 
-                    let res1 = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max);
-                    let res2 = velocity_correction(&x1_shifted,&x2,&v2,dt,peri_max,ecc_max);
+                    let res1 = velocity_correction(&x1,&x2,&v2,dt,peri_max,ecc_max, KEP_EPS);
+                    let res2 = velocity_correction(&x1_shifted,&x2,&v2,dt,peri_max,ecc_max, KEP_EPS);
 
                     if let (Ok((v1, _, _)), Ok((v2c, _, _))) = (res1, res2) {
                         let diff = (v1 - v2c).norm();
