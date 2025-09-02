@@ -125,15 +125,13 @@ fn bench_prelim_orbit(c: &mut Criterion) {
                 // 0.3" ≈ 1.454e-6 rad; use your production noise scale if different.
                 let sigma_rad = 1.5e-6_f64;
                 let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-                let noisy = g
-                    .generate_noisy_realizations(
-                        &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
-                        &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
-                        sigma_rad as usize,
-                        1.0,
-                        &mut rng,
-                    )
-                    .expect("noisy realizations");
+                let noisy = g.generate_noisy_realizations(
+                    &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
+                    &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
+                    sigma_rad as usize,
+                    1.0,
+                    &mut rng,
+                );
 
                 for gg in noisy {
                     let res = gg.prelim_orbit(&state, &IODParams::default());
