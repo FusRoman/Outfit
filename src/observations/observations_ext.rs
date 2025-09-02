@@ -747,13 +747,9 @@ mod test_obs_ext {
     #[test]
     #[cfg(feature = "jpl-download")]
     fn test_select_rms_interval() {
-        use camino::Utf8Path;
+        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
 
-        use crate::{constants::TrajectorySet, observations::trajectory_ext::TrajectoryExt};
-
-        let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-        let mut traj_set =
-            TrajectorySet::new_from_80col(&mut env_state, Utf8Path::new("tests/data/2015AB.obs"));
+        let mut traj_set = OUTFIT_HORIZON_TEST.1.clone();
 
         let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
         let traj_len = traj_set
