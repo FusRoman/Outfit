@@ -208,14 +208,14 @@ impl GaussObs {
         dec: Vector3<f64>,
         mjd_time: Vector3<f64>,
         observer_helio_position: Matrix3<f64>,
-    ) -> Result<GaussObs, OutfitError> {
-        Ok(GaussObs {
+    ) -> GaussObs {
+        GaussObs {
             idx_obs,
             ra,
             dec,
             time: mjd_time,
             observer_helio_position,
-        })
+        }
     }
 
     /// Generate a lazy sequence of noisy triplet realizations for orbit determination.

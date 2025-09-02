@@ -94,6 +94,7 @@ pub mod ades_reader;
 pub mod observations_ext;
 mod parquet_reader;
 pub mod trajectory_ext;
+pub mod triplets_generator;
 pub mod triplets_iod;
 
 use crate::{

@@ -162,45 +162,59 @@ use crate::{
 /// This trait is central to orbit determination pipelines and is designed
 /// to work with small batches of observations (often < 100 per object).
 pub trait ObservationsExt {
-    /// Compute candidate triplets of observations for Gauss initial orbit determination (IOD).
+    /// Compute **time-feasible, best-K** triplets of observations for Gauss IOD,
+    /// leveraging a lazy **index stream** and a bounded **max-heap** on spacing weight.
     ///
     /// Overview
     /// -----------------
-    /// This method builds a set of observation triplets optimized for the **Gauss method** of IOD.
-    /// It is a convenience wrapper around [`generate_triplets`], operating directly on the current
-    /// observation set (`self`).
+    /// This method is a convenience wrapper around [`generate_triplets`]. It operates
+    /// directly on `self` (the current observation set) and returns up to `max_triplet`
+    /// **best-scored** candidates for the Gauss preliminary solution. Internally it:
     ///
-    /// The procedure:
-    /// 1. Sort the available observations by epoch.
-    /// 2. Optionally downsample them to a manageable subset (`max_obs_for_triplets`).
-    /// 3. Enumerate all possible triplets respecting the time-span limits (`dt_min`..`dt_max`).
-    /// 4. Score each triplet using a spacing-based weight function (compared to `optimal_interval_time`).
-    /// 5. Return the best-ranked candidates up to `max_triplet`.
+    /// 1) Uses a `TripletIndexGenerator` that:
+    ///    - sorts epochs in place,
+    ///    - downsamples to at most `max_obs_for_triplets` (uniform with edges),
+    ///    - lazily **streams reduced indices** `(first, middle, last)` constrained by:
+    ///      `dt_min ≤ t[last] − t[first] ≤ dt_max`.
+    /// 2) Scores each feasible triplet with [`triplet_weight`](crate::observations::triplets_iod::triplet_weight) against `optimal_interval_time`.
+    /// 3) Keeps only the **K** smallest weights in a bounded **max-heap** (best-K selection).
+    /// 4) Materializes the survivors as [`GaussObs`] by (re)borrowing `self` immutably.
+    ///
+    /// Compared to brute-force `O(n³)`, the time-windowed enumeration drives the effective
+    /// cost toward ~`O(n²)` in typical time distributions, plus `O(n log K)` for heap updates.
     ///
     /// Arguments
     /// -----------------
-    /// * `dt_min` – Minimum allowed timespan `[days]` between the first and last observation of a triplet.
-    /// * `dt_max` – Maximum allowed timespan `[days]` between the first and last observation of a triplet.
-    /// * `optimal_interval_time` – Ideal interval `[days]` between consecutive observations in a triplet
-    ///   (used to compute the weight).
-    /// * `max_obs_for_triplets` – Maximum number of observations to retain after uniform downsampling.
-    /// * `max_triplet` – Maximum number of triplets to return.
+    /// * `dt_min` – Minimum allowed timespan `[same units as Observation::time]` between the first and last epoch of a triplet.
+    /// * `dt_max` – Maximum allowed timespan between the first and last epoch of a triplet.
+    /// * `optimal_interval_time` – Target per-gap spacing (e.g., days) used by [`triplet_weight`](crate::observations::triplets_iod::triplet_weight).
+    /// * `max_obs_for_triplets` – Upper bound on observations kept after downsampling (uniform with endpoints).
+    /// * `max_triplet` – Number `K` of best-scoring triplets to return.
     ///
     /// Return
     /// ----------
-    /// * `Result<Vec<GaussObs>, OutfitError>` – A collection of [`GaussObs`] triplets, sorted
-    ///   from best to worst by their weight.
+    /// * A `Vec<GaussObs>` of length `≤ max_triplet`, **sorted by increasing weight**
+    ///   (best geometric spacing first), ready to be passed to `GaussObs::prelim_orbit`.
     ///
     /// Remarks
-    /// ------------
-    /// * This is the **preferred high-level entry point** when working with a set of observations
-    ///   implementing [`ObservationsExt`].
-    /// * Use [`generate_triplets`] directly if you want to run the algorithm on a standalone `Vec<Observation>`.
+    /// -------------
+    /// * Sorting is **in-place**; call sites should not rely on original ordering afterward.
+    /// * The generator avoids overlapping borrows of `self`; only the final K triplets are materialized.
+    /// * For robustness studies, each returned triplet can be expanded with
+    ///   `GaussObs::realizations_iter` (lazy Monte-Carlo noise).
+    ///
+    /// Complexity
+    /// -----------------
+    /// * Enumeration: ~`O(n²)` (per-anchor time window).
+    /// * Selection: `O(n log K)` (bounded max-heap).
+    /// * Space: `O(1)` per yielded candidate; only K triplets are allocated at the end.
     ///
     /// See also
     /// ------------
-    /// * [`GaussObs`] – Triplet structure used as input for Gauss IOD.
-    /// * [`generate_triplets`] – Low-level function implementing the triplet generation and scoring.
+    /// * [`generate_triplets`] – Low-level function performing the selection (index stream + heap + materialization).
+    /// * [`TripletIndexGenerator`](crate::observations::triplets_generator::TripletIndexGenerator) – Lazy stream of reduced indices constrained by `(dt_min, dt_max)`.
+    /// * [`triplet_weight`](crate::observations::triplets_iod::triplet_weight) – Spacing heuristic around `optimal_interval_time`.
+    /// * [`GaussObs::realizations_iter`] – On-the-fly noisy realizations for a given triplet.
     fn compute_triplets(
         &mut self,
         dt_min: f64,
@@ -208,7 +222,7 @@ pub trait ObservationsExt {
         optimal_interval_time: f64,
         max_obs_for_triplets: usize,
         max_triplet: u32,
-    ) -> Result<Vec<GaussObs>, OutfitError>;
+    ) -> Vec<GaussObs>;
 
     /// Select the interval of observations for RMS calculation.
     ///
@@ -509,7 +523,7 @@ impl ObservationsExt for Observations {
         optimal_interval_time: f64,
         max_obs_for_triplets: usize,
         max_triplet: u32,
-    ) -> Result<Vec<GaussObs>, OutfitError> {
+    ) -> Vec<GaussObs> {
         generate_triplets(
             self,
             dt_min,
@@ -678,7 +692,7 @@ impl ObservationIOD for Observations {
             params.optimal_interval_time,
             params.max_obs_for_triplets,
             params.max_triplets,
-        )?;
+        );
 
         // Current best (lowest) RMS and its orbit.
         // Using +∞ avoids Option branching in the hot path.
@@ -702,12 +716,8 @@ impl ObservationIOD for Observations {
                 // 4.a) Preliminary Gauss solution on the current realization.
                 let gauss_res = match realization.prelim_orbit(state, params) {
                     Ok(res) => res,
-                    Err(e) => {
-                        // Consider skipping instead of failing fast if you want robustness:
-                        // continue;
-                        return Err(OutfitError::RmsComputationFailed(format!(
-                            "Failed to compute preliminary orbit from triplet: {e}"
-                        )));
+                    Err(_) => {
+                        continue;
                     }
                 };
 
@@ -726,12 +736,8 @@ impl ObservationIOD for Observations {
                     params.dtmax,
                 ) {
                     Ok(v) => v,
-                    Err(e) => {
-                        // Consider skipping instead of failing fast if you want robustness:
-                        // continue;
-                        return Err(OutfitError::RmsComputationFailed(format!(
-                            "Failed to compute RMS for orbit from triplet: {e}"
-                        )));
+                    Err(_) => {
+                        continue;
                     }
                 };
 
@@ -772,9 +778,7 @@ mod test_obs_ext {
             .get_mut(&traj_number)
             .expect("Failed to get trajectory");
 
-        let triplets = traj
-            .compute_triplets(0.03, 150.0, 20.0, traj_len, 10)
-            .unwrap();
+        let triplets = traj.compute_triplets(0.03, 150.0, 20.0, traj_len, 10);
         let (u1, u2) = traj
             .select_rms_interval(triplets.first().unwrap(), -1., 30.)
             .unwrap();
