@@ -491,6 +491,7 @@ pub trait ObservationIOD {
     /// * [`GaussObs::generate_noisy_realizations`] – Creates perturbed triplets with Gaussian noise.
     /// * [`GaussObs::prelim_orbit`] – Computes a preliminary orbit from a single triplet.
     /// * [`ObservationsExt::rms_orbit_error`] – Measures the goodness-of-fit of an orbit against observations.
+    /// * [`IODParams`] – Configuration options for the IOD process.
     fn estimate_best_orbit(
         &mut self,
         state: &Outfit,
@@ -665,10 +666,12 @@ impl ObservationIOD for Observations {
         rng: &mut impl rand::Rng,
         params: &IODParams,
     ) -> Result<(Option<GaussResult>, f64), OutfitError> {
-        // Apply uncertainty calibration based on RMS statistics from the error model
+        // --- Stage 1: Calibrate uncertainties once for the whole batch.
+        // This aligns quoted per-obs errors with empirical RMS statistics.
         self.apply_batch_rms_correction(error_model, params.gap_max);
 
-        // Generate candidate triplets (3-observation sets) based on temporal constraints
+        // --- Stage 2: Enumerate candidate triplets under temporal constraints.
+        // Prefer exposing this as an iterator in the future to enable early returns.
         let triplets = self.compute_triplets(
             params.dt_min,
             params.dt_max_triplet,
@@ -677,62 +680,70 @@ impl ObservationIOD for Observations {
             params.max_triplets,
         )?;
 
-        let mut best_rms = f64::MAX;
-        let mut best_orbit = None;
+        // Current best (lowest) RMS and its orbit.
+        // Using +∞ avoids Option branching in the hot path.
+        let mut best_rms = f64::INFINITY;
+        let mut best_orbit: Option<GaussResult> = None;
 
-        // Iterate over each triplet to attempt orbit estimation
+        // --- Stage 3: Explore each triplet.
         for triplet in triplets {
-            // Extract astrometric uncertainties for each observation in the triplet
+            // Extract 1-σ astrometric uncertainties for the three obs of this triplet.
             let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
 
-            // Generate multiple noisy realizations of the triplet to simulate measurement noise
-            let realizations = triplet.generate_noisy_realizations(
+            // --- Stage 4: For each (lazy) noisy realization of this triplet...
+            // The iterator yields the original triplet first, then noisy copies.
+            for realization in triplet.realizations_iter(
                 &error_ra,
                 &error_dec,
                 params.n_noise_realizations,
                 params.noise_scale,
                 rng,
-            )?;
-
-            // For each noisy realization, attempt orbit determination
-            for realization in realizations {
-                match realization.prelim_orbit(state, params) {
-                    Ok(gauss_res) => {
-                        let orbit = gauss_res.get_orbit();
-                        let equinoctial_elements = orbit.to_equinoctial()?;
-
-                        // Evaluate how well this orbit fits the full observation set
-                        match self.rms_orbit_error(
-                            state,
-                            &realization,
-                            &equinoctial_elements,
-                            params.extf,
-                            params.dtmax,
-                        ) {
-                            Ok(rms) => {
-                                // Keep orbit if it's the best (lowest RMS) so far
-                                if rms < best_rms {
-                                    best_rms = rms;
-                                    best_orbit = Some(gauss_res);
-                                }
-                            }
-                            Err(e) => {
-                                return Err(OutfitError::RmsComputationFailed(format!(
-                                    "Failed to compute RMS for orbit from triplet: {e}"
-                                )));
-                            }
-                        }
-                    }
+            ) {
+                // 4.a) Preliminary Gauss solution on the current realization.
+                let gauss_res = match realization.prelim_orbit(state, params) {
+                    Ok(res) => res,
                     Err(e) => {
+                        // Consider skipping instead of failing fast if you want robustness:
+                        // continue;
                         return Err(OutfitError::RmsComputationFailed(format!(
                             "Failed to compute preliminary orbit from triplet: {e}"
                         )));
                     }
+                };
+
+                // 4.b) Convert to the element set required by the scorer.
+                // If your scorer can consume the native representation, avoid this conversion.
+                let equinoctial_elements = gauss_res.get_orbit().to_equinoctial()?;
+
+                // 4.c) Score orbit vs. full observation set (RMS residual).
+                // TIP: pass `best_rms` as a pruning threshold inside `rms_orbit_error`
+                // to early-exit accumulation when the partial RMS is already worse.
+                let rms = match self.rms_orbit_error(
+                    state,
+                    &realization,
+                    &equinoctial_elements,
+                    params.extf,
+                    params.dtmax,
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        // Consider skipping instead of failing fast if you want robustness:
+                        // continue;
+                        return Err(OutfitError::RmsComputationFailed(format!(
+                            "Failed to compute RMS for orbit from triplet: {e}"
+                        )));
+                    }
+                };
+
+                // 4.d) Keep the best candidate so far.
+                if rms < best_rms {
+                    best_rms = rms;
+                    best_orbit = Some(gauss_res);
                 }
             }
         }
 
-        // Return best orbit found (if any) and corresponding RMS score
+        // --- Stage 5: Return the best orbit (if any) and its score.
         Ok((best_orbit, best_rms))
     }
 }

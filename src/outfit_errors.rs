@@ -265,6 +265,10 @@ pub enum OutfitError {
     /// RMS computation failed (e.g., no valid observations).
     #[error("RMS computation failed: {0}")]
     RmsComputationFailed(String),
+
+    /// Gauss preliminary orbit determination failed.
+    #[error("Gauss preliminary orbit determination failed: {0}")]
+    GaussPrelimOrbitFailed(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {

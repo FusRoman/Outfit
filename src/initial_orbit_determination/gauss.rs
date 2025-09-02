@@ -109,6 +109,7 @@ use std::ops::ControlFlow;
 use aberth::StopReason;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
+use rand_distr::StandardNormal;
 use smallvec::SmallVec;
 
 use crate::constants::Radian;
@@ -123,7 +124,6 @@ use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use aberth::aberth;
 use rand::Rng;
-use rand_distr::{Distribution, Normal};
 
 /// Observation triplet structure for Gauss's initial orbit determination (IOD).
 ///
@@ -218,39 +218,143 @@ impl GaussObs {
         })
     }
 
+    /// Generate a lazy sequence of noisy triplet realizations for orbit determination.
+    ///
+    /// This iterator always yields the **original triplet first**, followed by
+    /// `n_realizations` additional synthetic copies where each RA/DEC coordinate
+    /// is perturbed by Gaussian noise. The noise model is:
+    ///
+    /// * Draw `z ~ N(0, 1)` (standard normal) independently for each coordinate,
+    /// * Scale by the 1-σ astrometric uncertainty times `noise_scale`,
+    /// * Add to the nominal RA/DEC value.
+    ///
+    /// This function is designed for **Monte Carlo propagation of measurement
+    /// errors** in the initial orbit determination (IOD) stage. The lazy design
+    /// avoids building a large intermediate `Vec` and allows consumers to
+    /// **short-circuit early** (e.g., once a sufficiently good orbit fit is found).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `errors_ra` – 1-σ RA uncertainties for the three observations (radians).
+    /// * `errors_dec` – 1-σ DEC uncertainties for the three observations (radians).
+    /// * `n_realizations` – Number of noisy copies to generate (excluding the original).
+    /// * `noise_scale` – Scalar multiplier applied to the uncertainties
+    ///   (e.g. `1.0` = nominal, `2.0` = twice the quoted error).
+    /// * `rng` – Random number generator used to draw standard normals.
+    ///
+    /// Return
+    /// ----------
+    /// * An iterator yielding `GaussObs` values on the fly, starting with the
+    ///   unperturbed triplet.
+    ///
+    /// See also
+    /// ------------
+    /// * [`generate_noisy_realizations`](crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations) – Eager version collecting all realizations into a `Vec`.
+    /// * [`GaussObs::prelim_orbit`] – Consumes each realization to compute a Gauss preliminary orbit.
+    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – High-level search loop that leverages this iterator with early pruning.
+    pub fn realizations_iter<'a, R: Rng + 'a>(
+        &'a self,
+        errors_ra: &'a Vector3<f64>,
+        errors_dec: &'a Vector3<f64>,
+        n_realizations: usize,
+        noise_scale: f64,
+        rng: &'a mut R,
+    ) -> impl Iterator<Item = GaussObs> + 'a {
+        // Precompute scaled sigmas (σ × scale) to avoid redundant multiplications.
+        let s_ra = *errors_ra * noise_scale;
+        let s_dec = *errors_dec * noise_scale;
+
+        // Internal counter:
+        // i = 0 → original,
+        // 1..=n_realizations → noisy copies,
+        // > n_realizations → end of iteration.
+        let mut i = 0usize;
+
+        std::iter::from_fn(move || {
+            if i == 0 {
+                i += 1;
+                // Yield the exact original triplet first (no noise).
+                return Some(self.clone());
+            }
+            if i > n_realizations {
+                // All requested noisy realizations have been produced.
+                return None;
+            }
+            i += 1;
+
+            // --- Draw Gaussian noise ---
+            // For each RA/DEC coordinate: z ~ N(0, 1), then scale by σ.
+            let (z_ra0, z_ra1, z_ra2): (f64, f64, f64) = (
+                rng.sample(StandardNormal),
+                rng.sample(StandardNormal),
+                rng.sample(StandardNormal),
+            );
+            let (z_dec0, z_dec1, z_dec2): (f64, f64, f64) = (
+                rng.sample(StandardNormal),
+                rng.sample(StandardNormal),
+                rng.sample(StandardNormal),
+            );
+
+            // Apply perturbations independently to each of the 3 observations.
+            let ra = Vector3::new(
+                self.ra.x + z_ra0 * s_ra.x,
+                self.ra.y + z_ra1 * s_ra.y,
+                self.ra.z + z_ra2 * s_ra.z,
+            );
+            let dec = Vector3::new(
+                self.dec.x + z_dec0 * s_dec.x,
+                self.dec.y + z_dec1 * s_dec.y,
+                self.dec.z + z_dec2 * s_dec.z,
+            );
+
+            // Return a synthetic GaussObs realization
+            Some(GaussObs {
+                idx_obs: self.idx_obs,
+                ra,
+                dec,
+                time: self.time,
+                observer_helio_position: self.observer_helio_position,
+            })
+        })
+    }
+
     /// Generate noisy variants of this `GaussObs` triplet by injecting Gaussian noise
-    /// into the right ascension (RA) and declination (DEC) coordinates.
+    /// into the right ascension (RA) and declination (DEC) coordinates, and
+    /// collect all results into a vector.
     ///
-    /// The function returns a vector of `GaussObs` instances consisting of:
+    /// This function is the **eager counterpart** of [`realizations_iter`](crate::initial_orbit_determination::gauss::GaussObs::realizations_iter): it builds
+    /// and returns a full `Vec<GaussObs>` in memory, containing:
+    ///
     /// - The original, unperturbed triplet as the first element,
-    /// - Followed by `n_realizations` perturbed copies with Gaussian noise applied
-    ///   independently to each RA and DEC coordinate, using their corresponding
-    ///   standard deviations and a global scaling factor.
+    /// - Followed by `n_realizations` noisy copies where each RA/DEC coordinate is
+    ///   perturbed independently by Gaussian noise.
     ///
-    /// This method is functionally equivalent to OrbFit’s IOD behavior governed by the
-    /// `iodnit` and `iodksi` parameters, and is useful for testing the robustness
-    /// of initial orbit determination with respect to observational uncertainties.
+    /// The noise model is:
+    /// - Draw `z ~ N(0, 1)` independently for each coordinate,
+    /// - Multiply by the corresponding 1-σ uncertainty scaled by `noise_scale`,
+    /// - Add to the nominal RA/DEC value.
     ///
-    /// # Arguments
+    /// Arguments
+    /// -----------------
+    /// * `errors_ra` – 1-σ RA uncertainties for the three observations (radians).
+    /// * `errors_dec` – 1-σ DEC uncertainties for the three observations (radians).
+    /// * `n_realizations` – Number of noisy versions to generate (excluding the original).
+    /// * `noise_scale` – Factor applied to uncertainties (e.g. `1.0` for nominal,
+    ///   >1.0 to simulate larger errors).
+    /// * `rng` – Random number generator used to sample standard normals.
+    ///
+    /// Return
     /// ----------
-    /// * `errors_ra` - A `Vector3<f64>` containing 1σ errors (in radians) on the RA
-    ///   of the three observations.
-    /// * `errors_dec` - A `Vector3<f64>` containing 1σ errors (in radians) on the DEC
-    ///   of the three observations.
-    /// * `n_realizations` - The number of noisy versions to generate (excluding the original).
-    /// * `noise_scale` - A multiplicative factor applied to each σ (e.g., 1.0 for nominal noise,
-    ///   >1.0 to test instability under exaggerated error).
-    /// * `rng` - A mutable reference to a random number generator implementing `rand::Rng`.
+    /// * A vector of `GaussObs`:
+    ///   - First element = original triplet,
+    ///   - Remaining = noisy copies.
     ///
-    /// # Returns
-    /// ----------
-    /// A `Result` containing a vector of `GaussObs` instances:
-    /// - `Ok(vec)` if all noise samples were generated successfully,
-    /// - `Err(OutfitError::NoiseInjectionError)` if any distribution parameters were invalid.
-    ///
-    /// # Errors
-    /// ----------
-    /// Returns an error if any call to `Normal::new` fails due to non-finite or negative variance.
+    /// See also
+    /// ------------
+    /// * [`realizations_iter`](crate::initial_orbit_determination::gauss::GaussObs::realizations_iter) – Lazy version that yields realizations on demand and
+    ///   supports early-stop pruning.
+    /// * [`GaussObs::prelim_orbit`] – Compute a preliminary Gauss solution from each realization.
+    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – End-to-end search that consumes realizations.
     pub fn generate_noisy_realizations(
         &self,
         errors_ra: &Vector3<f64>,
@@ -258,40 +362,12 @@ impl GaussObs {
         n_realizations: usize,
         noise_scale: f64,
         rng: &mut impl Rng,
-    ) -> Result<Vec<GaussObs>, OutfitError> {
-        let noisy_iter = (0..n_realizations).map(|_| {
-            let ra_vec: Vec<f64> = self
-                .ra
-                .iter()
-                .zip(errors_ra.iter())
-                .map(|(&ra, &sigma)| {
-                    let normal = Normal::new(0.0, sigma * noise_scale)?;
-                    Ok(ra + normal.sample(rng))
-                })
-                .collect::<Result<Vec<f64>, OutfitError>>()?;
-
-            let dec_vec: Vec<f64> = self
-                .dec
-                .iter()
-                .zip(errors_dec.iter())
-                .map(|(&dec, &sigma)| {
-                    let normal = Normal::new(0.0, sigma * noise_scale)?;
-                    Ok(dec + normal.sample(rng))
-                })
-                .collect::<Result<Vec<f64>, OutfitError>>()?;
-
-            Ok(GaussObs {
-                idx_obs: self.idx_obs,
-                ra: Vector3::from_column_slice(&ra_vec),
-                dec: Vector3::from_column_slice(&dec_vec),
-                time: self.time,
-                observer_helio_position: self.observer_helio_position,
-            })
-        });
-
-        std::iter::once(Ok(self.clone()))
-            .chain(noisy_iter)
-            .collect::<Result<Vec<_>, _>>()
+    ) -> Vec<GaussObs> {
+        // Collect all items from the lazy iterator into a Vec.
+        // Less memory-efficient than the iterator version, but convenient when
+        // all realizations are needed at once.
+        self.realizations_iter(errors_ra, errors_dec, n_realizations, noise_scale, rng)
+            .collect()
     }
 
     /// Compute the direction cosine vector pointing toward the observed celestial body.
@@ -1829,9 +1905,8 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
 
-            let realizations = gauss
-                .generate_noisy_realizations(&errors_ra, &errors_dec, 5, 1.0, &mut rng)
-                .unwrap();
+            let realizations =
+                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 5, 1.0, &mut rng);
 
             assert_eq!(realizations.len(), 6); // 1 original + 5 noisy
 
@@ -1864,9 +1939,8 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(123);
 
-            let realizations = gauss
-                .generate_noisy_realizations(&errors_ra, &errors_dec, 3, 1.0, &mut rng)
-                .unwrap();
+            let realizations =
+                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 3, 1.0, &mut rng);
 
             for g in realizations {
                 assert_eq!(g.ra, gauss.ra);
@@ -1889,9 +1963,8 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(123);
 
-            let realizations = gauss
-                .generate_noisy_realizations(&errors_ra, &errors_dec, 0, 1.0, &mut rng)
-                .unwrap();
+            let realizations =
+                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 0, 1.0, &mut rng);
 
             assert_eq!(realizations.len(), 1); // Only the original observation
             assert_eq!(realizations[0], gauss);
@@ -1913,12 +1986,10 @@ pub(crate) mod gauss_test {
             let mut rng_low = StdRng::seed_from_u64(42);
             let mut rng_high = StdRng::seed_from_u64(42); // same seed
 
-            let low_noise = gauss
-                .generate_noisy_realizations(&errors_ra, &errors_dec, 1, 0.1, &mut rng_low)
-                .unwrap();
-            let high_noise = gauss
-                .generate_noisy_realizations(&errors_ra, &errors_dec, 1, 10.0, &mut rng_high)
-                .unwrap();
+            let low_noise =
+                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 1, 0.1, &mut rng_low);
+            let high_noise =
+                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 1, 10.0, &mut rng_high);
 
             let diff_low = (low_noise[1].ra - gauss.ra).norm();
             let diff_high = (high_noise[1].ra - gauss.ra).norm();
