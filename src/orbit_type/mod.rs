@@ -209,6 +209,7 @@ pub(crate) mod orbit_type_test {
     use approx::{abs_diff_eq, assert_abs_diff_eq, assert_relative_eq};
     use std::f64::consts::PI;
 
+    #[allow(dead_code)]
     pub(crate) fn approx_equal(
         current: &OrbitalElements,
         other: &OrbitalElements,
