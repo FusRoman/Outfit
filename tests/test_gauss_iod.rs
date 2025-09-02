@@ -74,12 +74,6 @@ fn test_gauss_iod() {
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
-    dbg!("expected orbit: {:?}", &expected_orbit);
-    dbg!("actual orbit: {:?}", orbit);
-
-    dbg!("expected rms: {:?}", 47.67954270293223);
-    dbg!("best rms: {:?}", best_rms);
-
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
@@ -108,12 +102,6 @@ fn test_gauss_iod() {
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
-    dbg!("expected orbit: {:?}", &expected_orbit);
-    dbg!("actual orbit: {:?}", orbit);
-
-    dbg!("expected rms: {:?}", 0.5509275597328892);
-    dbg!("best rms: {:?}", best_rms);
-
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
@@ -141,12 +129,6 @@ fn test_gauss_iod() {
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
-
-    dbg!("expected orbit: {:?}", &expected_orbit);
-    dbg!("actual orbit: {:?}", orbit);
-
-    dbg!("expected rms: {:?}", 6.319395087742966);
-    dbg!("best rms: {:?}", best_rms);
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(

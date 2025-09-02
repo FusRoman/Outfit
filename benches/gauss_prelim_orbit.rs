@@ -58,7 +58,6 @@ fn make_fixture_gaussobs() -> GaussObs {
     );
 
     GaussObs::with_observer_position(idx_obs, ra, dec, time, observer_helio_position)
-        .expect("GaussObs fixture")
 }
 
 /// Force Rayon (if used by downstream code) to a single worker thread.
