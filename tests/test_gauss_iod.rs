@@ -74,6 +74,12 @@ fn test_gauss_iod() {
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
+    dbg!("expected orbit: {:?}", &expected_orbit);
+    dbg!("actual orbit: {:?}", orbit);
+
+    dbg!("expected rms: {:?}", 47.67954270293223);
+    dbg!("best rms: {:?}", best_rms);
+
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
@@ -91,21 +97,27 @@ fn test_gauss_iod() {
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60672.24113100201,
-        semi_major_axis: 3.1895469772493885,
-        eccentricity: 0.05434034666134361,
-        inclination: 0.18343383575588454,
-        ascending_node_longitude: 0.03253594968161192,
-        periapsis_argument: 2.019754521803849,
-        mean_anomaly: 4.850703837045435,
+        semi_major_axis: 3.189546977249391,
+        eccentricity: 0.05434034666134485,
+        inclination: 0.18343383575588465,
+        ascending_node_longitude: 0.03253594968161228,
+        periapsis_argument: 2.0197545218038355,
+        mean_anomaly: 4.85070383704545,
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
+    dbg!("expected orbit: {:?}", &expected_orbit);
+    dbg!("actual orbit: {:?}", orbit);
+
+    dbg!("expected rms: {:?}", 0.5509275597328892);
+    dbg!("best rms: {:?}", best_rms);
+
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        0.5509275597662157,
+        0.5509275597328892,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
@@ -119,21 +131,27 @@ fn test_gauss_iod() {
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60465.26778016307,
-        semi_major_axis: 2.192136202202348,
-        eccentricity: 0.2042936374307111,
-        inclination: 0.11896511921064962,
-        ascending_node_longitude: 3.091130251223218,
-        periapsis_argument: 2.47144396636554,
-        mean_anomaly: 4.946662263883677,
+        semi_major_axis: 2.192136202201971,
+        eccentricity: 0.2042936374305811,
+        inclination: 0.1189651192106584,
+        ascending_node_longitude: 3.091130251223283,
+        periapsis_argument: 2.4714439663661487,
+        mean_anomaly: 4.9466622638827324,
     });
 
     let best_orbit_unwrapped = best_orbit.unwrap();
     let orbit = best_orbit_unwrapped.get_orbit();
 
+    dbg!("expected orbit: {:?}", &expected_orbit);
+    dbg!("actual orbit: {:?}", orbit);
+
+    dbg!("expected rms: {:?}", 6.319395087742966);
+    dbg!("best rms: {:?}", best_rms);
+
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        6.319395087742966,
+        6.319395085728921,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
