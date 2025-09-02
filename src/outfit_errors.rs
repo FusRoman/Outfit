@@ -261,6 +261,10 @@ pub enum OutfitError {
     /// Error indicating a floating-point value is NaN (Not a Number).
     #[error("Invalid floating-point value (NaN encountered): {0}")]
     InvalidFloatValue(ordered_float::FloatIsNan),
+
+    /// RMS computation failed (e.g., no valid observations).
+    #[error("RMS computation failed: {0}")]
+    RmsComputationFailed(String),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
