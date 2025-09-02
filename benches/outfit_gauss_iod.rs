@@ -1,7 +1,4 @@
-#![cfg_attr(not(feature = "jpl-download"), allow(dead_code))]
-#[cfg(not(feature = "jpl-download"))]
-compile_error!("This benchmark requires the `jpl-download` feature: run with `cargo bench --features jpl-download`.");
-
+#![cfg(feature = "jpl-download")]
 use std::cell::RefCell;
 
 use camino::Utf8Path;
