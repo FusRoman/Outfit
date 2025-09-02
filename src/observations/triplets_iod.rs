@@ -144,54 +144,129 @@ impl Ord for WeightedTriplet {
 /// Compute a spacing-based weight for a time-ordered observation triplet.
 ///
 /// The score penalizes **unbalanced** or **far-from-optimal** spacings between
-/// consecutive observations. A lower score means a more desirable (nearly uniform)
+/// consecutive observations. A lower score indicates a more desirable (nearly uniform)
 /// spacing close to the target interval `dtw`.
 ///
 /// Formula
 /// -----------------
-/// For consecutive time gaps `dt₁ = t₂ − t₁`, `dt₂ = t₃ − t₂`,
-/// the per-gap penalty is:
+/// For consecutive gaps `dt₁ = t₂ − t₁`, `dt₂ = t₃ − t₂`, define:
 /// ```text
-/// s(dt, dtw) = { dtw/dt,  if dt ≤ dtw
-///              { 1 + dt/dtw, otherwise
+/// s(dt, dtw) =  { dtw/dt,   if dt ≤ dtw
+///               { 1 + dt/dtw, otherwise
 /// ```
-/// and the total weight is:
+/// The total weight is:
 /// ```text
 /// weight = s(dt₁, dtw) + s(dt₂, dtw)
 /// ```
+/// This function computes the same value while precomputing `1/dtw` once
+/// to reduce divisions.
 ///
 /// Arguments
 /// -----------------
-/// * `time1`, `time2`, `time3` – Observation times (MJD), with `time1 < time2 < time3`.
-/// * `dtw` – Desired interval `[days]` between consecutive observations.
+/// * `time1` – Epoch of the first observation (must be finite).
+/// * `time2` – Epoch of the middle observation (must be finite).
+/// * `time3` – Epoch of the last observation (must be finite).
+/// * `dtw`   – Target per-gap spacing (same unit as the epochs, strictly positive).
 ///
 /// Return
 /// ----------
-/// * A scalar score (`f64`), **lower is better**.
+/// * A scalar weight (`f64`) where **smaller is better** (ideal gaps ≈ `dtw`).
 ///
 /// Remarks
 /// -------------
-/// * Complexity: **O(1)**.
-/// * Behavior is monotonic in each gap: penalties grow when a gap shrinks well below
-///   `dtw` or grows far above it.
-/// * Assumes strictly increasing times; if not guaranteed by callers, sort beforehand.
+/// * Assumes strictly increasing times (`time1 < time2 < time3`). If not guaranteed,
+///   sort beforehand or validate upstream.
+/// * Complexity: **O(1)**; uses one reciprocal of `dtw` and two cheap branches.
+/// * Very small gaps (`dt → 0⁺`) yield large penalties (`∞` limit). If you prefer
+///   to cap this behavior, clamp `dt` to an epsilon upstream (changes semantics).
 ///
 /// See also
 /// ------------
-/// * [`generate_triplets`] – Uses this function to rank candidate triplets.
+/// * [`triplet_weight_with_inv`] – Same logic but takes `inv_dtw` precomputed (hot loop friendly).
+/// * [`TripletIndexGenerator`] – Streams feasible `(i, j, k)` triplets by time window.
+/// * [`generate_triplets`] – Uses this weight to keep the best-K candidates.
+#[inline(always)]
 pub fn triplet_weight(time1: f64, time2: f64, time3: f64, dtw: f64) -> f64 {
-    fn s3dtw(dt: f64, dtw: f64) -> f64 {
-        if dt <= dtw {
-            dtw / dt
-        } else {
-            1.0 + dt / dtw
-        }
+    // Precompute reciprocal once (one division instead of two on average).
+    let inv_dtw = dtw.recip();
+    // Gaps are positive if times are sorted.
+    let dt12 = time2 - time1;
+    let dt23 = time3 - time2;
+    s_gap(dt12, inv_dtw) + s_gap(dt23, inv_dtw)
+}
+
+/// Compute the same spacing-based weight as [`triplet_weight`], but taking
+/// the reciprocal of the target spacing (`inv_dtw = 1.0 / dtw`) as input.
+///
+/// This variant is intended for **hot loops** where `dtw` is constant and can be
+/// inverted once upstream, eliminating one division per call.
+///
+/// Arguments
+/// -----------------
+/// * `time1`   – Epoch of the first observation (finite).
+/// * `time2`   – Epoch of the middle observation (finite).
+/// * `time3`   – Epoch of the last observation (finite).
+/// * `inv_dtw` – Precomputed reciprocal of the target spacing (`1.0 / dtw`, finite and positive).
+///
+/// Return
+/// ----------
+/// * The same scalar weight as [`triplet_weight`] (`f64`), **lower is better**.
+///
+/// Remarks
+/// -------------
+/// * Assumes `time1 < time2 < time3`.
+/// * Prefer this function inside inner loops when `dtw` is constant across many triplets.
+/// * Complexity: **O(1)**; avoids the extra division by reusing `inv_dtw`.
+///
+/// See also
+/// ------------
+/// * [`triplet_weight`] – Convenience version that accepts `dtw` directly.
+#[inline(always)]
+pub fn triplet_weight_with_inv(time1: f64, time2: f64, time3: f64, inv_dtw: f64) -> f64 {
+    // Gaps are positive if times are sorted.
+    let dt12 = time2 - time1;
+    let dt23 = time3 - time2;
+    s_gap(dt12, inv_dtw) + s_gap(dt23, inv_dtw)
+}
+
+/// Piecewise per-gap penalty used by the triplet spacing weight.
+///
+/// For the ratio `r = dt / dtw`, the penalty is:
+/// ```text
+/// s(dt, dtw) =  { 1 / r,     if r ≤ 1      (too small ⇢ penalize by inverse)
+///               { 1 + r,     otherwise     (too large ⇢ linear growth)
+/// ```
+/// Passing `inv_dtw = 1 / dtw` avoids a division in the common path.
+///
+/// Arguments
+/// -----------------
+/// * `dt`      – The consecutive time gap (positive if epochs are strictly increasing).
+/// * `inv_dtw` – Reciprocal of the target spacing (`1.0 / dtw`, positive).
+///
+/// Return
+/// ----------
+/// * The per-gap penalty `s(dt, dtw)` (`f64`).
+///
+/// Remarks
+/// -------------
+/// * Complexity: **O(1)**, one multiply and a single branch.
+/// * As `dt → 0⁺`, `s(dt, dtw) → +∞`; clamp upstream if you need bounded penalties.
+/// * Numeric domains must be finite; `NaN` or non-finite inputs propagate unspecified results.
+///
+/// See also
+/// ------------
+/// * [`triplet_weight`] – Sums two `s_gap` values for `(t₂−t₁)` and `(t₃−t₂)`.
+/// * [`triplet_weight_with_inv`] – Same, using a precomputed `inv_dtw`.
+#[inline(always)]
+fn s_gap(dt: f64, inv_dtw: f64) -> f64 {
+    // r = dt / dtw
+    let r = dt * inv_dtw;
+    if r <= 1.0 {
+        r.recip()
+    } else {
+        // `1.0 + r` avoids an extra division.
+        1.0 + r
     }
-
-    let dt1 = time2 - time1;
-    let dt2 = time3 - time2;
-
-    s3dtw(dt1, dtw) + s3dtw(dt2, dtw)
 }
 
 /// Downsample observation indices while preserving endpoints and temporal coverage.
@@ -347,9 +422,11 @@ pub fn generate_triplets(
 
     // Consume the reduced-index stream. After each `next()`, take a short immutable
     // borrow of the times to compute the weight (no overlap with the next `next()`).
+
+    let inv_dtw = optimal_interval_time.recip(); // precompute once
     while let Some((i, j, k)) = index_gen.next() {
         let times = index_gen.reduced_times();
-        let w = triplet_weight(times[i], times[j], times[k], optimal_interval_time);
+        let w = triplet_weight_with_inv(times[i], times[j], times[k], inv_dtw);
         push_best_k(WeightedTriplet {
             weight: w,
             first_idx: i,
