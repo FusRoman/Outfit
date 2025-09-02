@@ -1245,6 +1245,7 @@ impl GaussObs {
 }
 
 #[cfg(test)]
+#[cfg(feature = "jpl-download")]
 pub(crate) mod gauss_test {
 
     use super::*;
