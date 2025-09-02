@@ -696,7 +696,7 @@ impl ObservationIOD for Observations {
 
             // For each noisy realization, attempt orbit determination
             for realization in realizations {
-                match realization.prelim_orbit(state) {
+                match realization.prelim_orbit(state, params) {
                     Ok(gauss_res) => {
                         let orbit = gauss_res.get_orbit();
                         let equinoctial_elements = orbit.to_equinoctial()?;
@@ -1076,15 +1076,9 @@ mod test_obs_ext {
 
         let params = IODParams {
             n_noise_realizations: 5,
-            noise_scale: 1.0,
-            extf: -1.0,
-            dtmax: 30.0,
-            dt_min: 0.03,
-            dt_max_triplet: 150.0,
-            optimal_interval_time: 20.0,
             max_obs_for_triplets: traj_len,
-            max_triplets: 10,
             gap_max,
+            ..Default::default()
         };
 
         let (best_orbit, best_rms) = traj

@@ -65,6 +65,7 @@
 //! use outfit::outfit::Outfit;
 //! use outfit::error_models::ErrorModel;
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;
+//! use outfit::initial_orbit_determination::IODParams;
 //!
 //! let env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
@@ -72,7 +73,7 @@
 //! let gauss: GaussObs = unimplemented!("Construct GaussObs from RA/DEC/time and observer state");
 //!
 //! // Run the preliminary orbit computation
-//! let result = gauss.prelim_orbit(&env).unwrap();
+//! let result = gauss.prelim_orbit(&env, &IODParams::default()).unwrap();
 //!
 //! // Match on the returned orbital-element representation
 //! match result {
@@ -114,6 +115,7 @@ use crate::constants::Radian;
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::initial_orbit_determination::gauss_result::GaussResult;
+use crate::initial_orbit_determination::IODParams;
 use crate::kepler::velocity_correction_with_guess;
 use crate::orb_elem::eccentricity_control;
 use crate::orbit_type::OrbitalElements;
@@ -528,6 +530,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// ---------
+    /// * `iod_params` – Parameters controlling the IOD process, including minimum acceptable distance `ρ₂`.
     /// * `unit_matrix` – 3×3 matrix of unit direction vectors from observer to object (one per epoch).
     /// * `unit_matinv` – Inverse of `unit_matrix`, used to solve for the scalar distances ρ₁, ρ₂, ρ₃.
     /// * `vector_c` – Coefficient vector computed from a candidate root of the 8th-degree polynomial;
@@ -554,6 +557,7 @@ impl GaussObs {
     /// * [`VLIGHT_AU`] – speed of light in AU/day.
     pub fn position_vector_and_reference_epoch(
         &self,
+        iod_params: &IODParams,
         unit_matrix: &Matrix3<f64>,
         unit_matinv: &Matrix3<f64>,
         vector_c: &Vector3<f64>,
@@ -562,7 +566,7 @@ impl GaussObs {
         let gcap = obs_pos_t * vector_c;
         let crhom = unit_matinv * gcap;
         let rho: Vector3<f64> = -crhom.component_div(vector_c);
-        if rho[1] < 0.01 {
+        if rho[1] < iod_params.min_rho2_au {
             return Err(OutfitError::SpuriousRootDetected);
         }
         let rho_unit = Matrix3::from_columns(&[
@@ -641,6 +645,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// ---------
+    /// * `iod_params` – Parameters controlling the IOD process, including eccentricity and perihelion limits.
     /// * `root` – A real, positive root of the polynomial equation for r₂ (distance at central epoch).
     /// * `unit_matrix` – 3×3 matrix of unit direction vectors (from observer to object).
     /// * `inv_unit_matrix` – Inverse of the direction matrix.
@@ -666,6 +671,7 @@ impl GaussObs {
     #[allow(clippy::too_many_arguments)]
     pub fn accept_root(
         &self,
+        iod_params: &IODParams,
         root: f64,
         unit_matrix: &Matrix3<f64>,
         inv_unit_matrix: &Matrix3<f64>,
@@ -686,7 +692,12 @@ impl GaussObs {
 
         // Compute asteroid position vectors at each observation time, and the reference epoch
         let Some((ast_pos_all_time, reference_epoch)) = self
-            .position_vector_and_reference_epoch(unit_matrix, inv_unit_matrix, &vector_c)
+            .position_vector_and_reference_epoch(
+                iod_params,
+                unit_matrix,
+                inv_unit_matrix,
+                &vector_c,
+            )
             .ok()
         else {
             return None; // root leads to invalid geometry (e.g., ρ₂ < 0.01)
@@ -699,8 +710,12 @@ impl GaussObs {
         let asteroid_vel = self.gibbs_correction(&ast_pos_all_time, tau1, tau3);
 
         // Apply eccentricity and perihelion distance control
-        let (is_accepted, _, _, _) =
-            eccentricity_control(&ast_pos_second_time, &asteroid_vel, 1e3, 5.0)?;
+        let (is_accepted, _, _, _) = eccentricity_control(
+            &ast_pos_second_time,
+            &asteroid_vel,
+            iod_params.max_perihelion_au,
+            iod_params.max_ecc,
+        )?;
 
         // Accept only orbits within eccentricity and perihelion limits
         if is_accepted {
@@ -766,19 +781,6 @@ impl GaussObs {
             reference_epoch,
         ))
     }
-
-    // ---------------------------
-    // Associated constants (usage avec Self::CONSTANT)
-    // ---------------------------
-    const MAX_ECC: f64 = 5.0;
-    const MAX_Q_AU: f64 = 1.0e3;
-    const NEWTON_EPS: f64 = 1.0e-10;
-    const NEWTON_MAX_IT: usize = 50;
-    const ROOT_IMAG_EPS: f64 = 1.0e-6;
-
-    // Optionnel : bornes de plausibilité pour r2 (AU). À ajuster/paramétrer si besoin.
-    const R2_MIN: f64 = 0.05; // éviter Soleil-grazing
-    const R2_MAX: f64 = 200.0; // TNO extrême, à élargir si nécessaire
 
     /// Visit all real-positive roots of the fixed 8th-degree Gauss polynomial and call a visitor for each candidate.
     ///
@@ -854,7 +856,8 @@ impl GaussObs {
     /// No heap allocation is performed; inputs are passed by reference and the function is `#[inline]`.
     ///
     /// Arguments
-    /// -----------------
+    /// ---------
+    /// * `iod_params` – Parameters controlling the IOD process, including minimum acceptable distance `ρ₂`.
     /// * `r2`: Heliocentric distance at the second epoch `t2` (AU).
     /// * `unit_m`: Direction (line-of-sight) matrix `S`, columns are the unit vectors for each observation.
     /// * `inv_unit_m`: Precomputed inverse of `S`.  
@@ -886,6 +889,7 @@ impl GaussObs {
     #[allow(clippy::too_many_arguments)]
     fn try_accept_root(
         &self,
+        iod_params: &IODParams,
         r2: f64,
         unit_m: &Matrix3<f64>,
         inv_unit_m: &Matrix3<f64>,
@@ -894,7 +898,7 @@ impl GaussObs {
         tau1: f64,
         tau3: f64,
     ) -> Option<(nalgebra::Matrix3<f64>, Vector3<f64>, f64)> {
-        self.accept_root(r2, unit_m, inv_unit_m, a, b, tau1, tau3)
+        self.accept_root(iod_params, r2, unit_m, inv_unit_m, a, b, tau1, tau3)
     }
 
     /// Build a `GaussResult` from a position/velocity state at `t2`, applying aberration timing in
@@ -953,6 +957,7 @@ impl GaussObs {
     /// Arguments
     /// -----------------
     /// * `state`: Global context (ephemerides, constants, settings).
+    /// * `iod_params`: Parameters controlling the IOD process, including root filtering and correction settings.
     ///
     /// Return
     /// ----------
@@ -970,7 +975,12 @@ impl GaussObs {
     /// ------------
     /// * [`prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit) – Picks a single “best” solution (corrected preferred).
     /// * [`pos_and_vel_correction`](crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction) – Iterative velocity update (Lagrange f/g).
-    pub fn prelim_orbit_all(&self, state: &Outfit) -> Result<Vec<GaussResult>, OutfitError> {
+    /// * [`IODParams`] – Configuration parameters for the IOD process.
+    pub fn prelim_orbit_all(
+        &self,
+        state: &Outfit,
+        iod_params: &IODParams,
+    ) -> Result<Vec<GaussResult>, OutfitError> {
         // 1) Core Gauss quantities
         let (tau1, tau3, unit_m, inv_unit_m, vec_a, vec_b) = self.gauss_prelim()?;
 
@@ -979,53 +989,69 @@ impl GaussObs {
         let poly = [c0, 0.0, 0.0, c3, 0.0, 0.0, c6, 0.0, 1.0];
 
         // Accumulate up to three solutions (stack-first, then into_vec())
-        let mut solutions: SmallVec<[GaussResult; 3]> = SmallVec::new();
+        let mut solutions: SmallVec<[GaussResult; 4]> = SmallVec::new();
 
         // 3–5) Enumerate admissible roots → accept → correct (if possible) → push
-        Self::visit_real_positive_roots(&poly, 50, 1e-6, Self::ROOT_IMAG_EPS, |r2| {
-            // Cheap plausibility filter on r2 (optional)
-            if !(Self::R2_MIN..=Self::R2_MAX).contains(&r2) {
-                return ControlFlow::Continue(());
-            }
+        Self::visit_real_positive_roots(
+            &poly,
+            iod_params.aberth_max_iter,
+            iod_params.aberth_eps,
+            iod_params.root_imag_eps,
+            |r2| {
+                // Cheap plausibility filter on r2 (optional)
+                if !(iod_params.r2_min_au..=iod_params.r2_max_au).contains(&r2) {
+                    return ControlFlow::Continue(());
+                }
 
-            match self.try_accept_root(r2, &unit_m, &inv_unit_m, &vec_a, &vec_b, tau1, tau3) {
-                None => ControlFlow::Continue(()),
+                match self.try_accept_root(
+                    iod_params,
+                    r2,
+                    &unit_m,
+                    &inv_unit_m,
+                    &vec_a,
+                    &vec_b,
+                    tau1,
+                    tau3,
+                ) {
+                    None => ControlFlow::Continue(()),
 
-                Some((pos_all, v_pre, epoch_ref)) => {
-                    // Attempt velocity correction first; prefer corrected orbits
-                    if let Some((pos_cor, v_cor, epoch_cor)) = self.pos_and_vel_correction(
-                        &pos_all,
-                        &v_pre,
-                        &unit_m,
-                        &inv_unit_m,
-                        Self::MAX_Q_AU,
-                        Self::MAX_ECC,
-                        Self::NEWTON_EPS,
-                        Self::NEWTON_MAX_IT,
-                    ) {
-                        if let Some(res) =
-                            self.build_result(state, &pos_cor, &v_cor, epoch_cor, true)
+                    Some((pos_all, v_pre, epoch_ref)) => {
+                        // Attempt velocity correction first; prefer corrected orbits
+                        if let Some((pos_cor, v_cor, epoch_cor)) = self.pos_and_vel_correction(
+                            iod_params,
+                            &pos_all,
+                            &v_pre,
+                            &unit_m,
+                            &inv_unit_m,
+                            iod_params.max_perihelion_au,
+                            iod_params.max_ecc,
+                            iod_params.newton_eps,
+                            iod_params.newton_max_it,
+                        ) {
+                            if let Some(res) =
+                                self.build_result(state, &pos_cor, &v_cor, epoch_cor, true)
+                            {
+                                if solutions.len() < iod_params.max_tested_solutions {
+                                    solutions.push(res);
+                                }
+                            }
+                        } else if let Some(res) =
+                            self.build_result(state, &pos_all, &v_pre, epoch_ref, false)
                         {
-                            if solutions.len() < 3 {
+                            if solutions.len() < iod_params.max_tested_solutions {
                                 solutions.push(res);
                             }
                         }
-                    } else if let Some(res) =
-                        self.build_result(state, &pos_all, &v_pre, epoch_ref, false)
-                    {
-                        if solutions.len() < 3 {
-                            solutions.push(res);
+
+                        if solutions.len() >= iod_params.max_tested_solutions {
+                            ControlFlow::Break(())
+                        } else {
+                            ControlFlow::Continue(())
                         }
                     }
-
-                    if solutions.len() >= 3 {
-                        ControlFlow::Break(())
-                    } else {
-                        ControlFlow::Continue(())
-                    }
                 }
-            }
-        })?;
+            },
+        )?;
 
         if solutions.is_empty() {
             Err(OutfitError::GaussNoRootsFound)
@@ -1045,6 +1071,7 @@ impl GaussObs {
     /// Arguments
     /// -----------------
     /// * `state`: The global context (ephemerides, constants, settings).
+    /// * `iod_params`: Parameters controlling the IOD process, including root filtering and correction settings.
     ///
     /// Return
     /// ----------
@@ -1062,8 +1089,13 @@ impl GaussObs {
     /// ------------
     /// * [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all) – Enumerates and returns up to three acceptable solutions.
     /// * [`pos_and_vel_correction`](crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction) – Iterative velocity update (Lagrange f/g).
-    pub fn prelim_orbit(&self, state: &Outfit) -> Result<GaussResult, OutfitError> {
-        let all = self.prelim_orbit_all(state)?;
+    /// * [`IODParams`] – Configuration parameters for the IOD process.
+    pub fn prelim_orbit(
+        &self,
+        state: &Outfit,
+        iod_params: &IODParams,
+    ) -> Result<GaussResult, OutfitError> {
+        let all = self.prelim_orbit_all(state, iod_params)?;
         if let Some(best_corr) = all
             .iter()
             .find(|s| matches!(s, GaussResult::CorrectedOrbit(_)))
@@ -1086,6 +1118,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// ---------
+    /// * `iod_params` – Parameters controlling the IOD process, including minimum acceptable distance `ρ₂`.
     /// * `asteroid_position` – Initial 3×3 positions at epochs (t₁, t₂, t₃), columns are the position vectors (AU).
     /// * `asteroid_velocity` – Initial velocity at the central epoch t₂ (AU/day).
     /// * `unit_matrix` – 3×3 matrix of line-of-sight unit vectors (observer → object).
@@ -1109,6 +1142,7 @@ impl GaussObs {
     #[allow(clippy::too_many_arguments)]
     pub fn pos_and_vel_correction(
         &self,
+        iod_params: &IODParams,
         asteroid_position: &Matrix3<f64>,
         asteroid_velocity: &Vector3<f64>,
         unit_matrix: &Matrix3<f64>,
@@ -1145,8 +1179,6 @@ impl GaussObs {
             let r3 = pos.column(2).into_owned();
 
             // --- Two velocity corrections around the central position r2.
-            // Use a reasonably strict tolerance for the universal Kepler solver.
-            let kep_eps = Some(1e-12);
 
             // If velocity_correction_with_guess returns χ, we keep it and warm-start the next iteration.
             let res_left = velocity_correction_with_guess(
@@ -1157,7 +1189,7 @@ impl GaussObs {
                 peri_max,
                 ecc_max,
                 chi_guess_01,
-                kep_eps,
+                iod_params.kepler_eps,
             );
             let res_right = velocity_correction_with_guess(
                 &r3,
@@ -1167,7 +1199,7 @@ impl GaussObs {
                 peri_max,
                 ecc_max,
                 chi_guess_21,
-                kep_eps,
+                iod_params.kepler_eps,
             );
 
             // Both sides must succeed; otherwise, try another outer iteration (or eventually give up).
@@ -1204,6 +1236,7 @@ impl GaussObs {
 
             // --- Recompute asteroid positions and light-time-corrected epoch.
             let (new_pos, new_epoch) = match self.position_vector_and_reference_epoch(
+                iod_params,
                 unit_matrix,
                 inv_unit_matrix,
                 &c_vec,
@@ -1438,8 +1471,12 @@ pub(crate) mod gauss_test {
             -1.,
             vector_a[2] + vector_b[2] * r2m3,
         );
-        let ast_pos =
-            gauss.position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c);
+        let ast_pos = gauss.position_vector_and_reference_epoch(
+            &IODParams::default(),
+            &unit_matrix,
+            &inv_unit_matrix,
+            &vector_c,
+        );
         assert!(ast_pos.is_err());
 
         let second_root: f64 = 1.3856312487504951;
@@ -1450,7 +1487,12 @@ pub(crate) mod gauss_test {
             vector_a[2] + vector_b[2] * r2m3,
         );
         let (ast_pos, ref_epoch) = gauss
-            .position_vector_and_reference_epoch(&unit_matrix, &inv_unit_matrix, &vector_c)
+            .position_vector_and_reference_epoch(
+                &IODParams::default(),
+                &unit_matrix,
+                &inv_unit_matrix,
+                &vector_c,
+            )
             .unwrap();
 
         let ast_pos_slice: [f64; 9] = ast_pos
@@ -1551,7 +1593,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit(env).unwrap();
+        let binding = gauss.prelim_orbit(env, &IODParams::default()).unwrap();
         let prelim_orbit = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
@@ -1585,7 +1627,7 @@ pub(crate) mod gauss_test {
             .into(),
         };
 
-        let binding = a.prelim_orbit(env).unwrap();
+        let binding = a.prelim_orbit(env, &IODParams::default()).unwrap();
         let prelim_orbit_a = binding.get_orbit();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
@@ -1631,7 +1673,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit(env).unwrap();
+        let binding = gauss.prelim_orbit(env, &IODParams::default()).unwrap();
         let prelim_orbit_b = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
@@ -1727,6 +1769,7 @@ pub(crate) mod gauss_test {
 
         let (new_ast_pos, new_ast_vel, corrected_epoch) = gauss
             .pos_and_vel_correction(
+                &IODParams::default(),
                 &ast_pos,
                 &ast_vel,
                 &unit_matrix,
