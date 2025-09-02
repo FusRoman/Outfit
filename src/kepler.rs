@@ -150,7 +150,7 @@
 use crate::outfit_errors::OutfitError;
 
 use super::constants::DPI;
-use super::constants::GAUSS_GRAV;
+use super::constants::GAUSS_GRAV_SQUARED;
 use super::orb_elem::eccentricity_control;
 use nalgebra::Vector3;
 use std::f64::consts::PI;
@@ -671,101 +671,186 @@ pub fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: u
     (f - f0) / params.alpha.sqrt()
 }
 
-/// Solve the universal Kepler equation using Newton's method.
+/// Solve the universal Kepler equation using a safeguarded Newton iteration.
 ///
-/// This solver refines an initial guess for the universal anomaly `ψ` using
-/// Newton–Raphson iterations until the equation
+/// This routine finds the universal anomaly `ψ` such that:
 ///
 /// ```text
-/// r0 * s1 + sig0 * s2 + mu * s3 = dt
+/// f(ψ) = r0*s1(ψ) + sig0*s2(ψ) + mu*s3(ψ) - dt = 0
 /// ```
 ///
-/// is satisfied. The method handles both:
-/// * Elliptical orbits (alpha < 0)
-/// * Hyperbolic orbits (alpha > 0)
+/// where `(s0, s1, s2, s3)` are the Stumpff-based functions for the orbital
+/// energy parameter `alpha`.  
+///
+/// ### Supported cases
+/// - **Elliptic orbits** (`alpha < 0`)
+/// - **Hyperbolic orbits** (`alpha > 0`)
+///
+/// Parabolic motion (`alpha = 0`) is rejected and yields `None`.
+///
+/// ### Numerical strategy
+/// - Initial guess for `ψ` from [`prelim_kepuni`] unless an explicit
+///   `psi_guess` is provided (warm start).
+/// - Newton–Raphson iteration, with:
+///   * **Derivative guard** when `f′` is too small,
+///   * **Step size limiter** to prevent divergence for hyperbolic orbits,
+///   * **Sign-change damping** to avoid oscillations across zero.
+/// - Convergence checks based on:
+///   * **Equation residual** (`|f| < tol_f`),  
+///   * **Step size** (`|Δψ| < tol_step` absolute or relative).
 ///
 /// Arguments
 /// ---------
-/// * `dt` – Propagation interval Δt (days)
-/// * `r0` – Distance at epoch (AU)
-/// * `sig0` – Radial velocity component (AU/day)
-/// * `mu` – Gravitational parameter GM (AU³/day²)
-/// * `alpha` – Twice the specific orbital energy:
-///   * < 0 elliptical,
-///   * > 0 hyperbolic.
-/// * `e0` – Eccentricity of the orbit
-/// * `convergency` – Optional convergence tolerance (defaults to 100×ε)
+/// * `params` – Packed orbital parameters for the universal formulation.
+/// * `convergency` – Optional absolute tolerance on `ψ` (default: `100 × ε`).
+/// * `psi_guess` – Optional warm-start for `ψ` (skips [`prelim_kepuni`] if set).
 ///
 /// Returns
-/// --------
-/// * `Some((psi, s0, s1, s2, s3))` if the solver converged
-/// * `None` if the solver failed to converge or `alpha = 0`.
+/// -------
+/// * `Some((psi, s0, s1, s2, s3))` if the solver converged, with `s⋅`
+///   consistent with the final `ψ`.
+/// * `None` if the solver fails to converge within the iteration budget,
+///   or if the orbit is parabolic (`alpha = 0`).
 ///
-/// Remarks
+/// See also
 /// --------
-/// * The initial guess for `ψ` is computed using [`prelim_kepuni`].
-/// * Convergence is usually fast (few iterations).
-pub fn solve_kepuni(
+/// * [`prelim_kepuni`] – Provides an initial guess for `ψ`.
+/// * [`s_funct`] – Computes the Stumpff functions `(s0..s3)`.
+/// * [`UniversalKeplerParams`] – Parameter container for the universal formulation.
+pub fn solve_kepuni_with_guess(
     params: &UniversalKeplerParams,
     convergency: Option<f64>,
+    psi_guess: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
-    const MAX_ITER: usize = 100;
-    let tol = convergency.unwrap_or(100.0 * f64::EPSILON);
+    // --- Configuration
+    const MAX_ITER: usize = 50;
 
-    // Preliminary guess for psi
-    let mut psi = match params.orbit_type() {
-        OrbitType::Parabolic => return None,
-        OrbitType::Elliptic | OrbitType::Hyperbolic => prelim_kepuni(params, tol)?,
+    // Absolute step tolerance (controls convergence on Δψ).
+    let tol_step = convergency.unwrap_or(100.0 * f64::EPSILON);
+
+    // Scale-aware function tolerance for residual |f(ψ)|
+    // Combines absolute and relative terms to stay robust for both small and large dt.
+    let atol_f = 10.0 * f64::EPSILON;
+    let rtol_f = 10.0 * f64::EPSILON;
+    let tol_f = atol_f + rtol_f * params.dt.abs();
+
+    // Maximum allowed step length (relative to current |ψ|)
+    // Prevents Newton from taking excessively large jumps in hyperbolic cases.
+    let max_rel_step = 2.0;
+
+    // --- Orbit type gate
+    match params.orbit_type() {
+        OrbitType::Parabolic => return None, // parabolic motion not supported
+        OrbitType::Elliptic | OrbitType::Hyperbolic => {}
+    }
+
+    // --- Initial guess for ψ
+    let mut psi = if let Some(g) = psi_guess {
+        g
+    } else {
+        prelim_kepuni(params, tol_step)?
     };
 
-    // Newton-Raphson refinement
+    // --- Iteration loop
     for _ in 0..MAX_ITER {
+        // Stumpff functions at current ψ.
+        // Derivatives follow a chain: d/dψ s1 = s0, d/dψ s2 = s1, d/dψ s3 = s2.
         let (s0, s1, s2, s3) = s_funct(psi, params.alpha);
 
-        // Universal Kepler function and derivative
+        // Residual f(ψ) and its derivative f′(ψ)
         let f = params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt;
         let fp = params.r0 * s0 + params.sig0 * s1 + params.mu * s2;
-        let dpsi = -f / fp;
 
-        // Convergence safeguard
-        if s3.abs() > 1e-2 / f64::EPSILON {
-            return None;
+        // --- Convergence test on residual value
+        if f.abs() <= tol_f {
+            return Some((psi, s0, s1, s2, s3));
         }
 
-        // Update psi (dampen sign change)
+        // --- Derivative safeguard
+        // If f′ is too small, Newton would diverge. Fall back by shrinking ψ.
+        if !fp.is_finite() || fp.abs() < 10.0 * f64::EPSILON {
+            psi *= 0.5;
+            continue;
+        }
+
+        // --- Newton step
+        let mut dpsi = -f / fp;
+
+        // Step limiting to prevent runaway updates
+        let max_step = max_rel_step * (1.0 + psi.abs());
+        if dpsi.abs() > max_step {
+            dpsi = dpsi.signum() * max_step;
+        }
+
+        // --- Sign-change damping
+        // If the update would flip the sign of ψ, reduce oscillations by halving ψ instead.
         let new_psi = psi + dpsi;
         psi = if new_psi * psi < 0.0 {
-            psi / 2.0
+            0.5 * psi
         } else {
             new_psi
         };
 
-        // Convergence condition
-        let small_step = dpsi.abs() < tol || dpsi.abs() < tol * 10.0 * psi.abs();
-        if small_step {
-            return Some((psi, s0, s1, s2, s3));
+        // --- Convergence test on step size
+        let small_abs = dpsi.abs() <= tol_step;
+        let small_rel = dpsi.abs() <= tol_step * (1.0 + psi.abs());
+        if small_abs || small_rel {
+            // Recompute s⋅ for the final ψ to return consistent values
+            let (s0f, s1f, s2f, s3f) = s_funct(psi, params.alpha);
+            return Some((psi, s0f, s1f, s2f, s3f));
         }
     }
 
+    // Iteration budget exceeded without convergence
     None
+}
+
+/// Solve the universal Kepler equation with the legacy two-argument signature.
+///
+/// This is a thin wrapper around [`solve_kepuni_with_guess`] that omits the
+/// optional warm-start argument (`psi_guess`). It exists for backward
+/// compatibility with earlier code paths that only provide the orbital
+/// parameters and a convergence tolerance.
+///
+/// Behavior
+/// --------
+/// * Delegates directly to [`solve_kepuni_with_guess`] with `psi_guess = None`.
+/// * Otherwise identical in functionality and return type.
+/// * Use [`solve_kepuni_with_guess`] if you want to supply a warm-start
+///   value for the universal anomaly `ψ` to speed up iterative refinement.
+///
+/// Arguments
+/// ---------
+/// * `params` – Packed orbital parameters for the universal-variable formulation.
+/// * `convergency` – Optional absolute tolerance on `ψ` steps
+///   (default inside [`solve_kepuni_with_guess`]: `100 × ε`).
+///
+/// Return
+/// ------
+/// * `Some((psi, s0, s1, s2, s3))` if the solver converged.
+/// * `None` if convergence fails or if the orbit is parabolic (`alpha = 0`).
+///
+/// See also
+/// --------
+/// * [`solve_kepuni_with_guess`] – Extended variant with warm-start support.
+/// * [`s_funct`] – Computes the Stumpff functions `(s0..s3)`.
+pub fn solve_kepuni(
+    params: &UniversalKeplerParams,
+    convergency: Option<f64>,
+) -> Option<(f64, f64, f64, f64, f64)> {
+    // Delegate directly, disabling warm-start by passing None for psi_guess.
+    solve_kepuni_with_guess(params, convergency, None)
 }
 
 /// Apply velocity correction using Lagrange f–g coefficients.
 ///
 /// This function refines the velocity vector `v2` of an orbiting body at a given epoch,
-/// using the positions `x1` and `x2`, the time interval `dt`, and the two-body
-/// universal variable formulation. It proceeds as follows:
+/// using two-body dynamics in universal variables. It is a simplified wrapper around
+/// [`velocity_correction_with_guess`] that does not provide a warm-start for the universal
+/// anomaly χ or a custom solver tolerance.
 ///
-/// 1. Compute the orbital energy and eccentricity from `x2`, `v2` using [`eccentricity_control`].
-/// 2. Build the [`UniversalKeplerParams`] and solve the universal Kepler equation via [`solve_kepuni`].
-/// 3. Compute the Lagrange coefficients:
-///    - `f = 1 - μ * s2 / |x2|`
-///    - `g = dt - μ * s3`
-/// 4. Return the corrected velocity:
-///    - `v2_corrected = (x1 - f * x2) / g`
-///
-/// # Arguments
-///
+/// Arguments
+/// ---------
 /// * `x1` – Position vector of the body at epoch t₁ (in AU).
 /// * `x2` – Position vector of the body at epoch t₂ (in AU).
 /// * `v2` – Velocity vector at epoch t₂ (in AU/day).
@@ -773,19 +858,19 @@ pub fn solve_kepuni(
 /// * `peri_max` – Maximum acceptable perihelion distance for eccentricity control.
 /// * `ecc_max` – Maximum acceptable eccentricity for eccentricity control.
 ///
-/// # Returns
+/// Return
+/// ------
+/// * `Ok((v2_corrected, f, g))` on success, where:
+///   - `v2_corrected` is the corrected velocity vector at t₂ (AU/day),
+///   - `f`, `g` are the Lagrange coefficients.
+/// * `Err(OutfitError::VelocityCorrectionError)` if eccentricity control fails
+///   or the universal Kepler solver does not converge.
 ///
-/// On success, returns a tuple `(v2_corrected, f, g)`:
-/// * `v2_corrected` – Corrected velocity vector at t₂ (AU/day),
-/// * `f`, `g` – Lagrange coefficients.
-///
-/// Returns `Err(VelocityCorrectionError)` if:
-/// * `eccentricity_control` rejects the orbit,
-/// * or `solve_kepuni` fails to converge.
-///
-/// # See also
-/// * [`eccentricity_control`] – Computes eccentricity and energy.
-/// * [`solve_kepuni`] – Solves the universal Kepler equation.
+/// See also
+/// --------
+/// * [`velocity_correction_with_guess`] – Variant that accepts a universal-variable guess.
+/// * [`eccentricity_control`] – Validates eccentricity and angular momentum.
+/// * [`solve_kepuni`] – Universal Kepler solver returning Stumpff-based integrals.
 pub fn velocity_correction(
     x1: &Vector3<f64>,
     x2: &Vector3<f64>,
@@ -794,42 +879,120 @@ pub fn velocity_correction(
     peri_max: f64,
     ecc_max: f64,
 ) -> Result<(Vector3<f64>, f64, f64), OutfitError> {
-    // Precompute constants
-    let mu = GAUSS_GRAV.powi(2);
+    // Delegate to the more general implementation with warm-start capability,
+    // but here we pass `None` for both the χ guess and the solver tolerance
+    // to keep the legacy, minimal interface.
+    let (velocity_corrected, f, g, _) =
+        velocity_correction_with_guess(x1, x2, v2, dt, peri_max, ecc_max, None, None)?;
+    Ok((velocity_corrected, f, g))
+}
+
+/// Find corrected velocity using Lagrange f–g coefficients (configurable).
+///
+/// This routine refines the velocity vector `v2` of a body at epoch `t₂` by
+/// combining two-body dynamics in universal variables with Lagrange’s f–g
+/// formulation. Compared to [`velocity_correction`], this version allows:
+/// - a custom solver tolerance for the universal Kepler equation,
+/// - an optional warm-start on the universal anomaly `χ`.
+///
+/// Arguments
+/// ---------
+/// * `x1` – Position vector at epoch t₁ (AU).
+/// * `x2` – Position vector at epoch t₂ (AU).
+/// * `v2` – Velocity vector at epoch t₂ (AU/day).
+/// * `dt` – Time difference t₂ − t₁ (days).
+/// * `peri_max` – Maximum perihelion distance for dynamic acceptability.
+/// * `ecc_max` – Maximum eccentricity for dynamic acceptability.
+/// * `chi_guess` – Optional warm-start for the universal variable `χ`.
+/// * `eps` – Optional solver tolerance; default is `1e3 × f64::EPSILON`.
+///
+/// Return
+/// ------
+/// * `Ok((v2_corrected, f, g, chi))` on success, where:
+///   - `v2_corrected` is the corrected velocity at t₂ (AU/day),
+///   - `f`, `g` are the Lagrange coefficients,
+///   - `chi` is the final universal anomaly (useful for warm-starts).
+/// * `Err(OutfitError::VelocityCorrectionError)` if:
+///   - the eccentricity/energy check fails,
+///   - the universal Kepler solver does not converge,
+///   - or `g` is too small for a stable velocity update.
+///
+/// See also
+/// --------
+/// * [`velocity_correction`] – Simpler wrapper without warm-start or tolerance control.
+/// * [`eccentricity_control`] – Validates eccentricity and angular momentum.
+/// * [`solve_kepuni_with_guess`] – Universal Kepler solver with warm-start support.
+#[allow(clippy::too_many_arguments)]
+pub fn velocity_correction_with_guess(
+    x1: &Vector3<f64>,
+    x2: &Vector3<f64>,
+    v2: &Vector3<f64>,
+    dt: f64,
+    peri_max: f64,
+    ecc_max: f64,
+    chi_guess: Option<f64>,
+    eps: Option<f64>,
+) -> Result<(Vector3<f64>, f64, f64, f64), OutfitError> {
+    // --- Constants
+    let mu = GAUSS_GRAV_SQUARED;
     let r2 = x2.norm();
     let sig0 = x2.dot(v2);
 
-    // Step 1: Get orbital parameters (eccentricity, energy)
+    // --- Quick reject: check angular momentum
+    // A vanishing cross product x2 × v2 means rectilinear motion → unstable.
+    let h_norm = x2.cross(v2).norm();
+    if !h_norm.is_finite() || h_norm <= 1e6 * f64::EPSILON {
+        return Err(OutfitError::VelocityCorrectionError(
+            "Rejected orbit: near-zero angular momentum (x × v ≈ 0)".into(),
+        ));
+    }
+
+    // --- Step 1: Validate eccentricity and compute initial orbital energy
     let (_, ecc, _, energy) = eccentricity_control(x2, v2, peri_max, ecc_max).ok_or(
         OutfitError::VelocityCorrectionError(
-            "The eccentricity control detected that the asteroid as no angular momentum".into(),
+            "Eccentricity control rejected the candidate orbit".into(),
         ),
     )?;
 
-    // Step 2: Prepare parameters for universal Kepler solver
+    // --- Step 2: Pack parameters for the universal Kepler solver
     let params = UniversalKeplerParams {
         dt,
         r0: r2,
         sig0,
         mu,
-        alpha: 2.0 * energy,
+        alpha: 2.0 * energy, // specific orbital energy → α
         e0: ecc,
     };
 
-    // Solve universal Kepler equation for s2, s3
-    let eps = 1e3 * f64::EPSILON;
-    let (_, _, _, s2, s3) = solve_kepuni(&params, Some(eps)).ok_or(
-        OutfitError::VelocityCorrectionError("Failed to solve universal Kepler equation".into()),
+    // Solver tolerance: user override or default
+    let tol = eps.unwrap_or(1e3 * f64::EPSILON);
+
+    // --- Step 3: Solve the universal Kepler equation (with optional χ warm-start)
+    let (_chi, _c2, _c3, s2, s3) = solve_kepuni_with_guess(&params, Some(tol), chi_guess).ok_or(
+        OutfitError::VelocityCorrectionError("Universal Kepler solver did not converge".into()),
     )?;
 
-    // Step 3: Compute Lagrange f and g coefficients
+    // --- Step 4: Compute Lagrange coefficients f and g
     let f = 1.0 - (mu * s2) / r2;
     let g = dt - (mu * s3);
 
-    // Step 4: Compute corrected velocity
-    let v2_corrected = (x1 - f * x2) / g;
+    // Guard against ill-conditioned g (division instability)
+    let g_abs = g.abs();
+    let g_floor = 100.0 * f64::EPSILON * (1.0 + dt.abs()); // scale-aware minimum
+    if !(g_abs.is_finite()) || g_abs < g_floor {
+        return Err(OutfitError::VelocityCorrectionError(
+            "Lagrange coefficient g is too small for a stable velocity update".into(),
+        ));
+    }
 
-    Ok((v2_corrected, f, g))
+    // --- Step 5: Correct the velocity vector
+    // Formula: v2_corrected = (x1 - f*x2)/g
+    // Implementation uses BLAS-like axpy for fewer temporaries.
+    let mut v_corr = *x1; // allocate one Vector3
+    v_corr.axpy(-f, x2, 1.0); // v_corr = x1 - f*x2
+    v_corr.unscale_mut(g); // v_corr /= g
+
+    Ok((v_corr, f, g, _chi))
 }
 
 #[cfg(test)]
@@ -1255,7 +1418,7 @@ mod kepler_test {
 
             let (psi, s0, s1, s2, s3) = solve_kepuni(&params, None).unwrap();
 
-            assert_eq!(psi, -15.327414893041839);
+            assert_eq!(psi, -15.327414893041848);
             assert_eq!(s0, 0.9807723505583343);
             assert_eq!(s1, -15.229051668919967);
             assert_eq!(s2, 117.0876676813769);
