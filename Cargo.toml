@@ -91,18 +91,22 @@ required-features = ["jpl-download"]
 [[bench]]
 name = "load_parquet"
 harness = false
+required-features = ["jpl-download"]
 
 [[bench]]
 name = "outfit_gauss_iod"
 harness = false
+required-features = ["jpl-download"]
 
 [[bench]]
 name = "solve_kepler_equation"
 harness = false
+required-features = ["jpl-download"]
 
 [[bench]]
 name = "gauss_prelim_orbit"
 harness = false
+required-features = ["jpl-download"]
 
 [profile.bench]
 opt-level = 3
