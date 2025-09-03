@@ -269,6 +269,9 @@ pub enum OutfitError {
     /// Gauss preliminary orbit determination failed.
     #[error("Gauss preliminary orbit determination failed: {0}")]
     GaussPrelimOrbitFailed(String),
+
+    #[error(transparent)]
+    Parquet(#[from] parquet::errors::ParquetError),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {

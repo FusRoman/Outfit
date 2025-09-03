@@ -2,12 +2,16 @@ use arrow_array::Array;
 use hifitime::Epoch;
 use nalgebra::Vector3;
 use ordered_float::OrderedFloat;
+use parquet::errors::ParquetError;
 use smallvec::SmallVec;
+use std::collections::hash_map::Entry;
+use std::io;
 use std::sync::Arc;
 
 use crate::constants::ArcSec;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
+use crate::outfit_errors::OutfitError;
 use crate::{
     constants::{ObjectNumber, TrajectorySet, JDTOMJD},
     observations::Observation,
@@ -68,14 +72,13 @@ pub(crate) fn parquet_to_trajset(
     error_ra: ArcSec,
     error_dec: ArcSec,
     batch_size: Option<usize>,
-) {
+) -> Result<(), OutfitError> {
     // Resolve observer to its compact u16 key once (hot path avoids map lookups later).
     let uint16_obs = env_state.uint16_from_observer(observer);
 
     // Open file and inspect Parquet metadata (I/O and schema discovery happen here).
-    let file = std::fs::File::open(parquet).expect("Unable to open file");
-    let builder =
-        ParquetRecordBatchReaderBuilder::try_new(file).expect("Failed to read Parquet metadata");
+    let file = std::fs::File::open(parquet)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
 
     let parquet_metadata = builder.metadata();
     let schema_descr = parquet_metadata.file_metadata().schema_descr();
@@ -90,9 +93,15 @@ pub(crate) fn parquet_to_trajset(
             all_fields
                 .iter()
                 .position(|f| f.name() == *name)
-                .unwrap_or_else(|| panic!("Column '{name}' not found in schema"))
+                // If not found, surface a clean error instead of panicking.
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("Column '{name}' not found in schema"),
+                    )
+                })
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     let mask = ProjectionMask::leaves(schema_descr, projection_indices);
 
     // A larger batch often amortizes decompression + Arrow deserialization cost.
@@ -101,8 +110,7 @@ pub(crate) fn parquet_to_trajset(
     let reader = builder
         .with_projection(mask)
         .with_batch_size(batch_size)
-        .build()
-        .expect("Failed to build Parquet reader");
+        .build()?;
 
     // Pre-fetch shared providers and observer reference to avoid repeated lookups in the hot loop.
     let ut1 = env_state.get_ut1_provider();
@@ -117,7 +125,7 @@ pub(crate) fn parquet_to_trajset(
     // Iterate over Parquet record batches
     for maybe_batch in reader {
         // I/O boundary; failures here usually indicate corruption or incompatible schema.
-        let batch = maybe_batch.expect("Error reading batch");
+        let batch = maybe_batch.map_err(ParquetError::from)?;
         let len = batch.num_rows();
 
         // Projected columns by index: [0]=ra, [1]=dec, [2]=jd, [3]=trajectory_id
@@ -126,22 +134,29 @@ pub(crate) fn parquet_to_trajset(
             .column(0)
             .as_any()
             .downcast_ref::<Float64Array>()
-            .expect("ra must be Float64Array");
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ra must be Float64Array"))?;
         let dec_arr = batch
             .column(1)
             .as_any()
             .downcast_ref::<Float64Array>()
-            .expect("dec must be Float64Array");
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "dec must be Float64Array")
+            })?;
         let jd_arr = batch
             .column(2)
             .as_any()
             .downcast_ref::<Float64Array>()
-            .expect("jd must be Float64Array");
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "jd must be Float64Array"))?;
         let tid_arr = batch
             .column(3)
             .as_any()
             .downcast_ref::<UInt32Array>()
-            .expect("trajectory_id must be UInt32Array");
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "trajectory_id must be UInt32Array",
+                )
+            })?;
 
         // Fast path when all projected columns have no nulls.
         // This unlocks tight, bounds-checked loops on `&[T]` slices without per-row Option unwrapping.
@@ -166,20 +181,22 @@ pub(crate) fn parquet_to_trajset(
                 let key = OrderedFloat(mjd_time);
 
                 // Compute observer positions once per unique epoch.
-                // `or_insert_with` is only taken on the first occurrence of a given time.
-                let (geo_pos, helio_pos) = *pos_cache.entry(key).or_insert_with(|| {
-                    let epoch = Epoch::from_mjd_in_time_scale(mjd_time, hifitime::TimeScale::TT);
+                // We handle errors with `?` while using the entry API (no closures returning Result).
+                let (geo_pos, helio_pos) = match pos_cache.entry(key) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(v) => {
+                        let epoch =
+                            Epoch::from_mjd_in_time_scale(mjd_time, hifitime::TimeScale::TT);
 
-                    // Geocentric position (velocity unused here, but available if needed).
-                    let (geo, _vel) = obs_ref.pvobs(&epoch, ut1).expect("Observer::pvobs failed");
+                        // Geocentric position (velocity unused here, but available if needed).
+                        let (geo, _vel) = obs_ref.pvobs(&epoch, ut1)?;
+                        // Heliocentric position (requires geocentric as input).
+                        let helio = obs_ref.helio_position(env_state, &epoch, &geo)?;
 
-                    // Heliocentric position (requires geocentric as input).
-                    let helio = obs_ref
-                        .helio_position(env_state, &epoch, &geo)
-                        .expect("Observer::helio_position failed");
-
-                    (geo, helio)
-                });
+                        v.insert((geo, helio));
+                        (geo, helio)
+                    }
+                };
 
                 // Zero-ephemeris constructor: avoids recomputing positions at construction.
                 let obs = Observation::with_positions(
@@ -218,17 +235,19 @@ pub(crate) fn parquet_to_trajset(
                 let tid = tid_arr.value(i);
                 let key = OrderedFloat(mjd_time);
 
-                let (geo_pos, helio_pos) = *pos_cache.entry(key).or_insert_with(|| {
-                    let epoch = Epoch::from_mjd_in_time_scale(mjd_time, hifitime::TimeScale::TT);
+                let (geo_pos, helio_pos) = match pos_cache.entry(key) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(v) => {
+                        let epoch =
+                            Epoch::from_mjd_in_time_scale(mjd_time, hifitime::TimeScale::TT);
 
-                    let (geo, _vel) = obs_ref.pvobs(&epoch, ut1).expect("Observer::pvobs failed");
+                        let (geo, _vel) = obs_ref.pvobs(&epoch, ut1)?;
+                        let helio = obs_ref.helio_position(env_state, &epoch, &geo)?;
 
-                    let helio = obs_ref
-                        .helio_position(env_state, &epoch, &geo)
-                        .expect("Observer::helio_position failed");
-
-                    (geo, helio)
-                });
+                        v.insert((geo, helio));
+                        (geo, helio)
+                    }
+                };
 
                 let obs = Observation::with_positions(
                     uint16_obs, ra, error_ra, dec, error_dec, mjd_time, geo_pos, helio_pos,
@@ -241,4 +260,6 @@ pub(crate) fn parquet_to_trajset(
             }
         }
     }
+
+    Ok(())
 }
