@@ -774,10 +774,31 @@ impl ObservationIOD for Observations {
             params.max_triplets,
         );
 
+        if triplets.is_empty() {
+            let span = if self.is_empty() {
+                0.0
+            } else {
+                self.last().unwrap().time - self.first().unwrap().time
+            };
+            return Err(OutfitError::NoFeasibleTriplets {
+                span,
+                n_obs: self.len(),
+                dt_min: params.dt_min,
+                dt_max: params.dt_max_triplet,
+            });
+        }
+
         // Current best (lowest) RMS and its orbit.
         // Using +∞ avoids Option branching in the hot path.
         let mut best_rms = f64::INFINITY;
         let mut best_orbit: Option<GaussResult> = None;
+
+        // Keep the last encountered error so that we can report something meaningful if *all* fail.
+        // We don't clone: we keep only the most recent error by moving it in.
+        let mut last_error: Option<OutfitError> = None;
+
+        // For diagnostics, count how many realizations we actually attempted.
+        let mut n_attempts: usize = 0;
 
         // --- Stage 3: Explore each triplet.
         for triplet in triplets {
@@ -793,10 +814,14 @@ impl ObservationIOD for Observations {
                 params.noise_scale,
                 rng,
             ) {
+                n_attempts += 1;
+
                 // 4.a) Preliminary Gauss solution on the current realization.
                 let gauss_res = match realization.prelim_orbit(state, params) {
                     Ok(res) => res,
-                    Err(_) => {
+                    Err(e) => {
+                        // Record the failure and continue exploring.
+                        last_error = Some(e);
                         continue;
                     }
                 };
@@ -814,7 +839,8 @@ impl ObservationIOD for Observations {
                     Some(best_rms),
                 ) {
                     Ok(v) => v,
-                    Err(_) => {
+                    Err(e) => {
+                        last_error = Some(e);
                         continue;
                     }
                 };
@@ -827,8 +853,21 @@ impl ObservationIOD for Observations {
             }
         }
 
-        // --- Stage 5: Return the best orbit (if any) and its score.
-        Ok((best_orbit, best_rms))
+        // --- Stage 5: If at least one candidate succeeded, return the best; otherwise, propagate an error.
+        if let Some(orbit) = best_orbit {
+            Ok((Some(orbit), best_rms))
+        } else {
+            // If nothing succeeded, propagate a structured error with the last underlying cause.
+            // Fallback to a domain-specific unit error if we never captured any (e.g., no attempts).
+            let root_cause = match last_error {
+                Some(e) => e,
+                None => panic!("In estimate_best_orbit: no error captured but best_orbit is None, this should not happen"),
+            };
+            Err(OutfitError::NoViableOrbit {
+                cause: Box::new(root_cause),
+                attempts: n_attempts,
+            })
+        }
     }
 }
 

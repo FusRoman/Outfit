@@ -1,15 +1,139 @@
+//! Trajectory ingestion and batch Initial Orbit Determination (IOD).
+//!
+//! Overview
+//! -----------------
+//! This module provides **high-level utilities** to:
+//! * Build a [`TrajectorySet`] from multiple data sources (80-column MPC files, Parquet, ADES,
+//!   or in-memory batches).
+//! * Append observations to an existing set.
+//! * Run a **Gauss-based IOD** over all trajectories and collect **per-object results** in a
+//!   single map ([`FullOrbitResult`]).
+//!
+//! Data model
+//! -----------------
+//! * A [`TrajectorySet`] is a `HashMap<ObjectNumber, Observations>` storing one time-ordered
+//!   list of astrometric observations per object.
+//! * [`ObservationBatch`] is a thin, zero-copy view used to create/append observations that
+//!   all share the **same observer** and **uniform uncertainties**.
+//! * Results of the batch IOD are returned as a [`FullOrbitResult`]:
+//!   `HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>`.
+//!
+//! Ingestion sources
+//! -----------------
+//! The [`TrajectoryExt`] trait exposes constructors and appenders for:
+//! * **80-column MPC files**: [`TrajectoryExt::new_from_80col`], [`TrajectoryExt::add_from_80col`]
+//! * **Parquet** files (columns: `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`):
+//!   [`TrajectoryExt::new_from_parquet`], [`TrajectoryExt::add_from_parquet`]
+//! * **ADES** (MPC XML/JSON): [`TrajectoryExt::new_from_ades`], [`TrajectoryExt::add_from_ades`]
+//! * **In-memory batches** (one observer): [`TrajectoryExt::new_from_vec`], [`TrajectoryExt::add_from_vec`]
+//!
+//! Batch IOD
+//! -----------------
+//! Use [`TrajectoryExt::estimate_all_orbits`] to run the full Gauss IOD pipeline on every
+//! `(ObjectNumber → Observations)` pair in the set. Each object is processed with the same
+//! [`Outfit`] state and [`IODParams`]. The outcome for each object is either:
+//! * `Ok(Some(GaussResult))` + RMS – a viable preliminary or corrected orbit,
+//! * `Ok(None)` – pipeline executed but no viable solution kept,
+//! * `Err(OutfitError)` – a failure specific to that object (does not abort the batch).
+//!
+//! Assumptions & format expectations
+//! -----------------
+//! * Right ascension and declination are in **degrees** on input (unless stated otherwise).
+//! * Times are **TT** on input where noted and converted internally to **MJD**.
+//! * For Parquet ingestion, required columns are `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`.
+//! * For 80-col and ADES, inputs must follow MPC specifications.
+//!
+//! Errors
+//! -----------------
+//! Ingestion and IOD may return [`OutfitError`]. Batch execution isolates failures so that
+//! one object cannot prevent others from being processed.
+//!
+//! Example
+//! -----------------
+//! ```no_run
+//! use std::sync::Arc;
+//! use camino::Utf8Path;
+//! use ahash::RandomState;
+//! use rand::SeedableRng;
+//! use outfit::outfit::Outfit;
+//! use outfit::observations::trajectory_ext::{TrajectoryExt, FullOrbitResult};
+//! use outfit::observers::Observer;
+//! use outfit::initial_orbit_determination::IODParams;
+//!
+//! # fn demo() -> Result<(), outfit::outfit_errors::OutfitError> {
+//! let mut state = Outfit::new("horizon:DE440", outfit::error_models::ErrorModel::FCCT14)?;
+//! let observer: Arc<Observer> = state.get_observer_from_mpc_code(&"I41".into());
+//!
+//! // Build a TrajectorySet from Parquet
+//! let mut trajs = <_ as TrajectoryExt>::new_from_parquet(
+//!     &mut state,
+//!     Utf8Path::new("observations.parquet"),
+//!     observer.clone(),
+//!     0.5, 0.5,
+//!     Some(2048),
+//! )?;
+//!
+//! // Run batch IOD
+//! let mut rng = rand::rngs::StdRng::from_os_rng();
+//! let params = IODParams::builder().max_triplets(32).build()?;
+//! let results: FullOrbitResult = trajs.estimate_all_orbits(&state, &mut rng, &params);
+//!
+//! // Iterate results
+//! for (obj, outcome) in results {
+//!     match outcome {
+//!         Ok((Some(orbit), rms)) => eprintln!("{} → {:?}, rms={:.4}", obj, orbit, rms),
+//!         Ok((None, _))          => eprintln!("{} → no viable orbit", obj),
+//!         Err(err)               => eprintln!("{} → error: {}", obj, err),
+//!     }
+//! }
+//! # Ok(()) }
+//! ```
+//!
+//! See also
+//! ------------
+//! * [`TrajectoryExt`] – Constructors and appenders for [`TrajectorySet`].
+//! * [`ObservationIOD::estimate_best_orbit`] – Per-trajectory IOD and scoring.
+//! * [`IODParams`] – Tuning for triplet generation and correction.
+//! * [`GaussResult`] – Preliminary vs. corrected orbit representations.
+//! * [`Outfit`] – Ephemerides, reference frames, and observer registry.
 use std::{collections::HashMap, sync::Arc};
 
 use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
+use crate::initial_orbit_determination::gauss_result::GaussResult;
+use crate::initial_orbit_determination::IODParams;
 use crate::observations::observation_from_batch;
+use crate::observations::observations_ext::ObservationIOD;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
+use ahash::RandomState;
 use camino::Utf8Path;
+use rand::Rng;
 
 use super::ades_reader::parse_ades;
 use super::extract_80col;
 use super::parquet_reader::parquet_to_trajset;
+
+/// Full batch orbit determination results.
+///
+/// Each entry maps an [`ObjectNumber`] to the outcome of a full
+/// Initial Orbit Determination (IOD) attempt on its set of observations.
+/// The result type is:
+///
+/// * `Ok((Option<GaussResult>, f64))` – successful execution of the IOD pipeline:
+///   * `Option<GaussResult>` – the best preliminary or corrected orbit found
+///     for this object (or `None` if no viable orbit was selected),
+///   * `f64` – the RMS of normalized astrometric residuals for that solution.
+/// * `Err(OutfitError)` – a failure during orbit estimation for this object.
+///   Errors are per-object and do not abort the rest of the batch.
+///
+/// Internally, this is implemented as:
+///
+/// ```ignore
+/// HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>
+/// ```
+pub type FullOrbitResult =
+    HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>;
 
 pub struct ObservationBatch<'a> {
     pub ra: &'a [Degree],
@@ -239,6 +363,44 @@ pub trait TrajectoryExt {
         error_ra: Option<ArcSec>,
         error_dec: Option<ArcSec>,
     );
+
+    /// Estimate an initial orbit for **every trajectory** in the set and collect the results.
+    ///
+    /// This method runs the Gauss-based IOD pipeline on each `(ObjectNumber → Observations)`
+    /// pair contained in the trajectory set. All objects are processed with the same
+    /// configuration (`state`, `error_model`, `params`) and random number generator.
+    /// Results are aggregated into a [`FullOrbitResult`] map.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `state`: The global environment providing ephemerides, constants, and reference frames.
+    /// * `rng`: Random number generator used for noisy triplet realizations (e.g., \[`StdRng`\]).
+    /// * `params`: Parameters controlling triplet generation, scoring, and correction loops.
+    ///
+    /// Return
+    /// ----------
+    /// * A [`FullOrbitResult`] mapping each object to either:
+    ///   * `Ok((Option<GaussResult>, f64))` – a valid solution with its RMS,
+    ///   * `Err(OutfitError)` – an error diagnostic for that object.
+    ///
+    /// Notes
+    /// ----------
+    /// * The method iterates in place on the current set.  
+    /// * Observations themselves are not modified, but computation time scales
+    ///   with the number of trajectories and candidate triplets.  
+    /// * Errors are isolated: one object failing does not prevent others from being processed.
+    ///
+    /// See also
+    /// ------------
+    /// * [`ObservationIOD::estimate_best_orbit`] – Per-trajectory IOD with best-orbit selection.
+    /// * [`GaussResult`] – Variants for preliminary or corrected orbit solutions.
+    /// * [`IODParams`] – Tuning parameters for IOD batch execution.
+    fn estimate_all_orbits(
+        &mut self,
+        state: &Outfit,
+        rng: &mut impl Rng,
+        params: &IODParams,
+    ) -> FullOrbitResult;
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -333,5 +495,22 @@ impl TrajectoryExt for TrajectorySet {
         let mut trajs: TrajectorySet = HashMap::default();
         parse_ades(env_state, ades, &mut trajs, error_ra, error_dec);
         trajs
+    }
+
+    fn estimate_all_orbits(
+        &mut self,
+        state: &Outfit,
+        rng: &mut impl Rng,
+        params: &IODParams,
+    ) -> FullOrbitResult {
+        // Output map using the same fast hasher as TrajectorySet.
+        let mut results: FullOrbitResult = HashMap::default();
+
+        for (obj, observations) in self.iter_mut() {
+            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
+            results.insert(obj.clone(), res);
+        }
+
+        results
     }
 }

@@ -93,6 +93,7 @@ use vfcc17::parse_vfcc17_line;
 type CatalogCode = String;
 pub type ErrorModelData = HashMap<(MpcCode, CatalogCode), (f32, f32)>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorModel {
     FCCT14,
     CBM10,
