@@ -82,7 +82,8 @@ pub struct Outfit {
     observatories: Observatories,
     jpl_source: EphemFileSource,
     jpl_ephem: OnceCell<JPLEphem>,
-    error_model: ErrorModelData,
+    pub error_model: ErrorModel,
+    error_model_data: ErrorModelData,
     rot_equmj2000_to_eclmj2000: Matrix3<f64>,
     rot_eclmj2000_to_equmj2000: Matrix3<f64>,
 }
@@ -124,7 +125,8 @@ impl Outfit {
             observatories: Observatories::new(),
             jpl_source: jpl_file.try_into()?,
             jpl_ephem: OnceCell::new(),
-            error_model: error_model.read_error_model_file()?,
+            error_model,
+            error_model_data: error_model.read_error_model_file()?,
             rot_equmj2000_to_eclmj2000: rot1,
             rot_eclmj2000_to_equmj2000: rot2,
         })
@@ -255,7 +257,8 @@ impl Outfit {
                 let (longitude, cos, sin, name) = parse_remain(remain, code);
 
                 // TODO: support per-site catalog codes (not always "c")
-                let bias_rms = get_bias_rms(&self.error_model, code.to_string(), "c".to_string());
+                let bias_rms =
+                    get_bias_rms(&self.error_model_data, code.to_string(), "c".to_string());
 
                 let observer = Observer::from_parallax(
                     longitude as f64,

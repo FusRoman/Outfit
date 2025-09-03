@@ -42,14 +42,17 @@
 //!
 //! ## 3) Parsing & data ingestion
 //!
-//! **When**: Parsing observations, fixed-width records, or internal streams.
+//! **When**: Parsing observations, fixed-width records, ADES, or internal streams.
 //!
 //! - [`NomParsingError`](crate::outfit_errors::OutfitError::NomParsingError)
 //! - [`Parsing80ColumnFileError`](crate::outfit_errors::OutfitError::Parsing80ColumnFileError)
+//! - [`Parquet`](crate::outfit_errors::OutfitError::Parquet)
 //!
-//! **Typical causes**: schema drift; corrupted inputs; locale-specific formats.
+//! **Typical causes**: schema drift; corrupted inputs; locale-specific formats;
+//! columnar format mismatches.
 //!
-//! **Remediation**: strengthen parsers; surface line/column context; round-trip with golden files.
+//! **Remediation**: strengthen parsers; surface line/column context; round-trip with golden files;
+//! validate Parquet schema and logical types.
 //!
 //! ## 4) Numerical methods & stochastic routines
 //!
@@ -76,10 +79,16 @@
 //! - [`SpuriousRootDetected`](crate::outfit_errors::OutfitError::SpuriousRootDetected)
 //! - [`GaussNoRootsFound`](crate::outfit_errors::OutfitError::GaussNoRootsFound)
 //! - [`InvalidConversion`](crate::outfit_errors::OutfitError::InvalidConversion)
+//! - [`RmsComputationFailed`](crate::outfit_errors::OutfitError::RmsComputationFailed)
+//! - [`GaussPrelimOrbitFailed`](crate::outfit_errors::OutfitError::GaussPrelimOrbitFailed)
+//! - [`NoViableOrbit`](crate::outfit_errors::OutfitError::NoViableOrbit)
+//! - [`NoFeasibleTriplets`](crate::outfit_errors::OutfitError::NoFeasibleTriplets)
 //!
-//! **Typical causes**: coplanar geometry; invalid orbital elements; unsupported frame conversions.
+//! **Typical causes**: coplanar geometry; invalid orbital elements; unsupported frame conversions;
+//! all candidate triplets/realizations failing to produce a viable orbit.
 //!
-//! **Remediation**: pre-filter observations; enforce numeric bounds; fall back to alternative solvers.
+//! **Remediation**: pre-filter observations; enforce numeric bounds; fall back to alternative solvers;
+//! surface last/aggregated failure details when no orbit can be determined.
 //!
 //! ## 6) Observation catalog & indexing
 //!
@@ -107,7 +116,7 @@
 //! ## Testing & equality
 //!
 //! - [`OutfitError`](crate::outfit_errors::OutfitError) implements [`PartialEq`] for deterministic variants.
-//! - Variants wrapping opaque errors (e.g., I/O, HTTP) compare equal by kind only.
+//! - Variants wrapping opaque errors (e.g., I/O, HTTP, Parquet) compare equal by kind only.
 //!
 //! ```rust,ignore
 //! match result {
@@ -123,155 +132,121 @@
 //! * [`ParseObsError`](crate::observations::ParseObsError) – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
-//!
-//! ## Example
-//! ```rust,ignore
-//! use outfit::outfit_errors::OutfitError;
-//!
-//! fn do_something() -> Result<(), OutfitError> {
-//!     Err(OutfitError::InvalidUrl("http:/bad_url".into()))
-//! }
-//!
-//! match do_something() {
-//!     Err(OutfitError::InvalidUrl(msg)) => eprintln!("Bad URL: {msg}"),
-//!     Err(e) => eprintln!("General error: {e}"),
-//!     Ok(_) => println!("Success"),
-//! }
-//! ```
-
-use thiserror::Error;
 
 use crate::observations::ParseObsError;
+use thiserror::Error;
 
-/// All possible errors raised within the Outfit crate.
-///
-/// Each variant corresponds to a specific failure mode, either external
-/// (I/O, HTTP, parsing) or internal (root-finding, invalid parameters).
 #[derive(Error, Debug)]
 pub enum OutfitError {
-    /// Invalid JPL string format (e.g., `"horizonDE440"` instead of `"horizon:DE440"`).
     #[error("Invalid JPL string format: {0}")]
     InvalidJPLStringFormat(String),
 
-    /// Invalid JPL ephemeris file source (bad scheme or unknown provider).
     #[error("Invalid JPL ephemeris file source: {0}")]
     InvalidJPLEphemFileSource(String),
 
-    /// Unsupported or unrecognized JPL ephemeris file version.
     #[error("Invalid JPL ephemeris file version: {0}")]
     InvalidJPLEphemFileVersion(String),
 
-    /// Invalid URL string (parse failure).
     #[error("Invalid URL string: {0}")]
     InvalidUrl(String),
 
-    /// HTTP error raised by [`ureq`] client.
     #[error("HTTP request failed (ureq): {0}")]
     UreqHttpError(#[from] ureq::Error),
 
-    /// Filesystem I/O error (open/read/write).
     #[error("Filesystem I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// HTTP error raised by [`reqwest`] client (only with `jpl-download` feature).
     #[cfg(feature = "jpl-download")]
     #[error("HTTP request failed (reqwest): {0}")]
     ReqwestError(#[from] reqwest::Error),
 
-    /// Unable to create the base directory for JPL ephemeris file storage.
     #[error("Failed to create base directory for JPL ephemeris file: {0}")]
     UnableToCreateBaseDir(String),
 
-    /// UTF-8 error when decoding a filesystem path.
     #[error("Filesystem path is not valid UTF-8: {0}")]
     Utf8PathError(String),
 
-    /// JPL ephemeris file not found at the expected location.
     #[error("JPL ephemeris file not found: {0}")]
     JPLFileNotFound(String),
 
-    /// Failure during polynomial or numerical root finding (from `roots` crate).
     #[error("Numerical root finding failed: {0}")]
     RootFindingError(#[from] roots::SearchError),
 
-    /// Observation not found (index out of range or missing data).
     #[error("Observation not found at index: {0}")]
     ObservationNotFound(usize),
 
-    /// Invalid error model specification (e.g., unknown identifier).
     #[error("Invalid error model identifier: {0}")]
     InvalidErrorModel(String),
 
-    /// Invalid file path provided for an error model file.
     #[error("Invalid error model file path: {0}")]
     InvalidErrorModelFilePath(String),
 
-    /// Error during parsing with `nom` parser combinators.
     #[error("Parsing error (nom): {0}")]
     NomParsingError(String),
 
-    /// Error while parsing legacy 80-column formatted observation files.
     #[error("Parsing error in 80-column observation file: {0}")]
     Parsing80ColumnFileError(ParseObsError),
 
-    /// Gaussian noise generation failed (invalid parameters for normal distribution).
     #[error("Gaussian noise generation failed: {0:?}")]
     NoiseInjectionError(rand_distr::NormalError),
 
-    /// The unit direction matrix is singular (cannot invert; likely coplanar observations).
     #[error("Singular direction matrix (cannot invert); observations may be coplanar")]
     SingularDirectionMatrix,
 
-    /// Aberth–Ehrlich method failed to find acceptable complex polynomial roots.
     #[error("Polynomial root finding failed (Aberth–Ehrlich method did not converge)")]
     PolynomialRootFindingFailed,
 
-    /// Spurious root detected (e.g., negative or near-zero geocentric distance).
     #[error("Spurious root detected (negative or near-zero geocentric distance)")]
     SpuriousRootDetected,
 
-    /// Gauss method for initial orbit determination failed to find roots.
     #[error("Initial orbit determination (Gauss method) failed to find valid roots")]
     GaussNoRootsFound,
 
-    /// Invalid SPK segment data type in JPL ephemeris file.
     #[error("Invalid SPK segment data type: {0}")]
     InvalidSpkDataType(i32),
 
-    /// Invalid input parameter for initial orbit determination.
     #[error("Invalid parameter for initial orbit determination: {0}")]
     InvalidIODParameter(String),
 
-    /// Invalid reference system or unsupported transformation request.
     #[error("Invalid reference system: {0}")]
     InvalidRefSystem(String),
 
-    /// Failure during velocity correction procedure.
     #[error("Velocity correction procedure failed: {0}")]
     VelocityCorrectionError(String),
 
-    /// Invalid or inconsistent orbital elements/state vector.
     #[error("Invalid orbital state or inconsistent elements: {0}")]
     InvalidOrbit(String),
 
-    /// Generic invalid input error with a descriptive message.
     #[error("Invalid input conversion: {0}")]
     InvalidConversion(String),
 
-    /// Error indicating a floating-point value is NaN (Not a Number).
     #[error("Invalid floating-point value (NaN encountered): {0}")]
     InvalidFloatValue(ordered_float::FloatIsNan),
 
-    /// RMS computation failed (e.g., no valid observations).
     #[error("RMS computation failed: {0}")]
     RmsComputationFailed(String),
 
-    /// Gauss preliminary orbit determination failed.
     #[error("Gauss preliminary orbit determination failed: {0}")]
     GaussPrelimOrbitFailed(String),
 
     #[error(transparent)]
     Parquet(#[from] parquet::errors::ParquetError),
+
+    #[error("No viable orbit could be determined after {attempts} attempts: {cause}")]
+    NoViableOrbit {
+        cause: Box<OutfitError>,
+        attempts: usize,
+    },
+
+    #[error(
+        "No feasible triplets (span={span:.6} d, n_obs={n_obs}, dt_min={dt_min}, dt_max={dt_max})"
+    )]
+    NoFeasibleTriplets {
+        span: f64,
+        n_obs: usize,
+        dt_min: f64,
+        dt_max: f64,
+    },
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -295,11 +270,12 @@ impl PartialEq for OutfitError {
             (InvalidJPLEphemFileVersion(a), InvalidJPLEphemFileVersion(b)) => a == b,
             (InvalidUrl(a), InvalidUrl(b)) => a == b,
 
-            // Error variants that cannot be compared directly
+            // Opaque external error kinds compare equal by variant only
             (UreqHttpError(_), UreqHttpError(_)) => true,
             (IoError(_), IoError(_)) => true,
             #[cfg(feature = "jpl-download")]
             (ReqwestError(_), ReqwestError(_)) => true,
+            (Parquet(_), Parquet(_)) => true,
 
             (UnableToCreateBaseDir(a), UnableToCreateBaseDir(b)) => a == b,
             (Utf8PathError(a), Utf8PathError(b)) => a == b,
@@ -317,8 +293,35 @@ impl PartialEq for OutfitError {
             (VelocityCorrectionError(a), VelocityCorrectionError(b)) => a == b,
             (InvalidOrbit(a), InvalidOrbit(b)) => a == b,
             (InvalidConversion(a), InvalidConversion(b)) => a == b,
+            (InvalidFloatValue(a), InvalidFloatValue(b)) => a == b,
+            (RmsComputationFailed(a), RmsComputationFailed(b)) => a == b,
+            (GaussPrelimOrbitFailed(a), GaussPrelimOrbitFailed(b)) => a == b,
+            (
+                NoViableOrbit {
+                    cause: a,
+                    attempts: na,
+                },
+                NoViableOrbit {
+                    cause: b,
+                    attempts: nb,
+                },
+            ) => a == b && na == nb,
+            (
+                NoFeasibleTriplets {
+                    span: a,
+                    n_obs: na,
+                    dt_min: da,
+                    dt_max: ma,
+                },
+                NoFeasibleTriplets {
+                    span: b,
+                    n_obs: nb,
+                    dt_min: db,
+                    dt_max: mb,
+                },
+            ) => a == b && na == nb && da == db && ma == mb,
 
-            // Variantes unitaires
+            // Unit-like variants
             (SingularDirectionMatrix, SingularDirectionMatrix) => true,
             (PolynomialRootFindingFailed, PolynomialRootFindingFailed) => true,
             (SpuriousRootDetected, SpuriousRootDetected) => true,

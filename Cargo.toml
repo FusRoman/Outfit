@@ -88,6 +88,11 @@ name = "gauss_iod_once"
 path = "examples/gauss_iod_once.rs"
 required-features = ["jpl-download"]
 
+[[example]]
+name = "parquet_to_orbit"
+path = "examples/parquet_to_orbit.rs"
+required-features = ["jpl-download"]
+
 [[bench]]
 name = "load_parquet"
 harness = false
