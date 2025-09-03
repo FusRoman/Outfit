@@ -4,6 +4,7 @@ use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet
 use crate::observations::observation_from_batch;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
+use crate::outfit_errors::OutfitError;
 use camino::Utf8Path;
 
 use super::ades_reader::parse_ades;
@@ -116,22 +117,35 @@ pub trait TrajectoryExt {
         observer: Arc<Observer>,
     );
 
-    /// Create a TrajectorySet from a parquet file
+    /// Create a new [`TrajectorySet`] from a Parquet file.
+    ///
+    /// This function reads a Parquet file containing astrometric observations
+    /// and constructs a full [`TrajectorySet`]. Each observation is associated
+    /// with the provided `observer` and assigned constant uncertainties in
+    /// right ascension and declination.
     ///
     /// Arguments
-    /// ---------
-    /// * `parquet`: a path to a parquet file
-    /// * `observer`: the observer
-    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
-    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
-    /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
+    /// -----------------
+    /// * `env_state` – Global environment providing ephemerides, UT1 provider, and observer mapping.
+    /// * `parquet` – Path to the input Parquet file.
+    /// * `observer` – Observer metadata (shared reference, resolved once to a compact id).
+    /// * `error_ra` – 1-σ uncertainty in right ascension \[arcsec\], applied uniformly.
+    /// * `error_dec` – 1-σ uncertainty in declination \[arcsec\], applied uniformly.
+    /// * `batch_size` – Record batch size for Parquet reader; defaults to 2048 if `None`.
     ///
     /// Return
-    /// ------
-    /// * a TrajectorySet containing the observations from the parquet file
+    /// ----------
+    /// * `Ok(TrajectorySet)` – A new set of trajectories populated from the file.
+    /// * `Err(OutfitError)` – If the file cannot be opened, parsed, or contains invalid data.
     ///
-    /// Note: the parquet file should contain the columns "ra", "dec", "jd", and "trajectory_id"
-    /// The "jd" column is converted to MJD using the JDTOMJD constant
+    /// Notes
+    /// ----------
+    /// * The Parquet file must contain the following columns: `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`.
+    /// * The `"jd"` values are assumed to be in TT scale and are converted internally to MJD via [`JDTOMJD`](crate::constants::JDTOMJD).
+    ///
+    /// See also
+    /// ------------
+    /// * [`add_from_parquet`](crate::observations::trajectory_ext::TrajectoryExt::add_from_parquet) – Adds observations from a Parquet file to an existing set.
     fn new_from_parquet(
         env_state: &mut Outfit,
         parquet: &Utf8Path,
@@ -139,24 +153,38 @@ pub trait TrajectoryExt {
         error_ra: ArcSec,
         error_dec: ArcSec,
         batch_size: Option<usize>,
-    ) -> Self;
+    ) -> Result<Self, OutfitError>
+    where
+        Self: Sized;
 
-    /// Add a set of trajectories from a parquet file to a TrajectorySet
+    /// Add observations from a Parquet file to an existing [`TrajectorySet`].
+    ///
+    /// This function appends new observations (grouped by `trajectory_id`)
+    /// to the current set. The same `observer` and astrometric uncertainties
+    /// are applied to all ingested rows.
     ///
     /// Arguments
-    /// ---------
-    /// * `parquet`: a path to a parquet file
-    /// * `observer`: the observer
-    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
-    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
-    /// * `batch_size`: the batch size to use when reading the parquet file, if None, the default batch size is 2048
+    /// -----------------
+    /// * `env_state` – Global environment providing ephemerides, UT1 provider, and observer mapping.
+    /// * `parquet` – Path to the input Parquet file.
+    /// * `observer` – Observer metadata (shared reference, resolved once to a compact id).
+    /// * `error_ra` – 1-σ uncertainty in right ascension \[arcsec\], applied uniformly.
+    /// * `error_dec` – 1-σ uncertainty in declination \[arcsec\], applied uniformly.
+    /// * `batch_size` – Record batch size for Parquet reader; defaults to 2048 if `None`.
     ///
     /// Return
-    /// ------
-    /// * a TrajectorySet containing the new observations is added to the existing TrajectorySet
+    /// ----------
+    /// * `Ok(())` – On successful ingestion, with the internal set updated in place.
+    /// * `Err(OutfitError)` – If the file cannot be opened, parsed, or contains invalid data.
     ///
-    /// Note: the parquet file should contain the columns "ra", "dec", "jd", and "trajectory_id"
-    /// The "jd" column is converted to MJD using the JDTOMJD constant
+    /// Notes
+    /// ----------
+    /// * The Parquet file must contain the following columns: `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`.
+    /// * The `"jd"` values are assumed to be in TT scale and are converted internally to MJD via [`JDTOMJD`](crate::constants::JDTOMJD).
+    ///
+    /// See also
+    /// ------------
+    /// * [`new_from_parquet`](crate::observations::trajectory_ext::TrajectoryExt::new_from_parquet) – Creates a brand new set from a Parquet file.
     fn add_from_parquet(
         &mut self,
         env_state: &mut Outfit,
@@ -165,7 +193,7 @@ pub trait TrajectoryExt {
         error_ra: ArcSec,
         error_dec: ArcSec,
         batch_size: Option<usize>,
-    );
+    ) -> Result<(), OutfitError>;
 
     /// Add a set of trajectories to a TrajectorySet from an ADES file
     ///
@@ -248,10 +276,10 @@ impl TrajectoryExt for TrajectorySet {
         error_ra: ArcSec,
         error_dec: ArcSec,
         batch_size: Option<usize>,
-    ) {
+    ) -> Result<(), OutfitError> {
         parquet_to_trajset(
             self, env_state, parquet, observer, error_ra, error_dec, batch_size,
-        );
+        )
     }
 
     fn new_from_parquet(
@@ -261,12 +289,15 @@ impl TrajectoryExt for TrajectorySet {
         error_ra: ArcSec,
         error_dec: ArcSec,
         batch_size: Option<usize>,
-    ) -> Self {
+    ) -> Result<Self, OutfitError>
+    where
+        Self: Sized,
+    {
         let mut trajs: TrajectorySet = HashMap::default();
         parquet_to_trajset(
             &mut trajs, env_state, parquet, observer, error_ra, error_dec, batch_size,
-        );
-        trajs
+        )?;
+        Ok(trajs)
     }
 
     fn new_from_80col(env_state: &mut Outfit, colfile: &Utf8Path) -> Self {
