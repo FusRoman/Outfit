@@ -193,15 +193,9 @@ impl Observation {
     ) -> Result<Self, OutfitError> {
         // Observation time in TT
         let obs_mjd = Epoch::from_mjd_in_time_scale(time, hifitime::TimeScale::TT);
-        let (geo_obs_pos, _) = state
-            .get_observer_from_uint16(observer)
-            .pvobs(&obs_mjd, state.get_ut1_provider())?;
-
-        let helio_obs_pos = state.get_observer_from_uint16(observer).helio_position(
-            state,
-            &obs_mjd,
-            &geo_obs_pos,
-        )?;
+        let obs = state.get_observer_from_uint16(observer);
+        let (geo_obs_pos, _) = obs.pvobs(&obs_mjd, state.get_ut1_provider())?;
+        let helio_obs_pos = obs.helio_position(state, &obs_mjd, &geo_obs_pos)?;
 
         Ok(Observation {
             observer,
@@ -213,6 +207,62 @@ impl Observation {
             observer_earth_position: geo_obs_pos,
             observer_helio_position: helio_obs_pos,
         })
+    }
+
+    /// Construct an [`Observation`] from precomputed observer positions.
+    ///
+    /// This constructor is a **fast-path alternative** to [`Observation::new`]:
+    /// it skips all ephemeris calls by directly injecting the observer’s
+    /// geocentric and heliocentric positions. This is useful in ingestion
+    /// pipelines (e.g. Parquet readers) where positions can be cached and
+    /// reused for multiple observations sharing the same `(observer, time)`.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `observer` – Packed observer identifier (`u16`).
+    /// * `ra`, `error_ra` – Right ascension in radians and its 1-σ uncertainty (radians).
+    /// * `dec`, `error_dec` – Declination in radians and its 1-σ uncertainty (radians).
+    /// * `time` – Observation epoch in Modified Julian Date (TT scale).
+    /// * `observer_earth_position` – Geocentric observer position vector (AU, equatorial mean J2000).
+    /// * `observer_helio_position` – Heliocentric observer position vector (AU, equatorial mean J2000).
+    ///
+    /// Return
+    /// ----------
+    /// * A fully initialized [`Observation`] where astrometric quantities are set
+    ///   and observer positions are trusted to be externally consistent.
+    ///
+    /// Remarks
+    /// ------------
+    /// * Use this constructor only when you can guarantee that positions were
+    ///   computed consistently with the same environment (`Outfit`, UT1, ephemerides).
+    /// * All getter methods behave identically to those of [`Observation::new`].
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observation::new`] – Computes positions internally (slower, but self-contained).
+    /// * [`Observer::pvobs`] – Routine for geocentric position/velocity.
+    /// * [`Observer::helio_position`] – Routine for heliocentric position.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_positions(
+        observer: u16,
+        ra: Radian,
+        error_ra: Radian,
+        dec: Radian,
+        error_dec: Radian,
+        time: MJD,
+        observer_earth_position: Vector3<f64>,
+        observer_helio_position: Vector3<f64>,
+    ) -> Self {
+        Self {
+            observer,
+            ra,
+            error_ra,
+            dec,
+            error_dec,
+            time,
+            observer_earth_position,
+            observer_helio_position,
+        }
     }
 
     /// Get the observer heliocentric position at the observation epoch.

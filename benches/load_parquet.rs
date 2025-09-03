@@ -26,6 +26,7 @@ fn bench_load_parquet(c: &mut Criterion) {
         Some(1024),
         Some(2048),
         Some(4096),
+        Some(65536),
     ]
     .iter()
     {
