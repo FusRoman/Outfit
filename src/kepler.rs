@@ -234,150 +234,180 @@ impl UniversalKeplerParams {
     }
 }
 
-/// Computes the Stumpff-like auxiliary functions (s0, s1, s2, s3) used in
-/// universal variable formulations of two-body orbital motion.
+/// Compute the generalized Stumpff-like auxiliary functions (s0, s1, s2, s3)
+/// used in the **universal variable formulation** of the two-body problem.
 ///
-/// These functions are a generalization of the classical Stumpff functions.
-/// They appear in semi-analytical formulations such as the **f–g series**
-/// (Everhart & Pitkin) for universal Kepler propagation, and are used to
-/// compute position and velocity vectors from the universal anomaly `ψ`.
+/// These functions extend the classical Stumpff functions `C(z), S(z)` and
+/// appear in semi-analytical formulations such as the **f–g series** for
+/// universal Kepler propagation. They allow one to compute position and
+/// velocity vectors from the *universal anomaly* `ψ` across all orbit types
+/// (elliptic, parabolic, hyperbolic).
+///
+/// Scientific background
+/// ---------------------
+/// Let α = 2E (twice the specific orbital energy). Define β = α ψ².
+/// The generalized series are:
+///
+/// * s0(ψ, α) ≈ 1 + α Σ (cosine-like),
+/// * s1(ψ, α) ≈ ψ + α Σ (sine-like),
+/// * s2 = (s0 − 1) / α,
+/// * s3 = (s1 − ψ) / α.
+///
+/// They enter the f–g Lagrange coefficients:
+///
+/// ```text
+/// f = 1 − (μ/r0) · s2
+/// g = Δt − μ · s3
+/// ```
 ///
 /// Algorithm
 /// ---------
-/// * For small `|α ψ²|`, `s0`, `s1`, `s2`, `s3` are computed directly
-///   by power series expansion.
-/// * For large `|α ψ²|`, the function:
-///   1. Reduces `ψ` by repeatedly halving it until `|α ψ²|` becomes small,
-///   2. Computes `s0` and `s1` from the series at the reduced value,
-///   3. Applies duplication formulas to recover `s0` and `s1` for the full `ψ`,
-///   4. Reconstructs `s2` and `s3` using:
-///      * `s2 = (s0 - 1)/α`
-///      * `s3 = (s1 - ψ)/α`
+/// Two regimes are used depending on the size of `β = α ψ²`:
 ///
-/// This approach avoids divergence and preserves numerical stability for
-/// large anomalies, at the cost of some loss of precision for `s2` and `s3`.
+/// **CASE 1 – Small |β| (rapidly convergent):**
+///   * Expand s2 and s3 by power series in ψ.
+///   * Reconstruct s0 and s1 via defining relations.
+///   * This is efficient and stable for |β| < BETACONTR (≈ 100).
+///
+/// **CASE 2 – Large |β| (poor convergence):**
+///   1. Halve ψ until |β| is small enough (β → β/4 per halving).
+///   2. Evaluate s0 and s1 by series expansion at the reduced ψ.
+///   3. Apply *duplication formulas* recursively to scale back up:
+///      - s0(2ψ) = 2 s0(ψ)² − 1   (analogue of cos(2x))
+///      - s1(2ψ) = 2 s0(ψ)·s1(ψ)  (analogue of sin(2x))
+///   4. Recover s2 and s3 from their definitions.
+///   * This ensures stability but s2, s3 may lose precision due to subtraction.
 ///
 /// Arguments
 /// ---------
-/// * `psi` – Universal anomaly (integration parameter).
-/// * `alpha` – Two times the specific orbital energy (2 * E). It can be
-///   negative (elliptic), zero (parabolic), or positive (hyperbolic).
+/// * `psi`   – Universal anomaly (integration parameter).
+/// * `alpha` – Twice the specific orbital energy (2·E). Negative for elliptic,
+///   zero for parabolic, positive for hyperbolic motion.
 ///
-/// Returns
-/// --------
-/// * `(s0, s1, s2, s3)` – Tuple of four Stumpff-like functions:
-///   - `s0 ≈ 1 + α·Σ`  — generalized cosine-like series,
-///   - `s1 ≈ ψ + α·Σ`  — generalized sine-like series,
-///   - `s2 = (s0 - 1)/α`,
-///   - `s3 = (s1 - ψ)/α`.
-///
-/// These functions are used to evaluate the Lagrange f and g coefficients:
-///
-/// ```text
-/// f = 1 - (μ/r0) s2
-/// g = Δt - μ s3
-/// ```
+/// Return
+/// ----------
+/// * `(s0, s1, s2, s3)` – Tuple of the four auxiliary functions.
+///   - `s0` : cosine-like series,
+///   - `s1` : sine-like series,
+///   - `s2` : (s0 − 1)/α,
+///   - `s3` : (s1 − ψ)/α.
 ///
 /// Remarks
-/// --------
-/// * For very large values of `α ψ²`, `s2` and `s3` may lose some precision
-///   because they are reconstructed from differences of large numbers.
+/// ----------
+/// * For parabolic motion (α = 0), the limiting form should be used (not handled here).
+/// * For very large `|α ψ²|`, reconstruction of s2, s3 involves subtracting
+///   large numbers and may lose accuracy.
 ///
 /// References
 /// ----------
-/// * Everhart, E. & Pitkin, E.T., *American Journal of Physics*, 51(8), 712–717 (1983)
-/// * Goodyear, W.H., *Astronomical Journal*, 70, 189–192 (1965)
+/// * Everhart, E. & Pitkin, E.T., *American Journal of Physics*, 51(8), 712–717 (1983).
+/// * Goodyear, W.H., *Astronomical Journal*, 70, 189–192 (1965).
+/// * Battin, R.H., *An Introduction to the Mathematics and Methods of Astrodynamics*.
 ///
 /// # See also
-/// * [`velocity_correction`] – Uses these functions to compute position and velocity (f–g series).
-/// * [`solve_kepuni`] – Solves universal Kepler's equation using these functions.
-/// * [Battin, *An Introduction to the Mathematics and Methods of Astrodynamics*]
+/// * [`velocity_correction`] – Uses these functions in the f–g propagation.
+/// * [`solve_kepuni`] – Universal Kepler solver relying on these functions.
+#[inline(always)]
 pub fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
-    // Maximum number of terms for the power series and half-angle iterations.
-    const JMAX: usize = 70;
-    const HALFMAX: usize = 30;
-    const BETACONTR: f64 = 100.0;
+    // =========================================================================
+    // Configuration parameters
+    // =========================================================================
+    const JMAX: usize = 70; // Max series terms (guard against slow convergence)
+    const HALFMAX: usize = 30; // Max halving iterations (duplication safety)
+    const BETACONTR: f64 = 100.0; // Threshold between "small" and "large" β
 
-    // Machine precision parameters:
-    // - convergence_tol : term below this is negligible
-    // - overflow_limit  : stop if a term becomes numerically unstable
+    // Machine-related thresholds
     let eps = f64::EPSILON;
-    let convergence_tol = 100.0 * eps;
-    let overflow_limit = 1.0 / eps;
-
-    // Beta is the main expansion parameter: β = α * ψ²
-    let beta = alpha * psi.powi(2);
-
-    // Helper closure for direct computation of s2 and s3 by series expansion.
-    // It builds the power series for:
-    //   s2 = ψ²/2 + β ψ⁴/(3*4) + ...
-    //   s3 = ψ³/6 + β ψ⁵/(4*5) + ...
-    let compute_s2_s3 = |beta: f64, psi: f64| -> (f64, f64) {
-        let mut term_s2 = psi.powi(2) / 2.0;
-        let mut term_s3 = term_s2 * psi / 3.0;
-        let mut s2 = term_s2;
-        let mut s3 = term_s3;
-
-        // Add successive terms to the series for s2
-        for j in 1..=JMAX {
-            term_s2 *= beta / ((2.0 * j as f64 + 1.0) * (2.0 * j as f64 + 2.0));
-            s2 += term_s2;
-            // Stop when terms are very small or too large
-            if term_s2.abs() < convergence_tol || term_s2.abs() > overflow_limit {
-                break;
-            }
-        }
-
-        // Add successive terms to the series for s3
-        for j in 1..=JMAX {
-            term_s3 *= beta / ((2.0 * j as f64 + 2.0) * (2.0 * j as f64 + 3.0));
-            s3 += term_s3;
-            if term_s3.abs() < convergence_tol || term_s3.abs() > overflow_limit {
-                break;
-            }
-        }
-
-        (s2, s3)
-    };
+    let convergence_tol = 100.0 * eps; // Below this, terms are negligible
+    let overflow_limit = 1.0 / eps; // Prevent runaway if terms blow up
 
     // =========================================================================
-    // CASE 1: direct series expansion
-    // When |β| is small enough, the series converge rapidly and no reduction is needed.
+    // Fast path: exactly ψ = 0 → trivial values
+    // =========================================================================
+    if psi == 0.0 {
+        return (1.0, 0.0, 0.0, 0.0);
+    }
+
+    // Core expansion parameter: β = α ψ²
+    let psi2 = psi * psi;
+    let beta = alpha * psi2;
+
+    // =========================================================================
+    // CASE 1: Direct series expansion (|β| small)
     // =========================================================================
     if beta.abs() < BETACONTR {
-        let (s2, s3) = compute_s2_s3(beta, psi);
+        // Series initialization:
+        // s2 = ψ²/2,  s3 = ψ³/6
+        let mut s2 = 0.5 * psi2;
+        let mut term2 = s2;
+
+        let mut s3 = (s2 * psi) / 3.0;
+        let mut term3 = s3;
+
+        // Denominators for recurrence evolve as:
+        //   s2: (3·4), (5·6), ...
+        //   s3: (4·5), (6·7), ...
+        let mut d2a = 3.0;
+        let mut d2b = 4.0;
+        let mut d3a = 4.0;
+        let mut d3b = 5.0;
+
+        for _ in 1..=JMAX {
+            // Next correction term for s2
+            term2 *= beta / (d2a * d2b);
+            s2 += term2;
+
+            // Next correction term for s3
+            term3 *= beta / (d3a * d3b);
+            s3 += term3;
+
+            // Early exit if converged or diverging
+            let small2 = term2.abs() < convergence_tol;
+            let small3 = term3.abs() < convergence_tol;
+            let big2 = term2.abs() > overflow_limit;
+            let big3 = term3.abs() > overflow_limit;
+
+            if (small2 && small3) || big2 || big3 {
+                break;
+            }
+
+            // Update denominators (+2 at each step)
+            d2a += 2.0;
+            d2b += 2.0;
+            d3a += 2.0;
+            d3b += 2.0;
+        }
+
+        // Recover s1 and s0 via their defining relations
         let s1 = psi + alpha * s3;
         let s0 = 1.0 + alpha * s2;
         return (s0, s1, s2, s3);
     }
 
     // =========================================================================
-    // CASE 2: large |β|
-    // To ensure convergence, we repeatedly halve ψ until β becomes small,
-    // compute s0 and s1 at the reduced value, then use duplication formulas
-    // to recover the functions at the original ψ.
+    // CASE 2: Large |β| → reduce ψ until convergence is safe
     // =========================================================================
+    let mut psi_r = psi;
+    let mut beta_r = beta;
+    let mut nhalf = 0usize;
 
-    // 1. Reduce psi by repeated halving
-    let mut psi_reduced = psi;
-    let mut nhalf = 0;
-    for _ in 0..HALFMAX {
-        psi_reduced *= 0.5;
+    // Step 1. Halve ψ until |β| is small enough or max halving reached
+    while beta_r.abs() >= BETACONTR && nhalf < HALFMAX {
+        psi_r *= 0.5;
+        beta_r *= 0.25; // β ∝ ψ² → halving ψ divides β by 4
         nhalf += 1;
-        let beta_half = alpha * psi_reduced.powi(2);
-        if beta_half.abs() < BETACONTR {
-            break;
-        }
     }
 
-    // 2. Compute s0 and s1 at the reduced psi using power series
-    let mut term0 = 1.0; // first term for s0
-    let mut term1 = psi_reduced; // first term for s1
+    // Step 2. Series expansion for s0 and s1 at reduced ψ
     let mut s0 = 1.0;
-    let mut s1 = psi_reduced;
+    let mut s1 = psi_r;
+
+    // Recurrence terms for series
+    let mut term0 = 1.0; // first nontrivial term for s0 is β_r/(1·2)
+    let mut term1 = psi_r; // first nontrivial term for s1 is ψ_r · β_r/(2·3)
 
     for j in 1..=JMAX {
-        term0 *= beta / ((2 * j - 1) as f64 * (2 * j) as f64);
+        term0 *= beta_r / ((2 * j - 1) as f64 * (2 * j) as f64);
         s0 += term0;
         if term0.abs() < convergence_tol || term0.abs() > overflow_limit {
             break;
@@ -385,30 +415,22 @@ pub fn s_funct(psi: f64, alpha: f64) -> (f64, f64, f64, f64) {
     }
 
     for j in 1..=JMAX {
-        term1 *= beta / ((2 * j) as f64 * (2 * j + 1) as f64);
+        term1 *= beta_r / ((2 * j) as f64 * (2 * j + 1) as f64);
         s1 += term1;
         if term1.abs() < convergence_tol || term1.abs() > overflow_limit {
             break;
         }
     }
 
-    // 3. Apply duplication formulas to scale s0 and s1 back to the original psi.
-    // These formulas correspond to:
-    //   cos(2x) = 2 cos^2(x) - 1
-    //   sin(2x) = 2 cos(x) sin(x)
-    // generalized to the universal variables.
+    // Step 3. Duplication formulas to scale back to the original ψ
     for _ in 0..nhalf {
-        let new_s0 = 2.0 * s0.powi(2) - 1.0;
-        let new_s1 = 2.0 * s0 * s1;
-        s0 = new_s0;
-        s1 = new_s1;
+        let c = s0;
+        let s = s1;
+        s0 = 2.0 * c * c - 1.0; // analogue of cos(2x)
+        s1 = 2.0 * c * s; // analogue of sin(2x)
     }
 
-    // 4. Recompute s2 and s3 from s0 and s1 using their defining relations:
-    //    s2 = (s0 - 1) / α
-    //    s3 = (s1 - ψ) / α
-    // These relations are numerically less stable for large β, but they are
-    // the standard method used in OrbFit (and the Fortran reference code).
+    // Step 4. Reconstruct s2 and s3 (less stable numerically)
     let s3 = (s1 - psi) / alpha;
     let s2 = (s0 - 1.0) / alpha;
 
@@ -671,119 +693,165 @@ pub fn prelim_hyperbolic(params: &UniversalKeplerParams, contr: f64, max_iter: u
     (f - f0) / params.alpha.sqrt()
 }
 
-/// Solve the universal Kepler equation using a safeguarded Newton iteration.
+/// Solve the **universal Kepler equation** with a safeguarded Newton iteration.
 ///
-/// This routine finds the universal anomaly `ψ` such that:
+/// Goal
+/// -----
+/// Find the universal anomaly `ψ` such that the residual
 ///
 /// ```text
-/// f(ψ) = r0*s1(ψ) + sig0*s2(ψ) + mu*s3(ψ) - dt = 0
+/// f(ψ) = r0·s1(ψ, α) + sig0·s2(ψ, α) + mu·s3(ψ, α) − dt = 0
 /// ```
 ///
-/// where `(s0, s1, s2, s3)` are the Stumpff-based functions for the orbital
-/// energy parameter `alpha`.  
+/// vanishes, where `(s0, s1, s2, s3)` are the Stumpff-like auxiliary functions
+/// (see [`s_funct`]) for the energy parameter `α = 2E`.
 ///
-/// ### Supported cases
-/// - **Elliptic orbits** (`alpha < 0`)
-/// - **Hyperbolic orbits** (`alpha > 0`)
+/// Scientific background
+/// ---------------------
+/// The **universal-variable formulation** unifies elliptic and hyperbolic motion
+/// (and the parabolic limit) in a single equation in the universal anomaly `ψ`.
+/// The Stumpff-like functions `(s0..s3)` appear in the **Lagrange f–g series**,
+/// enabling position/velocity propagation across conic regimes by combining
+/// geometry (`r0`, `sig0`) with dynamics (`mu`, `α`) and the time of flight `dt`.
 ///
-/// Parabolic motion (`alpha = 0`) is rejected and yields `None`.
+/// Supported regimes
+/// -----------------
+/// * **Elliptic** (`α < 0`) and **Hyperbolic** (`α > 0`) motions.
+/// * **Parabolic** (`α = 0`) is **not** handled here and returns `None`.
 ///
-/// ### Numerical strategy
-/// - Initial guess for `ψ` from [`prelim_kepuni`] unless an explicit
-///   `psi_guess` is provided (warm start).
-/// - Newton–Raphson iteration, with:
-///   * **Derivative guard** when `f′` is too small,
-///   * **Step size limiter** to prevent divergence for hyperbolic orbits,
-///   * **Sign-change damping** to avoid oscillations across zero.
-/// - Convergence checks based on:
-///   * **Equation residual** (`|f| < tol_f`),  
-///   * **Step size** (`|Δψ| < tol_step` absolute or relative).
+/// Numerical strategy
+/// ------------------
+/// * Initial guess:
+///   * Use [`prelim_kepuni`] unless an explicit `psi_guess` is provided (warm start).
+/// * Newton–Raphson with safeguards:
+///   * **Derivative guard**: if `f′(ψ)` is tiny/non-finite, shrink `ψ` (back-off).
+///   * **Step limiter**: cap `|Δψ|` by a multiple of `1 + |ψ|` (stability on hyperbolas).
+///   * **Sign-change damping**: if the update would flip `sign(ψ)`, halve `ψ` instead
+///     to avoid zero-crossing oscillations.
+/// * Convergence checks:
+///   * **Residual criterion**: `|f(ψ)| ≤ tol_f` with a scale-aware tolerance
+///     `tol_f = atol + rtol·|dt|` (robust for both small and large times of flight).
+///   * **Step criterion**: `|Δψ| ≤ tol_step` (absolute) or `≤ tol_step·(1 + |ψ|)` (relative).
 ///
 /// Arguments
-/// ---------
-/// * `params` – Packed orbital parameters for the universal formulation.
-/// * `convergency` – Optional absolute tolerance on `ψ` (default: `100 × ε`).
-/// * `psi_guess` – Optional warm-start for `ψ` (skips [`prelim_kepuni`] if set).
+/// -----------------
+/// * `params` – Packed parameters for the universal formulation:
+///   - `r0` (initial radius), `sig0` (radial-velocity proxy), `mu` (GM),
+///     `alpha = 2E`, and `dt` (time of flight).
+/// * `convergency` – Optional absolute tolerance on `ψ` (default: `100·ε`).
+/// * `psi_guess` – Optional initial guess for `ψ` (skips [`prelim_kepuni`] if provided).
 ///
-/// Returns
-/// -------
-/// * `Some((psi, s0, s1, s2, s3))` if the solver converged, with `s⋅`
-///   consistent with the final `ψ`.
-/// * `None` if the solver fails to converge within the iteration budget,
-///   or if the orbit is parabolic (`alpha = 0`).
+/// Return
+/// ----------
+/// * `Some((psi, s0, s1, s2, s3))` on convergence with `s⋅` consistent with the final `ψ`.
+/// * `None` on failure to converge within the iteration budget or for `α = 0` (parabolic).
+///
+/// Notes
+/// ------
+/// * The step limiter `|Δψ| ≤ k·(1 + |ψ|)` with `k = 2` curbs runaway updates,
+///   especially useful in **hyperbolic** cases where `ψ` can grow rapidly.
+/// * The residual tolerance mixes absolute and relative components to keep
+///   sensitivity proportional to the scale of `dt`.
 ///
 /// See also
-/// --------
-/// * [`prelim_kepuni`] – Provides an initial guess for `ψ`.
-/// * [`s_funct`] – Computes the Stumpff functions `(s0..s3)`.
-/// * [`UniversalKeplerParams`] – Parameter container for the universal formulation.
+/// ------------
+/// * [`s_funct`] – Stumpff-like auxiliary functions used to evaluate `f(ψ)` and `f′(ψ)`.
+/// * [`prelim_kepuni`] – Heuristic initial guess for the universal anomaly.
+/// * [`UniversalKeplerParams`] – Input container for the universal-variable formulation.
+#[inline(always)]
 pub fn solve_kepuni_with_guess(
     params: &UniversalKeplerParams,
     convergency: Option<f64>,
     psi_guess: Option<f64>,
 ) -> Option<(f64, f64, f64, f64, f64)> {
-    // --- Configuration
+    // =========================================================================
+    // Configuration
+    // =========================================================================
     const MAX_ITER: usize = 50;
 
     // Absolute step tolerance (controls convergence on Δψ).
     let tol_step = convergency.unwrap_or(100.0 * f64::EPSILON);
 
-    // Scale-aware function tolerance for residual |f(ψ)|
-    // Combines absolute and relative terms to stay robust for both small and large dt.
-    let atol_f = 10.0 * f64::EPSILON;
-    let rtol_f = 10.0 * f64::EPSILON;
-    let tol_f = atol_f + rtol_f * params.dt.abs();
+    // Scale-aware residual tolerance for |f(ψ)|:
+    // tol_f = atol + rtol * |dt|
+    // This keeps the criterion meaningful for both small and large flight times.
+    let tol_f = {
+        let eps10 = 10.0 * f64::EPSILON;
+        eps10 + eps10 * params.dt.abs()
+    };
 
-    // Maximum allowed step length (relative to current |ψ|)
-    // Prevents Newton from taking excessively large jumps in hyperbolic cases.
+    // Maximum allowed step length relative to the current |ψ|
+    // Prevents overshooting, especially on hyperbolic trajectories.
     let max_rel_step = 2.0;
 
-    // --- Orbit type gate
+    // =========================================================================
+    // Orbit-type gate
+    // =========================================================================
     match params.orbit_type() {
-        OrbitType::Parabolic => return None, // parabolic motion not supported
+        OrbitType::Parabolic => return None, // Parabolic motion not supported here
         OrbitType::Elliptic | OrbitType::Hyperbolic => {}
     }
 
-    // --- Initial guess for ψ
+    // Shorthands (tighten inner loop by avoiding repeated field loads)
+    let r0 = params.r0;
+    let sig0 = params.sig0;
+    let mu = params.mu;
+    let a = params.alpha;
+    let dt = params.dt;
+
+    // =========================================================================
+    // Initial guess for ψ: warm start or heuristic
+    // =========================================================================
     let mut psi = if let Some(g) = psi_guess {
         g
     } else {
+        // May return None if the guess cannot be built consistently.
         prelim_kepuni(params, tol_step)?
     };
 
-    // --- Iteration loop
+    // =========================================================================
+    // Newton iteration with safeguards
+    // =========================================================================
     for _ in 0..MAX_ITER {
+        // Defensive: if ψ became non-finite (rare in practice), back off and continue.
+        if !psi.is_finite() {
+            psi = 0.5; // arbitrary finite reset that lets the iteration recover
+        }
+
         // Stumpff functions at current ψ.
-        // Derivatives follow a chain: d/dψ s1 = s0, d/dψ s2 = s1, d/dψ s3 = s2.
-        let (s0, s1, s2, s3) = s_funct(psi, params.alpha);
+        // Derivative chain: (d/dψ) s1 = s0, (d/dψ) s2 = s1, (d/dψ) s3 = s2.
+        let (s0, s1, s2, s3) = s_funct(psi, a);
 
-        // Residual f(ψ) and its derivative f′(ψ)
-        let f = params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt;
-        let fp = params.r0 * s0 + params.sig0 * s1 + params.mu * s2;
+        // Residual and derivative:
+        // f(ψ)  = r0*s1 + sig0*s2 + mu*s3 - dt
+        // f'(ψ) = r0*s0 + sig0*s1 + mu*s2
+        let f = (((r0 * s1) + (sig0 * s2)) + (mu * s3)) - dt;
+        let fp = ((r0 * s0) + (sig0 * s1)) + (mu * s2);
 
-        // --- Convergence test on residual value
+        // --- Convergence on residual
         if f.abs() <= tol_f {
             return Some((psi, s0, s1, s2, s3));
         }
 
         // --- Derivative safeguard
-        // If f′ is too small, Newton would diverge. Fall back by shrinking ψ.
+        // If f′ is too small or non-finite, a Newton step would be unreliable → shrink ψ.
         if !fp.is_finite() || fp.abs() < 10.0 * f64::EPSILON {
             psi *= 0.5;
             continue;
         }
 
-        // --- Newton step
+        // --- Newton step (with step limiting)
         let mut dpsi = -f / fp;
 
-        // Step limiting to prevent runaway updates
+        // Limit the step magnitude: |Δψ| ≤ max_rel_step * (1 + |ψ|)
         let max_step = max_rel_step * (1.0 + psi.abs());
         if dpsi.abs() > max_step {
             dpsi = dpsi.signum() * max_step;
         }
 
         // --- Sign-change damping
-        // If the update would flip the sign of ψ, reduce oscillations by halving ψ instead.
+        // If the update would cross zero (flip the sign of ψ), halve ψ instead
+        // to avoid oscillations around 0 (common instability pattern).
         let new_psi = psi + dpsi;
         psi = if new_psi * psi < 0.0 {
             0.5 * psi
@@ -791,17 +859,22 @@ pub fn solve_kepuni_with_guess(
             new_psi
         };
 
-        // --- Convergence test on step size
+        // --- Convergence on step size
+        // Absolute criterion: when |Δψ| is already tiny, reuse current (s⋅) to avoid one extra call.
         let small_abs = dpsi.abs() <= tol_step;
+        if small_abs {
+            return Some((psi, s0, s1, s2, s3));
+        }
+
+        // Relative-only success path: ensure strict consistency by recomputing (s⋅) at the final ψ.
         let small_rel = dpsi.abs() <= tol_step * (1.0 + psi.abs());
-        if small_abs || small_rel {
-            // Recompute s⋅ for the final ψ to return consistent values
-            let (s0f, s1f, s2f, s3f) = s_funct(psi, params.alpha);
+        if small_rel {
+            let (s0f, s1f, s2f, s3f) = s_funct(psi, a);
             return Some((psi, s0f, s1f, s2f, s3f));
         }
     }
 
-    // Iteration budget exceeded without convergence
+    // No convergence within MAX_ITER
     None
 }
 
