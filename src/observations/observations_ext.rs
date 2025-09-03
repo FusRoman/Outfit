@@ -766,7 +766,6 @@ impl ObservationIOD for Observations {
         self.apply_batch_rms_correction(error_model, params.gap_max);
 
         // --- Stage 2: Enumerate candidate triplets under temporal constraints.
-        // Prefer exposing this as an iterator in the future to enable early returns.
         let triplets = self.compute_triplets(
             params.dt_min,
             params.dt_max_triplet,
@@ -803,12 +802,9 @@ impl ObservationIOD for Observations {
                 };
 
                 // 4.b) Convert to the element set required by the scorer.
-                // If your scorer can consume the native representation, avoid this conversion.
                 let equinoctial_elements = gauss_res.get_orbit().to_equinoctial()?;
 
                 // 4.c) Score orbit vs. full observation set (RMS residual).
-                // TIP: pass `best_rms` as a pruning threshold inside `rms_orbit_error`
-                // to early-exit accumulation when the partial RMS is already worse.
                 let rms = match self.rms_orbit_error(
                     state,
                     &realization,
