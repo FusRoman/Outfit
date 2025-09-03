@@ -84,7 +84,7 @@
 //! - [`IODParams`] – Parameters controlling IOD (triplet constraints, noise realizations).
 use itertools::Itertools;
 use nalgebra::Vector3;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ops::ControlFlow};
 
 use crate::{
     constants::{Observations, Radian},
@@ -247,41 +247,62 @@ pub trait ObservationsExt {
         dtmax: f64,
     ) -> Result<(usize, usize), OutfitError>;
 
-    /// Compute the RMS of normalized astrometric residuals over a selected interval of observations.
+    /// Evaluate the orbit quality by computing the RMS of normalized astrometric residuals
+    /// over a time window centered on a Gauss triplet.
     ///
-    /// This function evaluates the quality of a preliminary orbit by computing the root-mean-square (RMS)
-    /// of normalized squared astrometric residuals (in RA and DEC) across a subset of observations selected
-    /// from a `GaussObs` triplet. The subset is determined using a time interval expansion (`extf`) and a
-    /// maximum allowed duration (`dtmax`), centered on the triplet.
+    /// Scientific context
+    /// -------------------
+    /// This function measures how well a preliminary orbit reproduces the observed
+    /// astrometry (RA, DEC). It computes the **root-mean-square (RMS)** of the
+    /// normalized residuals between predicted and observed positions, aggregated over
+    /// a set of observations surrounding a Gauss triplet.
     ///
-    /// # Arguments
-    /// ---------------
-    /// * `state` - The current global state providing ephemerides, Earth orientation data, and time conversion.
-    /// * `triplets` - A set of three observations used to generate the initial orbit (Gauss method).
-    /// * `orbit_element` - The keplerian orbital elements to be tested against the observation arc.
-    /// * `extf` - A fractional extension factor used to expand the time interval around the triplet center.
-    /// * `dtmax` - A maximum time window (in days) allowed for including additional observations.
+    /// Interval selection
+    /// -------------------
+    /// The observation arc is defined by:
+    /// * `extf` – fractional extension factor applied around the triplet center,
+    /// * `dtmax` – absolute maximum time span (days) allowed for the arc.
     ///
-    /// # Returns
+    /// The effective interval is determined by
+    /// [`select_rms_interval`](Self::select_rms_interval), which returns the first
+    /// and last indices of the observations to include.
+    ///
+    /// Computation
+    /// ------------
+    /// * Each observation contributes a squared normalized residual
+    ///   from [`Observation::ephemeris_error`](crate::observations::Observation::ephemeris_error).
+    /// * The final RMS is
+    ///
+    /// ```text
+    /// RMS = √[ (1 / (2N)) · Σᵢ (ΔRAᵢ² + ΔDECᵢ²) ]
+    /// ```
+    ///
+    /// where `N` is the number of observations in the selected interval.
+    ///
+    /// Pruning mode
+    /// ------------
+    /// If `prune_if_rms_ge` is set:
+    /// * The summation stops early once the partial RMS reaches the threshold,
+    ///   returning the pruning value directly.
+    /// * If `prune_if_rms_ge = ∞`, no early exit occurs (equivalent to no pruning).
+    ///
+    /// Arguments
     /// ----------
-    /// * `Result<f64, OutfitError>` - The RMS (root-mean-square) of the normalized residuals over the selected interval, in radians.
+    /// * `state` – Global context providing ephemerides, Earth orientation, and time conversion.
+    /// * `triplets` – The Gauss triplet that defined the preliminary orbit.
+    /// * `orbit_element` – The orbit (in equinoctial elements) to be tested against the arc.
+    /// * `extf` – Fractional time extension of the interval around the triplet.
+    /// * `dtmax` – Maximum arc duration (days).
+    /// * `prune_if_rms_ge` – Optional RMS cutoff for early termination (see *Pruning mode*).
     ///
-    /// # Computation Details
-    /// ----------
-    /// - The residuals per observation are computed using [`Observation::ephemeris_error`](crate::observations::Observation::ephemeris_error), returning a weighted sum of squares (normalized).
-    /// - The RMS is computed as:
-    ///   RMS = √[ (1 / 2N) × Σᵢ (RAᵢ² + DECᵢ²) ]
-    ///   where N is the number of observations in the selected interval.
+    /// Return
+    /// -------
+    /// * `Ok(rms)` – RMS of the normalized astrometric residuals (radians).
+    /// * `Err(OutfitError)` – If interval selection fails or propagation/ephemeris lookup fails.
     ///
-    /// # Errors
-    /// ----------
-    /// Returns `OutfitError` if:
-    /// - The interval selection fails (e.g., no valid observations in time range),
-    /// - Orbit propagation or ephemeris lookup fails for any observation.
-    ///
-    /// # Units
-    /// ----------
-    /// - The final RMS is expressed in **radians**.
+    /// Units
+    /// -------
+    /// * The returned RMS is dimensionless but expressed in **radians**.
     fn rms_orbit_error(
         &self,
         state: &Outfit,
@@ -289,6 +310,7 @@ pub trait ObservationsExt {
         orbit_element: &EquinoctialElements,
         extf: f64,
         dtmax: f64,
+        prune_if_rms_ge: Option<f64>,
     ) -> Result<f64, OutfitError>;
 
     /// Apply RMS correction based on temporally clustered batches of observations.
@@ -599,15 +621,74 @@ impl ObservationsExt for Observations {
         orbit_element: &EquinoctialElements,
         extf: f64,
         dtmax: f64,
+        prune_if_rms_ge: Option<f64>,
     ) -> Result<f64, OutfitError> {
+        // Select the time interval [start_obs_rms, end_obs_rms] over which the RMS
+        // error is evaluated. The interval depends on the triplet and on external
+        // filtering parameters (extf, dtmax).
         let (start_obs_rms, end_obs_rms) = self.select_rms_interval(triplets, extf, dtmax)?;
 
-        let rms_all_obs = self[start_obs_rms..=end_obs_rms]
+        // Number of observations contributing to the RMS
+        let n_obs = (end_obs_rms - start_obs_rms + 1) as f64;
+
+        // Denominator of the RMS formula: here weighted by 2.0 for consistency
+        // with the convention used elsewhere in the code.
+        let denom = 2.0 * n_obs;
+
+        // =========================================================================
+        // Case 1: No pruning → behave like the "classical" RMS definition
+        // =========================================================================
+        if prune_if_rms_ge.is_none() {
+            // Accumulate the squared ephemeris errors for each observation
+            let sum = self[start_obs_rms..=end_obs_rms]
+                .iter()
+                .map(|obs| obs.ephemeris_error(state, orbit_element))
+                // try_fold propagates errors from ephemeris_error while summing
+                .try_fold(0.0, |acc, term| term.map(|v| acc + v))?;
+
+            // Final RMS = sqrt( sum / denom )
+            return Ok((sum / denom).sqrt());
+        }
+
+        // =========================================================================
+        // Case 2: Pruning enabled → early stop if RMS exceeds a threshold
+        // =========================================================================
+        let prune = prune_if_rms_ge.unwrap();
+
+        // Convert the RMS cutoff into a sum cutoff:
+        // RMS² = sum / denom  →  stop if sum ≥ (prune² * denom).
+        let sum_cutoff = if prune.is_finite() {
+            prune * prune * denom
+        } else {
+            f64::INFINITY // "no real cutoff" if prune = ∞
+        };
+
+        // Iterate over observations and accumulate squared errors.
+        // We use ControlFlow to allow early exit:
+        //   - Continue(sum): keep summing,
+        //   - Break(value):  stop early and return the pruning threshold.
+        let folded: ControlFlow<f64, f64> = self[start_obs_rms..=end_obs_rms]
             .iter()
             .map(|obs| obs.ephemeris_error(state, orbit_element))
-            .try_fold(0.0, |acc, rms_obs| rms_obs.map(|rms| acc + rms))?;
+            .try_fold(0.0, |acc, term| match term {
+                Ok(v) => {
+                    let new_sum = acc + v;
+                    if new_sum >= sum_cutoff {
+                        // Early exit: threshold reached, return directly
+                        ControlFlow::Break(prune)
+                    } else {
+                        ControlFlow::Continue(new_sum)
+                    }
+                }
+                // In case of error in ephemeris_error, also exit with pruning value.
+                Err(_) => ControlFlow::Break(prune),
+            });
 
-        Ok((rms_all_obs / (2. * (end_obs_rms - start_obs_rms + 1) as f64)).sqrt())
+        // Final RMS depending on whether we exited early or not
+        match folded {
+            ControlFlow::Continue(sum) => Ok((sum / denom).sqrt()),
+            ControlFlow::Break(rms) => Ok(rms),
+        }
     }
 
     fn apply_batch_rms_correction(&mut self, error_model: &ErrorModel, gap_max: f64) {
@@ -734,6 +815,7 @@ impl ObservationIOD for Observations {
                     &equinoctial_elements,
                     params.extf,
                     params.dtmax,
+                    Some(best_rms),
                 ) {
                     Ok(v) => v,
                     Err(_) => {
@@ -852,7 +934,14 @@ mod test_obs_ext {
         };
 
         let rms = traj
-            .rms_orbit_error(&OUTFIT_HORIZON_TEST.0, &triplets, &kepler.into(), -1.0, 30.)
+            .rms_orbit_error(
+                &OUTFIT_HORIZON_TEST.0,
+                &triplets,
+                &kepler.into(),
+                -1.0,
+                30.,
+                None,
+            )
             .unwrap();
 
         assert_eq!(rms, 68.88650730830162);

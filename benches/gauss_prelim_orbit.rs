@@ -116,8 +116,8 @@ fn bench_prelim_orbit(c: &mut Criterion) {
         )
     });
 
-    // 3) Noisy batch 100: generate 100 noisy realizations then run prelim_orbit
-    group.bench_function("noisy_batch_100", |b| {
+    // 3) Noisy: generate one noisy realization then run prelim_orbit
+    group.bench_function("noisy_single_call", |b| {
         b.iter_batched(
             || gauss.clone(),
             |g| {
@@ -127,7 +127,7 @@ fn bench_prelim_orbit(c: &mut Criterion) {
                 let noisy = g.generate_noisy_realizations(
                     &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
                     &(Vector3::zeros().add_scalar(1.0) * sigma_rad),
-                    sigma_rad as usize,
+                    100,
                     1.0,
                     &mut rng,
                 );
