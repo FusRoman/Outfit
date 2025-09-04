@@ -97,6 +97,7 @@
 //! * [`IODParams`] – Tuning for triplet generation and correction.
 //! * [`GaussResult`] – Preliminary vs. corrected orbit representations.
 //! * [`Outfit`] – Ephemerides, reference frames, and observer registry.
+use std::fmt;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
@@ -114,6 +115,13 @@ use rand::Rng;
 use super::ades_reader::parse_ades;
 use super::extract_80col;
 use super::parquet_reader::parquet_to_trajset;
+
+#[cfg(feature = "progress")]
+use crate::observations::progress_bar::IterTimer;
+#[cfg(feature = "progress")]
+use indicatif::{ProgressBar, ProgressStyle};
+#[cfg(feature = "progress")]
+use std::time::Duration;
 
 /// Full batch orbit determination results.
 ///
@@ -135,6 +143,82 @@ use super::parquet_reader::parquet_to_trajset;
 /// ```
 pub type FullOrbitResult =
     HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>;
+
+/// Summary statistics for per-trajectory observation counts.
+///
+/// Each [`TrajectorySet`] entry (one object) has an associated
+/// [`Observations`] container. This structure stores basic distribution
+/// statistics on the **number of observations per trajectory**, as
+/// returned by [`obs_count_stats`](crate::observations::trajectory_ext::TrajectoryExt::obs_count_stats).
+///
+/// Fields
+/// -----------------
+/// * `min` – smallest number of observations in any trajectory.
+/// * `p25` – 25th percentile (first quartile) of observation counts.
+/// * `median` – 50th percentile (second quartile).
+/// * `p95` – 95th percentile, indicating the upper tail of the distribution.
+/// * `max` – largest number of observations in any trajectory.
+///
+/// Percentiles are computed using the *nearest-rank* method:
+/// the index is `round(q × (N-1))` for quantile `q ∈ [0,1]`, clamped to valid range.
+/// This convention makes results stable even for small sample sizes.
+///
+/// Display
+/// -----------------
+/// * `format!("{}", stats)` – compact single-line summary, e.g.:
+///   ```text
+///   min=2, p25=4, median=8, p95=15, max=20
+///   ```
+///
+/// * `format!("{:#}", stats)` – pretty multi-line table, e.g.:
+///   ```text
+///   Observation count per trajectory — summary
+///   -----------------------------------------
+///   min    : 2
+///   p25    : 4
+///   median : 8
+///   p95    : 15
+///   max    : 20
+///   ```
+///
+/// See also
+/// ------------
+/// * [`obs_count_stats`](crate::observations::trajectory_ext::TrajectoryExt::obs_count_stats) – Computes these statistics from a [`TrajectorySet`].
+#[derive(Debug, Clone, Copy)]
+pub struct ObsCountStats {
+    pub min: usize,
+    pub p25: usize,
+    pub median: usize,
+    pub p95: usize,
+    pub max: usize,
+}
+
+impl fmt::Display for ObsCountStats {
+    /// Compact by default; pretty multi-line when using the alternate flag (`{:#}`).
+    ///
+    /// See also
+    /// ------------
+    /// * [`obs_count_stats`](crate::observations::trajectory_ext::TrajectoryExt::obs_count_stats) – Builder of these summary statistics.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            // Pretty, multi-line, aligned output (ASCII-only for portability).
+            writeln!(f, "Observation count per trajectory — summary")?;
+            writeln!(f, "-----------------------------------------")?;
+            writeln!(f, "min    : {}", self.min)?;
+            writeln!(f, "p25    : {}", self.p25)?;
+            writeln!(f, "median : {}", self.median)?;
+            writeln!(f, "p95    : {}", self.p95)?;
+            write!(f, "max    : {}", self.max)
+        } else {
+            // Compact single-line for logs and quick prints.
+            write!(
+                f,
+                "min={}, p25={}, median={}, p95={}, max={}",
+                self.min, self.p25, self.median, self.p95, self.max
+            )
+        }
+    }
+}
 
 pub struct ObservationBatch<'a> {
     pub ra: &'a [Degree],
@@ -402,6 +486,41 @@ pub trait TrajectoryExt {
         rng: &mut impl Rng,
         params: &IODParams,
     ) -> FullOrbitResult;
+
+    /// Count the total number of [`Observation`](crate::observations::Observation) entries across all trajectories.
+    ///
+    /// This method iterates once over all values in the [`TrajectorySet`],
+    /// summing the length of each [`Observations`] container.
+    ///
+    /// Return
+    /// ----------
+    /// * The total number of observations across all objects.
+    fn total_observations(&self) -> usize;
+
+    /// Compute distribution statistics for the number of observations per trajectory.
+    ///
+    /// Each trajectory (one object in the [`TrajectorySet`]) has an associated
+    /// [`Observations`] container. This function collects their sizes and computes:
+    ///
+    /// * `min` – smallest number of observations in any trajectory,
+    /// * `p25` – 25th percentile (first quartile),
+    /// * `median` – 50th percentile (second quartile),
+    /// * `p95` – 95th percentile (upper tail indicator),
+    /// * `max` – largest number of observations in any trajectory.
+    ///
+    /// Percentiles are computed using the *nearest-rank* method:
+    /// the index is `round(q × (N-1))` for quantile `q ∈ [0,1]`, clamped to valid range.
+    /// This makes results robust even for small datasets.
+    ///
+    /// Return
+    /// ----------
+    /// * `None` if the set is empty.
+    /// * `Some(ObsCountStats)` containing the summary statistics otherwise.
+    ///
+    /// See also
+    /// ------------
+    /// * [`total_observations`](crate::observations::trajectory_ext::TrajectoryExt::total_observations) – Sum of all observations across trajectories.
+    fn obs_count_stats(&self) -> Option<ObsCountStats>;
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -498,6 +617,46 @@ impl TrajectoryExt for TrajectorySet {
         trajs
     }
 
+    #[cfg(feature = "progress")]
+    fn estimate_all_orbits(
+        &mut self,
+        state: &Outfit,
+        rng: &mut impl Rng,
+        params: &IODParams,
+    ) -> FullOrbitResult {
+        let total = self.len() as u64;
+        let pb = ProgressBar::new(total.max(1));
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) \
+             | {per_sec} | ETA {eta_precise} | {msg}",
+            )
+            .expect("indicatif template"),
+        );
+        pb.enable_steady_tick(Duration::from_millis(200));
+
+        let mut results: FullOrbitResult = HashMap::default();
+        let mut it_timer = IterTimer::new(0.2);
+
+        for (obj, observations) in self.iter_mut() {
+            // Time of the previous loop (zero for the first, acceptable).
+
+            use crate::observations::progress_bar::fmt_dur;
+            let last = it_timer.tick();
+            let avg = it_timer.avg();
+            pb.set_message(format!("last: {}, avg: {}", fmt_dur(last), fmt_dur(avg)));
+
+            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
+            results.insert(obj.clone(), res);
+
+            pb.inc(1);
+        }
+
+        pb.finish_and_clear();
+        results
+    }
+
+    #[cfg(not(feature = "progress"))]
     fn estimate_all_orbits(
         &mut self,
         state: &Outfit,
@@ -513,5 +672,44 @@ impl TrajectoryExt for TrajectorySet {
         }
 
         results
+    }
+
+    #[inline]
+    fn total_observations(&self) -> usize {
+        self.values().map(|obs: &Observations| obs.len()).sum()
+    }
+
+    fn obs_count_stats(&self) -> Option<ObsCountStats> {
+        // Collect sizes (one pass, O(N))
+        let mut counts: Vec<usize> = self.values().map(|obs| obs.len()).collect();
+        if counts.is_empty() {
+            return None;
+        }
+
+        // Sort once, O(N log N). `unstable` is fine since we only need order.
+        counts.sort_unstable();
+
+        #[inline]
+        fn q_index(n: usize, q: f64) -> usize {
+            // Nearest-rank on [0, n-1] using linear index; robust for small n.
+            let pos = q * (n as f64 - 1.0);
+            let idx = pos.round() as isize;
+            idx.clamp(0, (n as isize) - 1) as usize
+        }
+
+        let n = counts.len();
+        let min = counts[0];
+        let max = counts[n - 1];
+        let p25 = counts[q_index(n, 0.25)];
+        let median = counts[q_index(n, 0.50)];
+        let p95 = counts[q_index(n, 0.95)];
+
+        Some(ObsCountStats {
+            min,
+            p25,
+            median,
+            p95,
+            max,
+        })
     }
 }

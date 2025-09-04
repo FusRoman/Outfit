@@ -53,6 +53,7 @@ tokio = { version = "1.44.1", default-features = false, optional = true, feature
     "io-util",
 ] }
 tokio-stream = { version = "0.1.17", default-features = false, optional = true }
+indicatif = { version = "0.18", optional = true }
 
 [dev-dependencies]
 approx = { version = "0.5.1", default-features = false }
@@ -62,6 +63,7 @@ proptest = "1.7.0"
 
 [features]
 jpl-download = ["dep:reqwest", "dep:tokio", "dep:tokio-stream"]
+progress = ["dep:indicatif"]
 
 [[test]]
 name = "reader_80col_test"
