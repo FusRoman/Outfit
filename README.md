@@ -1,90 +1,211 @@
 # Outfit
 
-Outfit is a Rust library for managing, analyzing, and determining the orbits of celestial objects from astrometric observations. It provides efficient tools to read, manipulate, and process observations from various formats (80-column MPC, ADES XML, Parquet), perform initial orbit determination (Gauss method), manage observers, and interface with JPL ephemerides.
+A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
 
-## Main Features
-
-- **Observation reading**:
-  - 80-column MPC files
-  - ADES (XML) files
-  - Parquet files (batch observations)
-- **Observer management**: creation, identification by MPC code, handling coordinates and altitudes
-- **Initial orbit determination**:
-  - Gauss method on observation triplets
-  - Calculations in different reference systems
-- **Error handling and uncertainty models**
-- **JPL ephemerides interface (HORIZON, NAIF)**
-- **Batch processing and benchmarks**
-- **Modular and extensible**
-
-## Installation
-
-Add Outfit to your Rust project via Cargo:
-
-```toml
-[dependencies]
-outfit = "1.0.0"
-```
-
-Enable the `jpl-download` feature for automatic ephemeris download:
-
-```toml
-[dependencies]
-outfit = { version = "1.0.0", features = ["jpl-download"] }
-```
-
-## Tests and Benchmarks
-
-- Run tests:
-  ```bash
-  cargo test
-  ```
-- Run benchmarks:
-  ```bash
-  cargo bench
-  ```
-
-## Main Dependencies
-
-- [nalgebra] for linear algebra
-- [parquet] for Parquet file reading
-- [quick-xml] for ADES parsing
-- [criterion] for benchmarks
-
-## Roadmap
-
-Planned and upcoming features for Outfit include:
-
-### v2.0
-- **Full least squares orbit fitting**  
-  Add a complete least squares optimization for orbit fitting, allowing robust adjustment of orbital elements to all available observations.
-- **Support for hyperbolic and parabolic orbits (e ≥ 1)**  
-  Enable orbit determination and propagation for interstellar objects and other bodies with e ≥ 1. ([#29](https://github.com/FusRoman/Outfit/issues/29))
-- **ANISE support for JPL ephemeris loading**  
-  Reduce codebase complexity and add support for loading JPL ephemerides via ANISE/SPICE. ([#28](https://github.com/FusRoman/Outfit/issues/28))
-- **RMS estimation for all file formats**  
-  Extend RMS (root mean square) error estimation to all supported observation file formats. ([#22](https://github.com/FusRoman/Outfit/issues/22))
-- **Radar observation support**  
-  Add the ability to ingest and process radar observations for orbit determination. ([#13](https://github.com/FusRoman/Outfit/issues/13))
-
-### v3.0
-- **Vaisala method for initial orbit determination**  
-  Implement the Vaisala method as an alternative approach for initial orbit determination.
-
-For more details and the latest updates, see the [GitHub issues page](https://github.com/FusRoman/Outfit/issues).
-
-## License
-
-This project is licensed under the CeCILL-C Free Software License Agreement. See the `LICENSE` file for more information.
-
-## Author
-
-Developed by FusRoman.
-
-## Acknowledgements
-
-Special thanks to the developers of [OrbFit](https://adams.dm.unipi.it/orbfit/) for their outstanding work and for providing much of the inspiration and reference algorithms for this project.
+> **Why Outfit?**  
+> Modern asteroid pipelines need a library that is **fast (Rust)**, **reproducible**, and **easy to integrate** in data-intensive workflows (batch files, Parquet, CI/benchmarks). Outfit re-implements classic OrbFit IOD logic with a **memory-safe**, **modular** design and production-grade ergonomics (features, docs, tests, benches). It is built to:
+> - ingest **large datasets** efficiently (columnar Parquet, batch APIs);
+> - run **deterministic IOD** with controlled noise and repeatable seeds;
+> - interface **cleanly** with JPL ephemerides (e.g., DE440);
+> - provide a **clean API** that composes well across projects.
 
 ---
 
-For any questions or contributions, feel free to open an issue or pull request on the GitHub repository.
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Data Formats](#data-formats)
+- [Initial Orbit Determination](#initial-orbit-determination)
+- [Observers & Reference Frames](#observers--reference-frames)
+- [Cargo Feature Flags](#cargo-feature-flags)
+- [Performance & Reproducibility](#performance--reproducibility)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+
+---
+
+## Features
+
+- **Observation I/O**
+  - MPC **80-column** files
+  - **ADES XML** files
+  - **Parquet** batches for high-throughput pipelines
+- **Observer management**
+  - Lookup by **MPC code**
+  - Topocentric geometry (geocentric & heliocentric positions, AU, J2000)
+- **Initial Orbit Determination**
+  - **Gauss method** on observation triplets
+  - Iterative velocity correction with Lagrange coefficients
+  - Dynamic acceptability filters (perihelion, eccentricity, geometry)
+  - RMS evaluation on extended arcs
+- **Ephemerides**
+  - Interface with **JPL** ephemerides (e.g., **DE440**)
+- **Error models**
+  - Built-in astrometric uncertainty models (e.g., FCCT14)
+- **Batch processing & benchmarking**
+  - Stream triplets, evaluate, and rank candidates
+  - Criterion-based micro/macro benchmarks
+
+---
+
+## Installation
+
+Add Outfit to your `Cargo.toml`:
+
+~~~toml
+[dependencies]
+outfit = "1.0.0"
+~~~
+
+Enable automatic ephemeris download (JPL DE440) with the `jpl-download` feature:
+
+~~~toml
+[dependencies]
+outfit = { version = "1.0.0", features = ["jpl-download"] }
+~~~
+
+Enable a CLI-style progress bar for long loops:
+
+~~~toml
+[dependencies]
+outfit = { version = "1.0.0", features = ["progress"] }
+~~~
+
+Combine features as needed (example):
+
+~~~toml
+[dependencies]
+outfit = { version = "1.0.0", features = ["jpl-download", "progress", "parquet", "ades", "mpc80"] }
+~~~
+
+---
+
+## Quick Start
+
+The crate ships with several **ready-to-run examples** in the [`examples/`](examples) directory.  
+They demonstrate end-to-end workflows such as:
+
+- Reading observations (MPC 80-column, Parquet)
+- Building a `TrajectorySet`
+- Running Gauss initial orbit determination
+- Inspecting and printing orbital elements with RMS statistics
+
+Run an example directly with Cargo:
+
+```bash
+cargo run --release --example parquet_to_orbit --features jpl-download
+```
+
+This will:
+
+- Load observations from a Parquet file,
+
+- Identify the observer by MPC code,
+
+- Run the Gauss IOD pipeline,
+
+- Print the best-fit orbit with its RMS value.
+
+---
+
+## Data Formats
+
+- **MPC 80-column** – [Minor Planet Center fixed-width astrometry format](https://minorplanetcenter.net/iau/info/OpticalObs.html)  
+- **ADES XML** – [IAU Astrometric Data Exchange Standard (ADES)](https://minorplanetcenter.net/iau/info/ADES.html)  
+- **Parquet** – [Apache Parquet](https://parquet.apache.org/) columnar format for large batch processing  
+  Typical columns: `ra`, `dec`, `jd` or `mjd`, `trajectory_id` (configurable)
+
+
+---
+
+## Initial Orbit Determination
+
+Outfit implements the **Gauss method** on observation triplets:
+
+1. Select candidate triplets `(i, j, k)` with spacing/quality heuristics.
+2. Solve for **topocentric distances** and the heliocentric state at the central epoch.
+3. Apply **dynamic acceptability** filters (perihelion, eccentricity, geometry).
+4. **Refine** velocity with Lagrange coefficients (iterative correction loop).
+5. Evaluate **RMS of normalized astrometric residuals** on an extended arc to rank solutions.
+
+Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
+
+---
+
+## Observers & Reference Frames
+
+- Observer lookup by **MPC code**.
+- Geocentric and heliocentric positions in **AU**, **J2000** (equatorial).
+- Earth orientation (nutation, precession) and **aberration** corrections via internal reference-system utilities.
+
+---
+
+## Cargo Feature Flags
+
+| Feature         | Description                                                                 |
+|-----------------|-----------------------------------------------------------------------------|
+| `jpl-download`  | Automatically fetch JPL ephemerides on first use (e.g., DE440).            |
+| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.|
+
+---
+
+## Performance & Reproducibility
+
+- **Deterministic runs** by default (set RNG seeds explicitly when noise is used).
+- **Batch-friendly APIs** (Parquet; streaming triplets).
+- Avoid ephemeris I/O in hot paths by **precomputing observer positions**.
+- Benchmarks via **criterion** (see below).
+
+**Tips**
+- Compile with `--release` for production.
+- Keep ephemerides cached locally (with `jpl-download` enabled) to avoid I/O stalls.
+- Use the `progress` feature to instrument long loops without cluttering core logic.
+
+---
+
+## Roadmap
+
+- **Full least-squares orbit fitting** across full arcs
+- **Hyperbolic & parabolic orbits** (e ≥ 1) for interstellar candidates
+- **Alternative IOD methods** (e.g., **Vaisala**)
+- **Ephemerides backends** (e.g., ANISE/SPICE integration)
+
+See the issue tracker for the latest details and discussion.
+
+---
+
+## Contributing
+
+Contributions are welcome!  
+Please open an issue to discuss substantial changes. For PRs, please:
+
+- Add tests for new functionality
+- Keep public APIs documented
+- Ensure `cargo fmt` and `cargo clippy` pass (`-D warnings` recommended)
+- Include benchmarks when touching hot paths
+
+A typical dev loop:
+
+~~~bash
+cargo fmt --all
+cargo clippy --all-targets --all-features
+cargo test --all-features
+cargo bench --features jpl-download
+~~~
+
+---
+
+## License
+
+This project is licensed under the **CeCILL-C** Free Software License Agreement. See the `LICENSE` file.
+
+---
+
+## Acknowledgements
+
+- The **OrbFit** project and its authors for foundational algorithms and references.
+- The maintainers of **JPL** ephemerides and the broader open-source ecosystem (linear algebra, I/O, benchmarking crates) that Outfit builds upon.
