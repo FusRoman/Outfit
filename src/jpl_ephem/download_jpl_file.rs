@@ -289,7 +289,7 @@ impl EphemFilePath {
     /// See also
     /// --------
     /// * [`EphemFileSource`] — Backend + version selector.
-    /// * [`download_big_file`] — Async downloader (gated by `jpl-download`).
+    /// * \[`download_big_file`\] — Async downloader (gated by `jpl-download`).
     pub fn get_ephemeris_file(file_source: &EphemFileSource) -> Result<EphemFilePath, OutfitError> {
         let local_file = EphemFilePath::try_from(file_source.clone())?;
 

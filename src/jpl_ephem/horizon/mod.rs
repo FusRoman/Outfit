@@ -32,7 +32,7 @@
 //! 1. Select a
 //!    [`JPLHorizonVersion`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion)
 //!    and resolve the file path (via
-//!    [`crate::jpl_ephem::download_jpl_file::download_big_file`]).
+//!    \[`crate::jpl_ephem::download_jpl_file::download_big_file`\], gated by the `jpl-download` feature).
 //! 2. Construct a
 //!    [`HorizonData`](crate::jpl_ephem::horizon::horizon_data::HorizonData)
 //!    by reading the binary file.

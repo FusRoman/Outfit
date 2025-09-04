@@ -30,7 +30,7 @@
 //!
 //! - [`InvalidUrl`](crate::outfit_errors::OutfitError::InvalidUrl)
 //! - [`UreqHttpError`](crate::outfit_errors::OutfitError::UreqHttpError)
-//! - [`ReqwestError`](crate::outfit_errors::OutfitError::ReqwestError) *(feature: `jpl-download`)*
+//! - \[`ReqwestError`\](crate::outfit_errors::OutfitError::ReqwestError) *(feature: `jpl-download`)*
 //! - [`IoError`](crate::outfit_errors::OutfitError::IoError)
 //! - [`UnableToCreateBaseDir`](crate::outfit_errors::OutfitError::UnableToCreateBaseDir)
 //! - [`Utf8PathError`](crate::outfit_errors::OutfitError::Utf8PathError)

@@ -23,6 +23,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Equinoctial elements and conversion utilities:
   - Conversion between Keplerian and equinoctial elements
   - Two-body solver and Jacobian computation for equinoctial elements
+- Progress indicators (feature-gated): optional real-time progress bars with `indicatif` and loop performance measurement via `IterTimer`
+- Extensive documentation:
+  - Unified docstrings in English with *Arguments*, *Return*, and *See also* sections
+  - Examples integrated directly in Rustdoc (e.g. with `cfg(feature = "jpl-download")`)
+- Examples folder: runnable end-to-end examples (`examples/parquet_to_orbit.rs`, `examples/iod.rs`) to demonstrate usage
 
 ### Changed
 - Major refactor of `kepler.rs` (Keplerian motion, universal variable solver, anomaly conversion), `orb_elem.rs`, `equinoctial_element.rs`, and `initial_orbit_determination/gauss.rs` for clarity, maintainability, and performance
@@ -38,11 +43,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Refactor for better performance and code clarity
 - Update README and license (now CeCILL-C)
 - Make almost everything public for documentation purposes
+- Benchmarks: improved Criterion benches, especially for `prelim_orbit`
+- Error handling: switched fully to [`thiserror`] with `#[from]` conversions and improved error messages
+- Profiles: added optimized `[profile.bench]` with `required-features = ["jpl-download"]`
 
 ### Fixed
 - Fix and improve documentation links
 - Fix unwraps in production code
 - Improve error reporting and handling
+- Test infrastructure: fixed JPL-dependent tests by clarifying ephemeris file requirements and adding fallback
+- Cargo manifest: audited and removed unused dependencies (via `cargo-udeps`)
 
 ### Removed
 - Remove dead and unused code
