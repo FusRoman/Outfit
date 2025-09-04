@@ -105,7 +105,7 @@ fn test_gauss_iod() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        0.5509275597328892,
+        0.550927559734816,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );

@@ -171,6 +171,77 @@ type GaussPrelimResult = Result<
     OutfitError,
 >;
 
+/// Compute Descartes’ sign-variation upper bound for a sparse degree-8 polynomial.
+/// Specialized for:
+/// `p(x) = c0 + c3·x^3 + c6·x^6 + 1·x^8` (monic leading term).
+///
+/// This routine applies **Descartes’ rule of signs** to obtain an *upper bound* on the
+/// number of **positive real roots** of `p`. For positive roots, the rule counts the
+/// sign changes in the coefficient sequence ordered by **decreasing degree**, after
+/// removing coefficients that are exactly (or effectively) zero.  Because the polynomial
+/// is sparse and monic, the sequence reduces to just four terms:
+/// `[ +1 (for x^8), sign(c6), sign(c3), sign(c0) ]`.
+///
+/// The bound returned is exact **only as an upper bound**: the true number of positive
+/// real roots equals this bound minus an **even, non-negative integer**.  In particular,
+/// a result of `0` guarantees that **no** positive real root exists and you can safely
+/// skip any numerical root-finding for `x>0`.
+///
+/// Mathematical context
+/// --------------------
+/// * **Descartes’ rule of signs:** Let `V` be the number of sign variations in the ordered
+///   coefficient sequence of `p(x)` (descending degree, zeros removed). Then the number
+///   of positive real roots `N₊` (counted with multiplicities) satisfies:  
+///   `N₊ ≤ V` and `V − N₊` is an even integer.
+/// * The bound is **invariant under positive scaling** of the polynomial (multiplying all
+///   coefficients by a positive constant does not change the sign pattern).
+/// * Handling near-zero coefficients (`|c| ≤ zero_eps`) improves robustness by avoiding
+///   spurious sign flips caused by numerical noise.
+///
+/// Arguments
+/// -----------------
+/// * `c0`, `c3`, `c6`: Coefficients of the sparse polynomial `p(x) = c0 + c3·x^3 + c6·x^6 + x^8`.
+/// * `zero_eps`: Absolute threshold; coefficients with `|c| ≤ zero_eps` are treated as zero
+///   (they are ignored when counting sign variations).
+///
+/// Return
+/// ----------
+/// * An upper bound (`u32`) on the number of **positive real roots** of `p(x)`.
+///
+/// Notes
+/// ----------
+/// * Time complexity is **O(1)** (constant time): only four signs are inspected.
+/// * A return value of `0` implies “no positive real root” (useful as a fast pre-filter
+///   before calling a complex root solver such as Aberth).
+#[inline]
+fn descartes_upper_bound_deg8_sparse(c0: f64, c3: f64, c6: f64, zero_eps: f64) -> u32 {
+    #[inline]
+    fn s(v: f64, eps: f64) -> i8 {
+        if v.abs() <= eps {
+            0
+        } else if v.is_sign_positive() {
+            1
+        } else {
+            -1
+        }
+    }
+    // Leading coefficient is +1 for x^8.
+    let seq = [1_i8, s(c6, zero_eps), s(c3, zero_eps), s(c0, zero_eps)];
+
+    let mut last = 0_i8;
+    let mut count = 0_u32;
+    for &cur in &seq {
+        if cur == 0 {
+            continue;
+        }
+        if last != 0 && cur != last {
+            count += 1;
+        }
+        last = cur;
+    }
+    count
+}
+
 impl GaussObs {
     /// Construct a `GaussObs` object from an observation triplet and corresponding observer positions.
     ///
@@ -1063,6 +1134,13 @@ impl GaussObs {
         // 2) Degree-8 polynomial (only 3 non-zero coefficients)
         let (c6, c3, c0) = self.coeff_eight_poly(&unit_m, &inv_unit_m, &vec_a, &vec_b);
         let poly = [c0, 0.0, 0.0, c3, 0.0, 0.0, c6, 0.0, 1.0];
+
+        // --- Cheap prefilter: Descartes' rule of signs on (0, +∞).
+        // If zero, we know there is NO positive real root; skip Aberth entirely.
+        let ub = descartes_upper_bound_deg8_sparse(c0, c3, c6, 0.0);
+        if ub == 0 {
+            return Err(OutfitError::GaussNoRootsFound);
+        }
 
         // Accumulate up to three solutions (stack-first, then into_vec())
         let mut solutions: SmallVec<[GaussResult; 4]> = SmallVec::new();
