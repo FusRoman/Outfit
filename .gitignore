@@ -1,1 +1,13 @@
 /target
+/orbfit_tests
+.vscode
+deps_tree.txt
+perf.data
+run_perf.sh
+rust_side.txt
+tests/data/asteroid_dataset.parquet
+tests/data/mega_test.parquet
+tests/data/1I_Oumuamua.obs
+tests/data/2I_Borisov.obs
+tests/data/3I_Atlas.obs
+proptest-regressions/
