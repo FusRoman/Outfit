@@ -613,14 +613,29 @@ fn fmt_opt(x: f64) -> String {
 
 fn main() -> Result<(), OutfitError> {
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-    let path_file = Utf8Path::new("tests/data/test_from_fink.parquet");
+
+    let test_data = "tests/data/test_from_fink.parquet";
+
+    println!("Loading observations from {test_data}");
+    let path_file = Utf8Path::new(test_data);
 
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
 
     let mut traj_set =
         TrajectorySet::new_from_parquet(&mut env_state, path_file, ztf_observer, 0.5, 0.5, None)?;
 
-    dbg!("Loaded {} trajectories", traj_set.len());
+    println!(
+        "Loading done: {} trajectories / {} observations",
+        traj_set.len(),
+        traj_set.total_observations()
+    );
+
+    println!("Trajectory Set statistics:");
+    println!(
+        "{:#}",
+        traj_set.obs_count_stats().expect("TrajSet is empty")
+    );
+    println!("--------------------------\n");
 
     let mut rng = StdRng::from_os_rng();
 
@@ -631,7 +646,12 @@ fn main() -> Result<(), OutfitError> {
         .max_triplets(30)
         .build()?;
 
+    println!("Estimating orbits with params: {params:#}");
+    println!("Orbit estimation in progress... (this may take a while)");
+
     let orbits = traj_set.estimate_all_orbits(&env_state, &mut rng, &params);
+
+    println!("Orbit estimation done.");
 
     let summary = summarize_estimates(&orbits, 5);
     print_summary(&summary);

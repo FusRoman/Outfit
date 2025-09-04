@@ -73,9 +73,9 @@
 //! * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss solver
 //! * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result type for preliminary/corrected orbits
 //! * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection
-use std::cmp::Ordering::{Equal, Greater, Less};
-
 use crate::outfit_errors::OutfitError;
+use std::cmp::Ordering::{Equal, Greater, Less};
+use std::fmt;
 
 pub mod gauss;
 pub mod gauss_result;
@@ -611,5 +611,164 @@ impl IODParamsBuilder {
         }
 
         Ok(self.params)
+    }
+}
+
+impl fmt::Display for IODParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            const PARAM_COL: usize = 50; // width reserved for "name = value"
+            writeln!(f, "Initial Orbit Determination Parameters")?;
+            writeln!(f, "-------------------------------------")?;
+
+            macro_rules! line {
+                ($fmt:expr, $val:expr, $comment:expr) => {{
+                    let s = format!($fmt, $val);
+                    let pad = if s.len() < PARAM_COL {
+                        " ".repeat(PARAM_COL - s.len())
+                    } else {
+                        " ".to_string()
+                    };
+                    writeln!(f, "  {}{}# {}", s, pad, $comment)
+                }};
+            }
+
+            // --- Triplet generation / Monte Carlo ---
+            writeln!(f, "[Triplet generation / Monte Carlo]")?;
+            line!(
+                "n_noise_realizations = {}",
+                self.n_noise_realizations,
+                "Number of noisy copies per triplet"
+            )?;
+            line!(
+                "noise_scale          = {:.3}",
+                self.noise_scale,
+                "Scale factor for RA/DEC uncertainties"
+            )?;
+            line!(
+                "extf                 = {:.3}",
+                self.extf,
+                "Extrapolation factor for RMS window"
+            )?;
+            line!(
+                "dtmax                = {:.3} d",
+                self.dtmax,
+                "Minimum RMS evaluation window"
+            )?;
+            line!(
+                "dt_min               = {:.3} d",
+                self.dt_min,
+                "Minimum span between first/last obs"
+            )?;
+            line!(
+                "dt_max_triplet       = {:.3} d",
+                self.dt_max_triplet,
+                "Maximum allowed triplet span"
+            )?;
+            line!(
+                "optimal_interval_time= {:.3} d",
+                self.optimal_interval_time,
+                "Target spacing inside triplet"
+            )?;
+            line!(
+                "max_obs_for_triplets = {}",
+                self.max_obs_for_triplets,
+                "Cap on obs used to build triplets"
+            )?;
+            line!(
+                "max_triplets         = {}",
+                self.max_triplets,
+                "Maximum number of triplets evaluated"
+            )?;
+            line!(
+                "gap_max              = {:.3} d",
+                self.gap_max,
+                "Max intra-batch time gap"
+            )?;
+
+            // --- Physical plausibility / filtering ---
+            writeln!(f, "\n[Physical plausibility / filtering]")?;
+            line!(
+                "max_ecc              = {:.3}",
+                self.max_ecc,
+                "Maximum eccentricity accepted"
+            )?;
+            line!(
+                "max_perihelion_au    = {:.3} AU",
+                self.max_perihelion_au,
+                "Maximum perihelion distance"
+            )?;
+            line!(
+                "min_rho2_au          = {:.3} AU",
+                self.min_rho2_au,
+                "Minimum topocentric distance"
+            )?;
+            line!(
+                "r2_min_au            = {:.3} AU",
+                self.r2_min_au,
+                "Minimum heliocentric distance"
+            )?;
+            line!(
+                "r2_max_au            = {:.3} AU",
+                self.r2_max_au,
+                "Maximum heliocentric distance"
+            )?;
+
+            // --- Numerical tolerances / iterations ---
+            writeln!(f, "\n[Numerical tolerances / iterations]")?;
+            line!(
+                "newton_eps           = {:.1e}",
+                self.newton_eps,
+                "Tolerance for Newton–Raphson"
+            )?;
+            line!(
+                "newton_max_it        = {}",
+                self.newton_max_it,
+                "Max Newton–Raphson iterations"
+            )?;
+            line!(
+                "root_imag_eps        = {:.1e}",
+                self.root_imag_eps,
+                "Max imaginary part for promoted roots"
+            )?;
+            line!(
+                "aberth_max_iter      = {}",
+                self.aberth_max_iter,
+                "Max iterations for Aberth solver"
+            )?;
+            line!(
+                "aberth_eps           = {:.1e}",
+                self.aberth_eps,
+                "Convergence tolerance for Aberth solver"
+            )?;
+            line!(
+                "kepler_eps           = {:.1e}",
+                self.kepler_eps,
+                "Tolerance in Kepler solver"
+            )?;
+            line!(
+                "max_tested_solutions = {}",
+                self.max_tested_solutions,
+                "Max Gauss solutions kept"
+            )?;
+
+            Ok(())
+        } else {
+            write!(
+                f,
+                "IODParams(n_noise_realizations={}, noise_scale={:.2}, extf={:.2}, dtmax={:.1}d, dt_min={:.2}d, dt_max_triplet={:.1}d, max_triplets={}, max_ecc={:.2}, perihelion≤{:.1}AU, r2∈[{:.2},{:.1}]AU)",
+                self.n_noise_realizations,
+                self.noise_scale,
+                self.extf,
+                self.dtmax,
+                self.dt_min,
+                self.dt_max_triplet,
+                self.max_triplets,
+                self.max_ecc,
+                self.max_perihelion_au,
+                self.r2_min_au,
+                self.r2_max_au,
+            )
+        }
     }
 }

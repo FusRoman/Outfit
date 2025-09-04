@@ -8,7 +8,7 @@ use std::collections::hash_map::Entry;
 use std::io;
 use std::sync::Arc;
 
-use crate::constants::ArcSec;
+use crate::constants::{ArcSec, RADEG};
 use crate::observers::Observer;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
@@ -174,6 +174,10 @@ pub(crate) fn parquet_to_trajset(
 
             // Hot loop: build `Observation`s with positions sourced from the per-file cache.
             for i in 0..len {
+                // Convert degrees → radians (fast path: one multiply each).
+                let ra_rad = ra_vals[i] * RADEG;
+                let dec_rad = dec_vals[i] * RADEG;
+
                 // Convert JD → MJD(TT). Assumes `jd` is already in TT scale in the file;
                 // if not, convert scales here before caching.
                 let mjd_time = jd_vals[i] - JDTOMJD;
@@ -200,14 +204,7 @@ pub(crate) fn parquet_to_trajset(
 
                 // Zero-ephemeris constructor: avoids recomputing positions at construction.
                 let obs = Observation::with_positions(
-                    uint16_obs,
-                    ra_vals[i],
-                    error_ra,
-                    dec_vals[i],
-                    error_dec,
-                    mjd_time,
-                    geo_pos,
-                    helio_pos,
+                    uint16_obs, ra_rad, error_ra, dec_rad, error_dec, mjd_time, geo_pos, helio_pos,
                 );
 
                 // Group observations by `trajectory_id` (ObjectNumber::Int).
@@ -229,8 +226,8 @@ pub(crate) fn parquet_to_trajset(
                     continue; // Drop incomplete rows (policy: skip; alternatively, surface an error)
                 }
 
-                let ra = ra_arr.value(i);
-                let dec = dec_arr.value(i);
+                let ra_rad: f64 = ra_arr.value(i) * RADEG;
+                let dec_rad = dec_arr.value(i) * RADEG;
                 let mjd_time = jd_arr.value(i) - JDTOMJD;
                 let tid = tid_arr.value(i);
                 let key = OrderedFloat(mjd_time);
@@ -250,7 +247,7 @@ pub(crate) fn parquet_to_trajset(
                 };
 
                 let obs = Observation::with_positions(
-                    uint16_obs, ra, error_ra, dec, error_dec, mjd_time, geo_pos, helio_pos,
+                    uint16_obs, ra_rad, error_ra, dec_rad, error_dec, mjd_time, geo_pos, helio_pos,
                 );
 
                 trajectories

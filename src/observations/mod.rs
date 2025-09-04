@@ -93,6 +93,8 @@
 pub mod ades_reader;
 pub mod observations_ext;
 mod parquet_reader;
+#[cfg(feature = "progress")]
+pub(crate) mod progress_bar;
 pub mod trajectory_ext;
 pub mod triplets_generator;
 pub mod triplets_iod;
