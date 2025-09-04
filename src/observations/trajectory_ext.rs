@@ -59,13 +59,14 @@
 //! use outfit::observations::trajectory_ext::{TrajectoryExt, FullOrbitResult};
 //! use outfit::observers::Observer;
 //! use outfit::initial_orbit_determination::IODParams;
+//! use outfit::constants::TrajectorySet;
 //!
 //! # fn demo() -> Result<(), outfit::outfit_errors::OutfitError> {
 //! let mut state = Outfit::new("horizon:DE440", outfit::error_models::ErrorModel::FCCT14)?;
 //! let observer: Arc<Observer> = state.get_observer_from_mpc_code(&"I41".into());
 //!
 //! // Build a TrajectorySet from Parquet
-//! let mut trajs = <_ as TrajectoryExt>::new_from_parquet(
+//! let mut trajs: TrajectorySet = TrajectoryExt::new_from_parquet(
 //!     &mut state,
 //!     Utf8Path::new("observations.parquet"),
 //!     observer.clone(),
@@ -81,9 +82,9 @@
 //! // Iterate results
 //! for (obj, outcome) in results {
 //!     match outcome {
-//!         Ok((Some(orbit), rms)) => eprintln!("{} → {:?}, rms={:.4}", obj, orbit, rms),
-//!         Ok((None, _))          => eprintln!("{} → no viable orbit", obj),
-//!         Err(err)               => eprintln!("{} → error: {}", obj, err),
+//!         Ok((Some(orbit), rms)) => eprintln!("{:?} → {:?}, rms={:.4}", obj, orbit, rms),
+//!         Ok((None, _))          => eprintln!("{:?} → no viable orbit", obj),
+//!         Err(err)               => eprintln!("{:?} → error: {}", obj, err),
 //!     }
 //! }
 //! # Ok(()) }
