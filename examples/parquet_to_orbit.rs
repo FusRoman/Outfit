@@ -1,3 +1,4 @@
+#![cfg(feature = "jpl-download")]
 #![allow(non_snake_case)]
 use camino::Utf8Path;
 use outfit::initial_orbit_determination::IODParams;
