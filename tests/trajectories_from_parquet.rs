@@ -49,8 +49,8 @@ fn test_large_parquet() {
     assert_eq!(traj_set.get(&ObjectNumber::Int(4)).unwrap().len(), 10);
 
     let first_obs = traj.first().unwrap();
-    assert_eq!(first_obs.ra, 33.4247141);
-    assert_eq!(first_obs.dec, 23.5516817);
+    assert_eq!(first_obs.ra, 0.5833713125827732);
+    assert_eq!(first_obs.dec, 0.4110543900466954);
     assert_eq!(first_obs.time, 58789.138125000056);
     assert_eq!(
         first_obs.get_observer(&env_state).name,
@@ -58,8 +58,8 @@ fn test_large_parquet() {
     );
 
     let second_obs = traj.get(6).unwrap();
-    assert_eq!(second_obs.ra, 192.1234);
-    assert_eq!(second_obs.dec, -5.6789);
+    assert_eq!(second_obs.ra, 3.353185900126074);
+    assert_eq!(second_obs.dec, -0.09911550289150597);
     assert_eq!(second_obs.time, 59396.0);
     assert_eq!(
         second_obs.get_observer(&env_state).name,
