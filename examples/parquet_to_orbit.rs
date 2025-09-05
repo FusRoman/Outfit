@@ -1,12 +1,6 @@
 #![cfg(feature = "jpl-download")]
 #![allow(non_snake_case)]
 use camino::Utf8Path;
-use outfit::initial_orbit_determination::IODParams;
-use outfit::observations::trajectory_ext::TrajectoryExt;
-use outfit::orbit_type::keplerian_element::KeplerianElements;
-use outfit::{
-    constants::TrajectorySet, error_models::ErrorModel, outfit::Outfit, outfit_errors::OutfitError,
-};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -14,6 +8,8 @@ use outfit::constants::ObjectNumber;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasher;
+
+use outfit::prelude::*;
 
 // ======================= orbit classification =======================
 
@@ -102,7 +98,7 @@ fn classify_orbit(a: f64, e: f64, i_rad: f64) -> OrbitClass {
 }
 
 /// Extract a reference to `KeplerianElements` from a `GaussResult` if available.
-fn kepler_of(res: &GaussResult) -> Option<&KeplerianElements> {
+fn kepler_of(res: &GaussResult) -> Option<&outfit::KeplerianElements> {
     match res {
         GaussResult::CorrectedOrbit(k) => k.as_keplerian(),
         GaussResult::PrelimOrbit(k) => k.as_keplerian(),

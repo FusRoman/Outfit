@@ -52,7 +52,7 @@
 //! ## Workflow at a Glance
 //!
 //! 1. **Load observations** (MPC/ADES/Parquet).
-//! 2. **Initialize** an [`Outfit`](crate::outfit::Outfit) environment with JPL ephemerides.
+//! 2. **Initialize** an [`Outfit`](crate::Outfit) environment with JPL ephemerides.
 //! 3. **Form triplets** and run the Gauss IOD solver.
 //! 4. **Evaluate residuals** (RMS) and select the best candidate.
 //! 5. **Propagate** using Keplerian dynamics or convert to equinoctial elements as needed.
@@ -62,12 +62,9 @@
 //! ```rust
 //! use camino::Utf8Path;
 //! use rand::{rngs::StdRng, SeedableRng};
-//! use outfit::outfit::Outfit;
+//! use outfit::{Outfit, ErrorModel, IODParams};
 //! use outfit::constants::{TrajectorySet, ObjectNumber};
-//! use outfit::error_models::ErrorModel;
-//! use outfit::initial_orbit_determination::IODParams;
-//! use outfit::observations::trajectory_ext::TrajectoryExt;
-//! use outfit::observations::observations_ext::ObservationIOD;
+//! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
@@ -93,7 +90,7 @@
 //!
 //!     let mut rng = StdRng::seed_from_u64(42);
 //!
-////!     // Run Gauss IOD.
+//!     // Run Gauss IOD.
 //!     let (best_orbit, best_rms) = obs.estimate_best_orbit(
 //!         &mut env,
 //!         &ErrorModel::FCCT14,
@@ -175,6 +172,8 @@
 //! - [`jpl_ephem`] — Ephemerides backends (Horizons/NAIF).
 //! - [`ref_system`] — Reference frame conversions and rotations.
 
+// === Modules (internals). Keep public modules as they are; the facade is built via `pub use` below.
+
 /// Constants and astronomical unit conversions.
 pub mod constants;
 
@@ -223,6 +222,61 @@ pub mod ref_system;
 /// Time management and conversions (UTC, TDB, TT).
 pub mod time;
 
+// === Public API FACADE =====================================================
+// Re-export carefully curated symbols for a simple, stable top-level API.
+// Users can import from `outfit::...` without diving into deep module paths.
+
+// Core orchestrator
+pub use crate::outfit::Outfit;
+
+// Core data types & units
+pub use crate::constants::{ArcSec, Degree, ObjectNumber, TrajectorySet, MJD};
+
+// Orbital element representations
+pub use crate::orbit_type::{
+    cometary_element::CometaryElements, equinoctial_element::EquinoctialElements,
+    keplerian_element::KeplerianElements, OrbitalElements,
+};
+
+// Error handling and models
+pub use crate::error_models::ErrorModel;
+pub use crate::outfit_errors::OutfitError;
+
+// IOD (Gauss) key types
+pub use crate::initial_orbit_determination::gauss_result::GaussResult;
+pub use crate::initial_orbit_determination::IODParams;
+
+// Frequently-used extension traits (ergonomic entry points)
+pub use crate::observations::observations_ext::ObservationIOD;
+pub use crate::observations::trajectory_ext::TrajectoryExt;
+
+// Selected constants that are widely useful
+pub use crate::constants::{
+    AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU,
+};
+
+// JPL ephemeris enum for runtime inspection (optional but convenient)
+pub use crate::jpl_ephem::JPLEphem;
+
+// A convenient crate-wide Result alias.
+pub type Result<T> = core::result::Result<T, OutfitError>;
+
+/// Prelude with common imports for quick-start users.
+///
+/// Bring the most frequently used types and traits into scope in one line:
+/// ```rust
+/// use outfit::prelude::*;
+/// ```
+pub mod prelude {
+    pub use crate::{
+        ArcSec, Degree, ErrorModel, GaussResult, IODParams, JPLEphem, ObjectNumber, ObservationIOD,
+        Outfit, OutfitError, TrajectoryExt, TrajectorySet, MJD,
+    };
+    // Optionally include widely-used constants:
+    pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
+}
+
+// === Tests support ==========================================================
 #[cfg(all(test, feature = "jpl-download"))]
 pub(crate) mod unit_test_global {
     use std::sync::LazyLock;
