@@ -12,5 +12,30 @@ cargo check --all-targets --all-features || exit 1
 echo "Checking documentation build..."
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features || exit 1
 
+echo "Running cargo semver-checks (API compatibility)..."
+if command -v cargo-semver-checks >/dev/null 2>&1; then
+  # Try to use origin/main as the baseline; fall back to previous commit.
+  BASELINE_REV="$(git merge-base HEAD origin/main 2>/dev/null)"
+  if [ -z "$BASELINE_REV" ]; then
+    BASELINE_REV="$(git rev-parse HEAD~1 2>/dev/null)"
+  fi
+
+  if [ -n "$BASELINE_REV" ]; then
+    # Be strict: scan with all features enabled.
+    cargo semver-checks --all-features --baseline-rev "$BASELINE_REV" || {
+      echo "SemVer check failed: public API changes require an appropriate version bump."
+      echo "Adjust the version in Cargo.toml (patch/minor/major) or restore compatibility."
+      exit 1
+    }
+  else
+    echo "Warning: could not determine a git baseline (origin/main or HEAD~1). Skipping semver check."
+  fi
+else
+  echo "cargo-semver-checks not found — skipping SemVer check."
+  echo "Install it with: cargo install cargo-semver-checks --locked"
+  # Uncomment to make it mandatory:
+  # exit 1
+fi
+
 echo "All checks passed!"
 exit 0
