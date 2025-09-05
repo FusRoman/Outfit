@@ -122,9 +122,10 @@ codegen-units = 1
 debug = true
 
 [profile.release]
-debug = true
-lto = "thin"
+debug = false
+lto = "fat"
 codegen-units = 1
+strip = true
 
 [package.metadata.docs.rs]
 features = ["jpl-download"]
