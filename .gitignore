@@ -11,3 +11,7 @@ tests/data/1I_Oumuamua.obs
 tests/data/2I_Borisov.obs
 tests/data/3I_Atlas.obs
 proptest-regressions/
+perf.txt
+perf_data.data
+run_perf_bench.sh
+run_perf_example.sh
