@@ -351,6 +351,10 @@ pub trait TrajectoryExt {
     /// ----------
     /// * The Parquet file must contain the following columns: `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`.
     /// * The `"jd"` values are assumed to be in TT scale and are converted internally to MJD via [`JDTOMJD`](crate::constants::JDTOMJD).
+    /// * The `ra` and `dec` columns have to be in degrees and of type `Float64`.
+    /// * The `jd` column has to be in Julian Date (TT) and of type `Float64`.
+    /// * The `trajectory_id` column has to be of type `UInt32` and is used to group
+    ///   observations by object.
     ///
     /// See also
     /// ------------
@@ -390,6 +394,10 @@ pub trait TrajectoryExt {
     /// ----------
     /// * The Parquet file must contain the following columns: `"ra"`, `"dec"`, `"jd"`, `"trajectory_id"`.
     /// * The `"jd"` values are assumed to be in TT scale and are converted internally to MJD via [`JDTOMJD`](crate::constants::JDTOMJD).
+    /// * The `ra` and `dec` columns have to be in degrees and of type `Float64`.
+    /// * The `jd` column has to be in Julian Date (TT) and of type `Float64`.
+    /// * The `trajectory_id` column has to be of type `UInt32` and is used to group
+    ///   observations by object.
     ///
     /// See also
     /// ------------

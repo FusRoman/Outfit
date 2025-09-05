@@ -107,7 +107,7 @@
 //! }
 //! ```
 //!
-//! For more end-to-end flows, see the `examples/` folder (e.g. `parquet_to_orbit.rs`).
+//! For more end-to-end flows, see the [`examples/`](https://github.com/FusRoman/Outfit/tree/main/examples) folder (e.g. `parquet_to_orbit.rs`).
 //!
 //! ## Data Formats
 //!
@@ -115,7 +115,7 @@
 //!   <https://minorplanetcenter.net/iau/info/OpticalObs.html>
 //! - **ADES XML** — IAU’s Astrometric Data Exchange Standard  
 //!   <https://www.iau.org/static/science/scientific_bodies/commissions/f1/ADES-Specification.html>
-//! - **Parquet** — columnar format for large batch processing (typical columns: `ra`, `dec`, `jd|mjd`, `trajectory_id`)  
+//! - **Parquet** — columnar format for large batch processing (typical columns: `ra`, `dec`, `jd`, `trajectory_id`)  
 //!   <https://parquet.apache.org/docs/>
 //!
 //! ## Cargo Features

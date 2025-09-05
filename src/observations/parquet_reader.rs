@@ -40,6 +40,10 @@ type FastHashMap<K, V> = HashMap<K, V, RandomState>;
 ///   and observer definitions.
 /// * `parquet` – Path to the input Parquet file containing the columns
 ///   `ra`, `dec`, `jd`, and `trajectory_id`.
+///   The `ra` and `dec` columns have to be in degrees and of type `Float64`.
+///   The `jd` column has to be in Julian Date (TT) and of type `Float64`.
+///   The `trajectory_id` column has to be of type `UInt32` and is used to group
+///   observations by object.
 /// * `observer` – The [`Observer`] associated with all observations in this file.
 /// * `error_ra` – Right ascension astrometric uncertainty (radians).
 /// * `error_dec` – Declination astrometric uncertainty (radians).
