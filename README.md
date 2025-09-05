@@ -1,3 +1,8 @@
+[![Crates.io](https://img.shields.io/crates/v/outfit.svg)](https://crates.io/crates/outfit)
+[![Docs.rs](https://docs.rs/outfit/badge.svg)](https://docs.rs/outfit)
+[![License: CeCILL-C](https://img.shields.io/badge/license-CeCILL--C-blue.svg)](LICENSE)
+[![CI](https://github.com/FusRoman/Outfit/actions/workflows/ci.yml/badge.svg)](https://github.com/FusRoman/Outfit/actions)
+
 # Outfit
 
 A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.

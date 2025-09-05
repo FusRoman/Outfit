@@ -45,12 +45,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Install Rust with rustfmt
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -59,7 +57,6 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
@@ -69,12 +66,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Install Rust with clippy
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -83,10 +78,53 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: check version
         run: |
           rustc --version
           cargo clippy --version
       - name: Run cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+  coverage:
+    name: Coverage (stable, cargo-llvm-cov → Codecov)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable + llvm-tools
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-llvmcov-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+
+      - name: Clean coverage artifacts
+        run: cargo llvm-cov clean --workspace
+
+      - name: Generate coverage (lcov)
+        run: |
+          cargo llvm-cov \
+            --workspace \
+            --all-features \
+            --lcov --output-path lcov.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          flags: rust
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
