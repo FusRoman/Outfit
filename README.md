@@ -2,6 +2,9 @@
 [![Docs.rs](https://docs.rs/outfit/badge.svg)](https://docs.rs/outfit)
 [![License: CeCILL-C](https://img.shields.io/badge/license-CeCILL--C-blue.svg)](LICENSE)
 [![CI](https://github.com/FusRoman/Outfit/actions/workflows/ci.yml/badge.svg)](https://github.com/FusRoman/Outfit/actions)
+[![codecov](https://codecov.io/gh/FusRoman/Outfit/branch/main/graph/badge.svg)](https://codecov.io/gh/FusRoman/Outfit)
+[![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange)](https://www.rust-lang.org/)
+
 
 # Outfit
 
