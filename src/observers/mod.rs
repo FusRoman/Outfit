@@ -112,7 +112,7 @@ use hifitime::Epoch;
 use nalgebra::{Matrix3, Vector3};
 use ordered_float::NotNan;
 
-use crate::constants::{Degree, Kilometer, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, MJD};
+use crate::constants::{Degree, Meter, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, MJD};
 use crate::constants::{DPI, ERAU};
 use crate::earth_orientation::equequ;
 use crate::outfit::Outfit;
@@ -215,7 +215,7 @@ impl Observer {
     /// -----------------
     /// * `longitude`: Geodetic longitude in **degrees** (east positive).
     /// * `latitude`: Geodetic latitude in **degrees**.
-    /// * `elevation`: Height above the reference ellipsoid in **kilometers**.
+    /// * `elevation`: Height above the reference ellipsoid in **meters**.
     /// * `name`: Optional site name.
     /// * `ra_accuracy`: Optional RA accuracy in **radians**.
     /// * `dec_accuracy`: Optional DEC accuracy in **radians**.
@@ -236,7 +236,7 @@ impl Observer {
     pub fn new(
         longitude: Degree,
         latitude: Degree,
-        elevation: Kilometer,
+        elevation: Meter,
         name: Option<String>,
         ra_accuracy: Option<f64>,
         dec_accuracy: Option<f64>,
@@ -480,6 +480,66 @@ impl Observer {
 
         Ok(earth_pos + rot_matrix * observer_geocentric_position)
     }
+
+    /// Recover geodetic latitude and ellipsoidal height (WGS-84) from parallax constants.
+    ///
+    /// Inverts the stored parallax coordinates `(ρ·cosφ, ρ·sinφ)` to the **geodetic**
+    /// latitude `φ` (degrees) and the ellipsoidal height `h` (meters) above the
+    /// WGS-84 reference ellipsoid. The computation uses **Bowring’s closed-form**
+    /// formula (no iteration), which is usually sufficient for double-precision
+    /// accuracy at the centimeter level or better.
+    ///
+    /// Units & model
+    /// -------------
+    /// * Inputs: `ρ·cosφ` and `ρ·sinφ` are dimensionless, expressed in **Earth radii**
+    ///   (normalized by the equatorial radius). They are scaled internally by `a`
+    ///   (the equatorial radius) to meters.
+    /// * Output: latitude in **degrees**, height in **meters** (ellipsoidal height, not geoid/orthometric).
+    /// * Ellipsoid: WGS-84 radii from `constants.rs` (`EARTH_MAJOR_AXIS` = `a`, `EARTH_MINOR_AXIS` = `b`).
+    ///   If you prefer exact GRS-80 reproduction, use consistent `b` there; the difference vs WGS-84 is sub-millimetric.
+    ///
+    /// Notes
+    /// -----
+    /// * This routine **does not** compute the geodetic longitude; it only returns `(lat, h)`.
+    ///   Your `Observer` already stores the geodetic longitude independently.
+    /// * Numerical robustness is good across latitudes, including near the poles.
+    /// * If you require bit-for-bit parity with an external reference using a different ellipsoid,
+    ///   ensure `a`/`b` match that reference.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * None.
+    ///
+    /// Return
+    /// ----------
+    /// * `(geodetic_latitude_deg, height_meters)` — latitude in degrees, ellipsoidal height in meters.
+    ///
+    /// See also
+    /// ------------
+    /// * [`geodetic_to_parallax`] – Forward conversion used at construction.
+    /// * [`Observer::from_parallax`] – Builds an observer from `(ρ·cosφ, ρ·sinφ)`.
+    /// * `constants::EARTH_MAJOR_AXIS` / `constants::EARTH_MINOR_AXIS` – Ellipsoid radii used here.
+    pub fn geodetic_lat_height_wgs84(&self) -> (f64, f64) {
+        let a = EARTH_MAJOR_AXIS;
+        let b = EARTH_MINOR_AXIS;
+        let e2 = 1.0 - (b * b) / (a * a);
+        let ep2 = (a * a) / (b * b) - 1.0;
+
+        let p = self.rho_cos_phi.into_inner() * a; // distance in equatorial plane [m]
+        let z = self.rho_sin_phi.into_inner() * a; // z [m]
+
+        // Bowring’s formula:
+        let theta = (z * a).atan2(p * b);
+        let st = theta.sin();
+        let ct = theta.cos();
+        let phi = (z + ep2 * b * st.powi(3)).atan2(p - e2 * a * ct.powi(3));
+
+        let s = phi.sin();
+        let n = a / (1.0 - e2 * s * s).sqrt();
+        let h = p / phi.cos() - n;
+
+        (phi.to_degrees(), h)
+    }
 }
 
 /// Convert geodetic latitude and height into normalized parallax coordinates
@@ -493,7 +553,7 @@ impl Observer {
 /// Arguments
 /// ---------
 /// * `lat` - Geodetic latitude of the observer in **radians**.
-/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **meters**.
 ///
 /// Returns
 /// -------
@@ -506,8 +566,8 @@ impl Observer {
 /// Details
 /// -------
 /// The computation uses the reference ellipsoid defined by:
-/// * `EARTH_MAJOR_AXIS`: Equatorial radius (km),
-/// * `EARTH_MINOR_AXIS`: Polar radius (km).
+/// * `EARTH_MAJOR_AXIS`: Equatorial radius (m),
+/// * `EARTH_MINOR_AXIS`: Polar radius (m).
 ///
 /// The formula comes from standard geodetic to geocentric conversion:
 ///
@@ -541,7 +601,7 @@ pub fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     (rho_cos_phi, rho_sin_phi)
 }
 
-/// Convert geodetic latitude (in degrees) and height (in kilometers)
+/// Convert geodetic latitude (in degrees) and height (in meters)
 /// into normalized parallax coordinates.
 ///
 /// This is a convenience wrapper around [`lat_alt_to_parallax`] that
@@ -551,7 +611,7 @@ pub fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 /// Arguments
 /// ---------
 /// * `lat` - Geodetic latitude of the observer in **degrees**.
-/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **meters**.
 ///
 /// Returns
 /// -------
@@ -779,5 +839,85 @@ mod observer_test {
                 0.24333415479994636
             ]
         );
+    }
+
+    #[cfg(test)]
+    mod geodetic_inverse_tests {
+        use super::*;
+        use crate::constants::Degree;
+        use approx::assert_abs_diff_eq;
+
+        /// Round-trip a single site through (lon, lat, h) -> parallax -> inverse
+        /// and check that we recover the original geodetic latitude & height.
+        ///
+        /// Notes
+        /// -----
+        /// * `Observer::new` is given `h_m` in meters (as per current API usage).
+        /// * `geodetic_lat_height_wgs84()` returns height in **meters**; we convert to meters.
+        fn roundtrip_site(name: &str, lon_deg: Degree, lat_deg: Degree, h_m: f64) {
+            // Build observer (forward: geodetic -> parallax is done inside `Observer::new`)
+            let obs = Observer::new(lon_deg, lat_deg, h_m, Some(name.to_string()), None, None)
+                .expect("Failed to create observer");
+
+            // Inverse: parallax -> geodetic (WGS-84)
+            let (lat_rec_deg, h_rec_m) = obs.geodetic_lat_height_wgs84();
+
+            // Tolerances:
+            // - Latitude: 1e-6 deg (~3.6 mas) – tight but should pass for double precision Bowring + 0–1 Newton step
+            // - Height:   1e-2 m
+            let tol_lat_deg = 1e-6;
+            let tol_h_m = 1e-2;
+
+            assert_abs_diff_eq!(lat_rec_deg, lat_deg, epsilon = tol_lat_deg);
+            assert_abs_diff_eq!(h_rec_m, h_m, epsilon = tol_h_m);
+        }
+
+        /// See also
+        /// ------------
+        /// * [`Observer::new`] – Forward geodetic->parallax conversion under test by round-trip.
+        /// * [`Observer::from_parallax`] – Alternative constructor, if you want to inject ρ·cosφ/ρ·sinφ.
+        /// * `geodetic_to_parallax` – The forward routine used internally by `Observer::new`.
+
+        #[test]
+        fn geodetic_roundtrip_known_observatories_wgs84() {
+            // NOTE:
+            // The heights below are commonly quoted "above sea level" (orthometric).
+            // For pure algorithmic round-trip testing, that's acceptable because we feed
+            // the same height into forward and inverse. If you want strict ellipsoidal
+            // (h) values, substitute official WGS-84 heights here.
+            let sites: &[(&str, Degree, Degree, f64)] = &[
+                // name,                      lon_deg (E+), lat_deg (N+), height_m
+                ("Haleakala (PS1 I41)", -156.2575, 20.7075, 3055.0),
+                ("Mauna Kea (CFHT)", -155.4700, 19.8261, 4205.0),
+                ("ESO Paranal", -70.4025, -24.6252, 2635.0),
+                ("Cerro Pachon (Rubin)", -70.7366, -30.2407, 2663.0),
+                ("La Silla", -70.7346, -29.2613, 2400.0),
+                ("Kitt Peak", -111.5967, 31.9583, 2096.0),
+                ("Roque de los Muchachos", -17.8947, 28.7606, 2396.0),
+            ];
+
+            for (name, lon, lat, h_m) in sites.iter().copied() {
+                roundtrip_site(name, lon, lat, h_m);
+            }
+        }
+
+        #[test]
+        fn geodetic_roundtrip_extremes_equator_and_pole() {
+            // Equator, sea level
+            roundtrip_site("Equator (0°, 0 m)", 0.0, 0.0, 0.0);
+
+            // Near-North-Pole and Near-South-Pole with modest height
+            roundtrip_site("Near North Pole", 0.0, 89.999, 1000.0);
+            roundtrip_site("Near South Pole", 0.0, -89.999, 1000.0);
+        }
+
+        #[test]
+        fn geodetic_roundtrip_high_altitude_and_negative() {
+            // Very high site (simulate balloon/aircraft)
+            roundtrip_site("High Alt 10 m", 10.0, 45.0, 10_000.0);
+
+            // Negative height (below ellipsoid, synthetic but tests robustness)
+            roundtrip_site("Below ellipsoid -50 m", -30.0, -10.0, -50.0);
+        }
     }
 }

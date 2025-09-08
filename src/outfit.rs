@@ -59,7 +59,7 @@
 //!   Prefer adding a fallible variant if you need graceful handling.
 //! - I/O and parsing failures are surfaced as [`OutfitError`](crate::outfit_errors::OutfitError) where applicable.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use nalgebra::Matrix3;
 use once_cell::sync::OnceCell;
@@ -366,6 +366,116 @@ impl Outfit {
     pub fn add_observer(&mut self, observer: Arc<Observer>) {
         self.add_observer_internal(observer);
     }
+
+    /// Render the current observatories into a newly allocated `String`.
+    ///
+    /// This is a convenience wrapper around the `Display` implementation of
+    /// the internal struct \[`Observatories`\]. It materializes the formatted list (user-defined
+    /// observers first, then MPC sites if available) into a `String`.
+    ///
+    /// Output format
+    /// -------------
+    /// * Longitude and latitude are shown in **degrees**.
+    /// * Elevation is shown in **kilometers**.
+    /// * User-defined observers are listed first; if initialized, the
+    ///   **MPC observers** section follows.
+    /// * The relative order within each section is not guaranteed to be stable.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * None.
+    ///
+    /// Return
+    /// ----------
+    /// * A `String` containing the formatted observatories.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Outfit::show_observatories`] – Allocation-free display adaptor.
+    /// * [`Observer::geodetic_lat_height_wgs84`] – Provides latitude/height used in the listing.
+    #[inline]
+    pub fn show_observatories_string(&self) -> String {
+        self.observatories.to_string()
+    }
+
+    /// Pretty-print the current set of observatories without allocating a `String`.
+    ///
+    /// Returns a lightweight `Display` adaptor over the internal \[`Observatories`\]
+    /// collection. Use with `format!`, `println!`, log macros, or any consumer of
+    /// `fmt::Display`. User-defined observers are printed first, followed by the
+    /// **MPC observers** section if the MPC table has been initialized.
+    ///
+    /// Output format
+    /// -------------
+    /// * Longitude and latitude are shown in **degrees**.
+    /// * Elevation is shown in **kilometers**.
+    /// * The relative order within each section is not guaranteed to be stable.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * None.
+    ///
+    /// Return
+    /// ----------
+    /// * An [`ObservatoriesView`] display adaptor (zero-copy) suitable for `fmt::Display`.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Outfit::show_observatories_string`] – Eager, allocated `String`.
+    /// * [`Observer::geodetic_lat_height_wgs84`] – Provides latitude/height used in the listing.
+    #[inline]
+    pub fn show_observatories(&self) -> ObservatoriesView<'_> {
+        ObservatoriesView(&self.observatories)
+    }
+}
+
+/// Lightweight, zero-allocation display adaptor for the internal private struct \[`Observatories`\].
+///
+/// This type borrows the internal \[`Observatories`\] and implements `fmt::Display`,
+/// allowing you to pretty-print the full list of observers without allocating an
+/// intermediate `String`. It simply delegates to the `Display` implementation
+/// of \[`Observatories`\].
+///
+/// Output format
+/// -------------
+/// * User-defined observers are listed first.
+/// * If initialized, an **MPC observers** section follows.
+/// * Longitudes/latitudes are shown in **degrees**; elevation is shown in **kilometers**.
+/// * Relative order within each section is not guaranteed to be stable (hash-map backed).
+///
+/// Example
+/// -----------------
+/// ```rust, no_run
+/// # use outfit::outfit::Outfit;
+/// # use outfit::error_models::ErrorModel;
+/// let outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+/// // Print to stdout without allocating a String:
+/// println!("{}", outfit.show_observatories());
+/// // Or, if you need a String, use:
+/// let s = outfit.show_observatories_string();
+/// assert!(s.contains("User-defined observers:"));
+/// ```
+///
+/// Arguments
+/// -----------------
+/// * None (constructed by [`Outfit::show_observatories`]).
+///
+/// Return
+/// ----------
+/// * A display adaptor suitable for `format!`, `println!`, and any `fmt::Display` consumer.
+///
+/// See also
+/// ------------
+/// * [`Outfit::show_observatories`] – Returns this adaptor.
+/// * [`Outfit::show_observatories_string`] – Allocating `String` convenience.
+/// * [`Observer::geodetic_lat_height_wgs84`] – Provides latitude/height used in the listing.
+pub struct ObservatoriesView<'a>(&'a Observatories);
+
+impl<'a> fmt::Display for ObservatoriesView<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Delegate to Observatories' Display without allocating
+        write!(f, "{}", self.0)
+    }
 }
 
 /// Parse a fixed-width float slice from an MPC observatory line.
@@ -425,4 +535,142 @@ fn parse_remain(remain: &str, code: &str) -> (f32, f32, f32, String) {
         return (longitude, cos, 0.0, name.to_string());
     };
     (longitude, cos, sin, name.to_string())
+}
+
+#[cfg(test)]
+mod outfit_show_observatories_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Build a lightweight Outfit for display tests, then add zero or more user observers.
+    ///
+    /// Notes
+    /// -----
+    /// * Uses the public `Outfit::new(...)` constructor to avoid touching private internals.
+    /// * If your `Outfit::new` signature changes, adjust here accordingly.
+    fn build_outfit_with_users(users: &[(&str, f64, f64, f64)]) -> Outfit {
+        // Pick a reasonable default error model; adjust if your API differs.
+        let mut outfit = Outfit::new("horizon:DE440", crate::error_models::ErrorModel::FCCT14)
+            .expect("Failed to construct Outfit for display tests");
+
+        for (name, lon_deg, lat_deg, elev_km) in users.iter().copied() {
+            let obs = Observer::new(
+                lon_deg,
+                lat_deg,
+                elev_km,
+                Some(name.to_string()),
+                None,
+                None,
+            )
+            .expect("Failed to create user observer");
+            // If your API differs, replace with the appropriate method to register observers:
+            outfit.add_observer(Arc::new(obs));
+        }
+        outfit
+    }
+
+    /// Ensure the string rendering equals the Display adaptor output when there are no observers.
+    #[test]
+    fn show_observatories_empty() {
+        let outfit = build_outfit_with_users(&[]);
+
+        let s_string = outfit.show_observatories_string();
+        let s_view = format!("{}", outfit.show_observatories());
+
+        assert_eq!(
+            s_string, s_view,
+            "String output and Display adaptor should match"
+        );
+        assert!(
+            s_string.starts_with("User-defined observers:\n"),
+            "Missing 'User-defined observers:' header. Got:\n{s_string}"
+        );
+        assert!(
+            !s_string.contains("MPC observers:"),
+            "Should not show 'MPC observers:' when OnceLock is unset. Got:\n{s_string}"
+        );
+    }
+
+    /// After adding user-defined observers, they should appear in the output.
+    #[test]
+    fn show_observatories_with_users() {
+        let outfit = build_outfit_with_users(&[
+            ("UserA", 10.0, 0.0, 0.0),
+            ("UserB", 20.0, 45.0, 2.0), // 2 km elevation
+        ]);
+
+        let s_string = outfit.show_observatories_string();
+        let s_view = format!("{}", outfit.show_observatories());
+
+        assert_eq!(
+            s_string, s_view,
+            "String output and Display adaptor should match"
+        );
+
+        // Headers and user names should be present
+        assert!(
+            s_string.starts_with("User-defined observers:\n"),
+            "Missing 'User-defined observers:' header. Got:\n{s_string}"
+        );
+        assert!(
+            s_string.contains("UserA (lon: 10.000000°"),
+            "Missing formatted line for UserA. Got:\n{s_string}"
+        );
+        assert!(
+            s_string.contains("UserB (lon: 20.000000°"),
+            "Missing formatted line for UserB. Got:\n{s_string}"
+        );
+    }
+
+    /// If the MPC table is initialized, the MPC section should appear.
+    ///
+    /// Notes
+    /// -----
+    /// * This test accesses the OnceLock inside `observatories` to inject a minimal MPC table.
+    /// * If your `MpcCodeObs` stores `Arc<Observer>` instead of `Observer`, wrap with `Arc::new`.
+    #[test]
+    fn show_observatories_with_mpc_section() {
+        let outfit = build_outfit_with_users(&[("UserOnly", 0.0, 0.0, 0.0)]);
+
+        // Build a minimal MPC table with one entry
+        let mpc_site = Observer::new(
+            -156.2575,
+            20.7075,
+            3.055,
+            Some("Haleakala".to_string()),
+            None,
+            None,
+        )
+        .expect("Failed to create MPC observer");
+
+        // If MpcCodeObs = HashMap<String, Arc<Observer>>, wrap with Arc::new.
+        // If it is HashMap<String, Observer>, remove Arc::new below.
+        let mut mpc_table: crate::constants::MpcCodeObs = Default::default();
+        // Uncomment ONE of the two lines below depending on your alias:
+        // mpc_table.insert("I41".to_string(), mpc_site);                 // if value is Observer
+        mpc_table.insert("I41".to_string(), Arc::new(mpc_site)); // if value is Arc<Observer>
+
+        // Initialize the OnceLock
+        outfit
+            .observatories
+            .mpc_code_obs
+            .set(mpc_table)
+            .expect("OnceLock<MpcCodeObs> already initialized");
+
+        let s_string = outfit.show_observatories_string();
+        let s_view = format!("{}", outfit.show_observatories());
+
+        assert_eq!(
+            s_string, s_view,
+            "String output and Display adaptor should match"
+        );
+        assert!(
+            s_string.contains("MPC observers:"),
+            "Missing 'MPC observers:' header after setting OnceLock. Got:\n{s_string}"
+        );
+        assert!(
+            s_string.contains("[I41]"),
+            "Missing MPC code tag '[I41]' in output. Got:\n{s_string}"
+        );
+    }
 }

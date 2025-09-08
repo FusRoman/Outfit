@@ -1,7 +1,10 @@
 use super::bimap::BiMap;
 use super::Observer;
 use crate::constants::{Degree, Kilometer, MpcCodeObs};
-use std::sync::{Arc, OnceLock};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct Observatories {
@@ -68,6 +71,43 @@ impl Observatories {
     }
 }
 
+impl fmt::Display for Observatories {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "User-defined observers:")?;
+        for obs in self.obs_to_uint16.keys() {
+            let (lat, height) = obs.geodetic_lat_height_wgs84();
+
+            writeln!(
+                f,
+                "  {} (lon: {:.6}°, lat: {:.6}°, elev: {:.2} km)",
+                obs.name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                obs.longitude,
+                lat,
+                height
+            )?;
+        }
+
+        if let Some(mpc_code_obs) = self.mpc_code_obs.get() {
+            writeln!(f, "MPC observers:")?;
+            for (code, obs) in mpc_code_obs.iter() {
+                let (lat, height) = obs.geodetic_lat_height_wgs84();
+
+                writeln!(
+                    f,
+                    "  {} [{}] (lon: {:.6}°, lat: {:.6}°, elev: {:.2} km)",
+                    obs.name.clone().unwrap_or_else(|| "Unnamed".to_string()),
+                    code,
+                    obs.longitude,
+                    lat,
+                    height
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod observatories_test {
     use super::*;
@@ -88,5 +128,102 @@ mod observatories_test {
         assert_eq!(observatories.obs_to_uint16.len(), 2);
         let observer = observatories.get_observer_from_uint16(1);
         assert_eq!(observer.name, Some("Test2".to_string()));
+    }
+
+    #[cfg(test)]
+    mod observatories_display_tests {
+        use super::*;
+
+        /// Ensure the "user-defined" section is printed and includes both user observers.
+        ///
+        /// Notes
+        /// -----
+        /// * We don't assume any iteration order (HashMap-backed bi-map).
+        /// * We check for the header and the presence of each observer line fragment.
+        #[test]
+        fn display_user_defined_only() {
+            let mut obs = Observatories::new();
+
+            // Build two user-defined observers (elevation in kilometers).
+            obs.create_observer(10.0, 0.0, 0.0, Some("UserA".to_string()));
+            obs.create_observer(20.0, 45.0, 2.0, Some("UserB".to_string()));
+
+            let s = format!("{obs}");
+
+            // Header must be present
+            assert!(
+                s.starts_with("User-defined observers:\n"),
+                "Missing 'User-defined observers:' header. Got:\n{s}"
+            );
+
+            // Each user observer should be listed with their name and longitude fragment
+            assert!(
+                s.contains("UserA (lon: 10.000000°"),
+                "Missing formatted line for UserA. Got:\n{s}"
+            );
+            assert!(
+                s.contains("UserB (lon: 20.000000°"),
+                "Missing formatted line for UserB. Got:\n{s}"
+            );
+
+            // The MPC section should not appear if not initialized
+            assert!(
+                !s.contains("MPC observers:"),
+                "Unexpected 'MPC observers:' section when OnceLock is unset. Got:\n{s}"
+            );
+        }
+
+        /// If the MPC table is initialized, ensure the "MPC observers" section appears.
+        ///
+        /// Notes
+        /// -----
+        /// * We set the OnceLock<MpcCodeObs> with a single entry.
+        /// * We only check for presence of the section and the MPC code tag.
+        #[test]
+        fn display_includes_mpc_section_when_set() {
+            let mut obs = Observatories::new();
+
+            // One user-defined observer so the first section is non-empty.
+            obs.create_observer(0.0, 0.0, 0.0, Some("UserOnly".to_string()));
+
+            // Prepare an MPC observer entry.
+            let mpc_site = Observer::new(
+                -156.2575,
+                20.7075,
+                3.055,
+                Some("Haleakala".to_string()),
+                None,
+                None,
+            )
+            .expect("Failed to create MPC observer");
+
+            // Build an MpcCodeObs map with a single code.
+            // If your `MpcCodeObs` is a type alias, this should compile as-is.
+            // Example: `pub type MpcCodeObs = std::collections::HashMap<String, Observer>` (or Arc<Observer>).
+            let mut mpc_table: MpcCodeObs = Default::default();
+            // Adjust Arc<Observer> vs Observer depending on your alias:
+            // If it is `HashMap<String, Arc<Observer>>`, wrap with `Arc::new(mpc_site)`.
+            use std::sync::Arc;
+            mpc_table.insert("I41".to_string(), Arc::new(mpc_site));
+
+            // Initialize the OnceLock (only once)
+            obs.mpc_code_obs
+                .set(mpc_table)
+                .expect("OnceLock<MpcCodeObs> was already initialized");
+
+            let s = format!("{obs}");
+
+            // MPC section header must be present now
+            assert!(
+                s.contains("MPC observers:"),
+                "Missing 'MPC observers:' header after setting OnceLock. Got:\n{s}"
+            );
+
+            // The code tag should appear in the MPC line
+            assert!(
+                s.contains("[I41]"),
+                "Missing MPC code tag '[I41]' in output. Got:\n{s}"
+            );
+        }
     }
 }

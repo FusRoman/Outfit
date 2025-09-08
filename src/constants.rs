@@ -86,6 +86,8 @@ pub type ArcSec = f64;
 pub type Radian = f64;
 /// Distance in kilometers
 pub type Kilometer = f64;
+/// Distance in meters
+pub type Meter = f64;
 /// MPC code identifying an observatory (3 characters)
 pub type MpcCode = String;
 
