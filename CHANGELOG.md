@@ -2,6 +2,41 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-09-08
+
+### Added
+- **BiMap iteration API**:
+  - `iter()` → `(&K, &V)` over the forward map
+  - `iter_rev()` → `(&V, &K)` over the reverse map
+  - `keys()`, `values()` convenience views
+  - `IntoIterator` impls for `&BiMap`, `&mut BiMap`, and `BiMap` (owned)
+- **Observer inversion**:
+  - `Observer::geodetic_lat_height_wgs84()` — recover **geodetic latitude (deg)** and **ellipsoidal height (m)** from parallax constants `(ρ·cosφ, ρ·sinφ)` using Bowring’s method
+- **Observatories pretty-printing**:
+  - `impl Display for Observatories` — prints *User-defined observers* first, then *MPC observers* (if available); longitude/latitude in **degrees**, elevation in **kilometers**
+  - `Outfit::show_observatories()` — zero-allocation display adaptor for pretty-printing
+  - `Outfit::show_observatories_string()` — convenience method returning a formatted `String`
+  - `Outfit::write_observatories<W: io::Write>()` — write formatted listing to any writer
+
+### Changed
+- Documentation expanded and clarified:
+  - Docstrings for the inversion routine (units, ellipsoid, numerical notes)
+  - Docstrings for `ObservatoriesView` and the Outfit display helpers, including usage examples and “See also” sections
+- Display output now explicitly states units and section ordering; internal indices remain hidden from users
+
+### Fixed
+- **Documentation**: corrected `Observer` docs — elevation is in **meters** (previously incorrectly stated as kilometers). APIs and internal computations were already in meters; this is a documentation fix only (no breaking change).
+- Added unit tests for:
+  - BiMap iteration symmetry (`iter` vs `iter_rev`)
+  - Observatories `Display` output (presence of headers, user/MPC sections)
+  - Outfit display helpers (`show_observatories` vs `show_observatories_string` parity)
+  - Geodetic inversion round-trips on real sites (Haleakalā, Mauna Kea, Paranal, Cerro Pachón, La Silla, Kitt Peak, Roque de los Muchachos), with tolerant assertions via `approx`
+
+### Notes
+- Iteration order for `BiMap`/`Observatories` is hash-based and not guaranteed to be stable; switch to `indexmap` if deterministic insertion order is required.
+
+---
+
 ## [1.0.0] - 2025-09-04
 
 ### Added
