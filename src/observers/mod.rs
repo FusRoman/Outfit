@@ -119,6 +119,7 @@ use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use crate::ref_system::{rotmt, rotpn, RefEpoch, RefSystem};
 use crate::time::gmst;
+use std::fmt;
 
 /// Convert an `Option<f64>` into an `Option<NotNan<f64>>`, propagating `NaN` as an error.
 ///
@@ -142,6 +143,7 @@ use crate::time::gmst;
 /// See also
 /// ------------
 /// * [`ordered_float::NotNan`] – NaN-forbidding wrapper used across the crate.
+#[inline]
 pub fn to_opt_notnan(x: Option<f64>) -> Result<Option<NotNan<f64>>, ordered_float::FloatIsNan> {
     x.map(NotNan::new).transpose()
 }
@@ -542,6 +544,77 @@ impl Observer {
     }
 }
 
+impl fmt::Display for Observer {
+    /// Pretty-print an observer with optional verbose details using `{:#}` formatting.
+    ///
+    /// Default formatting (`{}`) prints a compact one-liner:
+    /// `Name (lon: XX.XXXXXX°, lat: YY.YYYYYY° geodetic, elev: Z.ZZ km)`.
+    ///
+    /// Alternate formatting (`{:#}`) prints a multi-line detailed block including:
+    /// - Parallax constants `(ρ·cosφ, ρ·sinφ)`,
+    /// - Geocentric latitude `φ_geo` and geocentric distance `ρ` (Earth radii),
+    /// - Astrometric 1-σ accuracies in arcseconds (if available).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `self`: The observer to format.
+    ///
+    /// Return
+    /// ----------
+    /// * A human-readable representation suitable for logs and diagnostics.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observer::geodetic_lat_height_wgs84`] – Geodetic latitude (deg) and ellipsoidal height (m).
+    /// * [`geodetic_to_parallax`] – Forward conversion to `(ρ·cosφ, ρ·sinφ)`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Friendly name
+        let name = self.name.as_deref().unwrap_or("Unnamed");
+
+        // Geodetic latitude (deg) and height (m -> km)
+        let (lat_deg, h_m) = self.geodetic_lat_height_wgs84();
+
+        // Geodetic longitude in degrees
+        let lon_deg = self.longitude.into_inner();
+
+        // Geocentric latitude and ρ from parallax constants
+        let rc = self.rho_cos_phi.into_inner();
+        let rs = self.rho_sin_phi.into_inner();
+        let phi_geo_deg = rs.atan2(rc).to_degrees();
+        let rho_re = rc.hypot(rs);
+
+        // Astrometric accuracies (radians -> arcseconds)
+        const RAD2AS: f64 = 206_264.806_247_096_36;
+        let ra_sigma_as = self
+            .ra_accuracy
+            .map(|v| format!("{:.3}″", v.into_inner() * RAD2AS))
+            .unwrap_or_else(|| "—".to_string());
+        let dec_sigma_as = self
+            .dec_accuracy
+            .map(|v| format!("{:.3}″", v.into_inner() * RAD2AS))
+            .unwrap_or_else(|| "—".to_string());
+
+        if f.alternate() {
+            // Verbose, multi-line format (triggered by "{:#}")
+            writeln!(
+                f,
+                "{name} (lon: {lon_deg:.6}°, lat: {lat_deg:.6}° geodetic, elev: {h_m:.2} m)"
+            )?;
+            writeln!(
+                f,
+                "  parallax: ρ·cosφ={rc:.9}, ρ·sinφ={rs:+.9}  |  φ_geo={phi_geo_deg:+.6}°  ρ={rho_re:.6} RE"
+            )?;
+            write!(f, "  astrometric 1σ: RA={ra_sigma_as}, DEC={dec_sigma_as}")
+        } else {
+            // Compact, single-line format (triggered by "{}")
+            write!(
+                f,
+                "{name} (lon: {lon_deg:.6}°, lat: {lat_deg:.6}° geodetic, elev: {h_m:.2} m)"
+            )
+        }
+    }
+}
+
 /// Convert geodetic latitude and height into normalized parallax coordinates
 /// on the Earth.
 ///
@@ -918,6 +991,150 @@ mod observer_test {
 
             // Negative height (below ellipsoid, synthetic but tests robustness)
             roundtrip_site("Below ellipsoid -50 m", -30.0, -10.0, -50.0);
+        }
+    }
+
+    #[cfg(test)]
+    mod observer_display_tests {
+        use super::*;
+
+        /// Convert arcseconds to radians.
+        #[inline]
+        fn arcsec_to_rad(as_val: f64) -> f64 {
+            // 1 arcsec = π / (180 * 3600) rad
+            std::f64::consts::PI / (180.0 * 3600.0) * as_val
+        }
+
+        /// Helper to build an Observer with optional RA/DEC accuracies (in arcseconds).
+        fn make_observer_with_acc(
+            name: Option<&str>,
+            lon_deg: f64,
+            lat_deg: f64,
+            elev_m: f64,
+            ra_as: Option<f64>,
+            dec_as: Option<f64>,
+        ) -> Observer {
+            let ra_sigma = ra_as.map(arcsec_to_rad);
+            let dec_sigma = dec_as.map(arcsec_to_rad);
+
+            Observer::new(
+                lon_deg,
+                lat_deg,
+                elev_m, // elevation in meters
+                name.map(|s| s.to_string()),
+                ra_sigma,
+                dec_sigma,
+            )
+            .expect("Failed to create Observer")
+        }
+
+        /// Compact formatting must be a single line with name/lon/lat/elev.
+        #[test]
+        fn display_compact_single_line() {
+            let obs = make_observer_with_acc(Some("TestSite"), 10.0, 0.0, 0.0, None, None);
+
+            let s = format!("{obs}");
+            // Must not contain newlines in compact form
+            assert!(
+                !s.contains('\n'),
+                "Compact format should be single-line, got:\n{s}"
+            );
+
+            // Must contain expected fragments (predictable numbers)
+            assert!(
+                s.contains("TestSite (lon: 10.000000°"),
+                "Missing name/lon fragment. Got:\n{s}"
+            );
+            assert!(
+                s.contains("lat: 0.000000° geodetic"),
+                "Missing geodetic latitude fragment. Got:\n{s}"
+            );
+            assert!(
+                s.contains("elev: 0.00 m"),
+                "Missing elevation fragment (m). Got:\n{s}"
+            );
+        }
+
+        /// Alternate formatting must be multi-line and include parallax & uncertainties.
+        #[test]
+        fn display_verbose_multiline_with_sections() {
+            let obs = make_observer_with_acc(Some("VerboseSite"), -70.0, -30.0, 2400.0, None, None);
+
+            let s = format!("{obs:#}");
+
+            // Must contain multiple lines and the expected section headers/fragments
+            assert!(
+                s.contains('\n'),
+                "Verbose format should be multi-line. Got:\n{s}"
+            );
+            assert!(
+                s.starts_with("VerboseSite (lon: -70.000000°"),
+                "First line should start with site name and lon. Got:\n{s}"
+            );
+            assert!(
+                s.contains("\n  parallax: ρ·cosφ="),
+                "Missing 'parallax:' line. Got:\n{s}"
+            );
+            assert!(
+                s.contains("φ_geo=") && s.contains("ρ="),
+                "Missing φ_geo/ρ fragments. Got:\n{s}"
+            );
+            assert!(
+                s.contains("\n  astrometric 1σ: RA=—, DEC=—"),
+                "Missing astrometric 1σ line with em-dashes for None. Got:\n{s}"
+            );
+        }
+
+        /// When RA/DEC accuracies are provided, they must be printed in arcseconds with three decimals.
+        #[test]
+        fn display_verbose_shows_ra_dec_sigmas() {
+            // RA = 1.0″, DEC = 2.5″ (passed in arcseconds, converted to radians internally)
+            let obs = make_observer_with_acc(Some("AccSite"), 0.0, 0.0, 0.0, Some(1.0), Some(2.5));
+
+            let s = format!("{obs:#}");
+
+            assert!(
+                s.contains("astrometric 1σ: RA=1.000″, DEC=2.500″"),
+                "Expected RA/DEC sigma in arcseconds with 3 decimals. Got:\n{s}"
+            );
+        }
+
+        /// Name fallback should be "Unnamed" when not provided.
+        #[test]
+        fn display_uses_unnamed_when_missing() {
+            let obs = make_observer_with_acc(None, 5.0, 0.0, 0.0, None, None);
+            let s = format!("{obs}");
+            assert!(
+                s.starts_with("Unnamed (lon: 5.000000°"),
+                "Expected 'Unnamed' fallback. Got:\n{s}"
+            );
+        }
+
+        /// Basic numeric sanity: geodetic height is shown in kilometers in the display.
+        /// For a 3055 m elevation, we expect ~3.055 km (rounded to 2 decimals).
+        #[test]
+        fn display_elevation_shown_in_km() {
+            let obs = make_observer_with_acc(
+                Some("Haleakala-ish"),
+                -156.2575,
+                20.7075,
+                3055.0,
+                None,
+                None,
+            );
+
+            let s = format!("{obs}");
+            // Check the km conversion and rounding only; don't assert on latitude value here.
+            assert!(
+                s.contains("elev: 3055.00 m"),
+                "Expected elevation ~3055 m rounded to 2 decimals. Got:\n{s}"
+            );
+
+            // Optional: ensure lon is printed correctly
+            assert!(
+                s.contains("lon: -156.257500°"),
+                "Longitude formatting mismatch. Got:\n{s}"
+            );
         }
     }
 }

@@ -77,6 +77,10 @@ pub(crate) fn parquet_to_trajset(
     error_dec: ArcSec,
     batch_size: Option<usize>,
 ) -> Result<(), OutfitError> {
+    // Convert arcsecond uncertainties to radians once (cheap).
+    let error_ra_rad = error_ra.to_radians();
+    let error_dec_rad = error_dec.to_radians();
+
     // Resolve observer to its compact u16 key once (hot path avoids map lookups later).
     let uint16_obs = env_state.uint16_from_observer(observer);
 
@@ -208,7 +212,14 @@ pub(crate) fn parquet_to_trajset(
 
                 // Zero-ephemeris constructor: avoids recomputing positions at construction.
                 let obs = Observation::with_positions(
-                    uint16_obs, ra_rad, error_ra, dec_rad, error_dec, mjd_time, geo_pos, helio_pos,
+                    uint16_obs,
+                    ra_rad,
+                    error_ra_rad,
+                    dec_rad,
+                    error_dec_rad,
+                    mjd_time,
+                    geo_pos,
+                    helio_pos,
                 );
 
                 // Group observations by `trajectory_id` (ObjectNumber::Int).
@@ -251,7 +262,14 @@ pub(crate) fn parquet_to_trajset(
                 };
 
                 let obs = Observation::with_positions(
-                    uint16_obs, ra_rad, error_ra, dec_rad, error_dec, mjd_time, geo_pos, helio_pos,
+                    uint16_obs,
+                    ra_rad,
+                    error_ra_rad,
+                    dec_rad,
+                    error_dec_rad,
+                    mjd_time,
+                    geo_pos,
+                    helio_pos,
                 );
 
                 trajectories

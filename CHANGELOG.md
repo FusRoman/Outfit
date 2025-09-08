@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `Outfit::show_observatories()` — zero-allocation display adaptor for pretty-printing
   - `Outfit::show_observatories_string()` — convenience method returning a formatted `String`
   - `Outfit::write_observatories<W: io::Write>()` — write formatted listing to any writer
+- **Observer pretty-printing**:
+  - `impl Display for Observer` with **compact** one-line default (`{}`) and **verbose** multi-line **alternate** formatting (`{:#}`) including parallax constants, geocentric latitude `φ_geo`, geocentric distance `ρ` (RE), and optional RA/DEC 1-σ accuracies (arcsec)
 
 ### Changed
 - Documentation expanded and clarified:
@@ -25,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Display output now explicitly states units and section ordering; internal indices remain hidden from users
 
 ### Fixed
+- **Critical bug – `parquet_to_trajset` RA/DEC uncertainties**:
+  - Observational uncertainties for RA/DEC provided in **arcseconds** were being treated as **radians**.  
+    The routine now **converts arcseconds → radians** (`ArcSec::to_radians()`) once per file before constructing `Observation`s, ensuring correct weighting in the fit and realistic residuals.
 - **Documentation**: corrected `Observer` docs — elevation is in **meters** (previously incorrectly stated as kilometers). APIs and internal computations were already in meters; this is a documentation fix only (no breaking change).
 - Added unit tests for:
   - BiMap iteration symmetry (`iter` vs `iter_rev`)
