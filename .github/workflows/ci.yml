@@ -127,16 +127,15 @@ jobs:
           flags: rust
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
-  # Not yet on crate.io so disabled for now
-  # semver-pr:
-  #   name: SemVer (PR vs base)
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
+  semver-pr:
+    name: SemVer (PR vs base)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  #     - name: Check semver (baseline = PR base)
-  #       uses: obi1kenobi/cargo-semver-checks-action@v2
-  #       with:
-  #         feature-group: all-features
-  #         baseline-rev: ${{ github.event.pull_request.base.sha }}
+      - name: Check semver (baseline = PR base)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          feature-group: all-features
+          baseline-rev: ${{ github.event.pull_request.base.sha }}

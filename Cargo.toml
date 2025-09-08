@@ -2,7 +2,7 @@
 name = "outfit"
 version = "1.1.0"
 edition = "2021"
-license = "CeCILL-C"
+license-file = "LICENSE"
 rust-version = "1.82"
 description = "Orbit determination toolkit in Rust. Provides astrometric parsing, observer management, and initial orbit determination (Gauss method) with JPL ephemeris support."
 readme = "README.md"
@@ -10,7 +10,7 @@ repository = "https://github.com/FusRoman/Outfit"
 homepage = "https://github.com/FusRoman/Outfit"
 documentation = "https://docs.rs/outfit"
 keywords = ["astronomy", "orbit-determination", "asteroid", "ephemeris", "astrometry"]
-categories = ["science", "science::astronomy", "parsing", "data-structures"]
+categories = ["science", "parsing", "data-structures"]
 authors = ["Roman Le Montagner <roman.le-montagner@ijclab.in2p3.fr>"]
 
 [dependencies]
