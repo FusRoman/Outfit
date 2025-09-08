@@ -73,6 +73,15 @@ impl Observatories {
 
 impl fmt::Display for Observatories {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.obs_to_uint16.is_empty() {
+            if self.mpc_code_obs.get().is_none() {
+                writeln!(f, "No observatories defined (user or MPC).\nTrying to get an observer from the MPC or insert a new one to initialize the observatory list.")?;
+                return Ok(());
+            } else {
+                writeln!(f, "No user-defined observers.")?;
+            }
+        }
+
         writeln!(f, "User-defined observers:")?;
         for obs in self.obs_to_uint16.keys() {
             let (lat, height) = obs.geodetic_lat_height_wgs84();

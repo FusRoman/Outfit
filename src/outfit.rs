@@ -582,7 +582,7 @@ mod outfit_show_observatories_tests {
             "String output and Display adaptor should match"
         );
         assert!(
-            s_string.starts_with("User-defined observers:\n"),
+            s_string.starts_with("No observatories defined (user or MPC)."),
             "Missing 'User-defined observers:' header. Got:\n{s_string}"
         );
         assert!(
