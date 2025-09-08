@@ -2,7 +2,7 @@
 name = "outfit"
 version = "1.0.0"
 edition = "2021"
-license = "CeCILL-C"
+license-file = "LICENSE"
 rust-version = "1.82"
 description = "Orbit determination toolkit in Rust. Provides astrometric parsing, observer management, and initial orbit determination (Gauss method) with JPL ephemeris support."
 readme = "README.md"
