@@ -97,10 +97,12 @@
 //! * [`IODParams`] – Tuning for triplet generation and correction.
 //! * [`GaussResult`] – Preliminary vs. corrected orbit representations.
 //! * [`Outfit`] – Ephemerides, reference frames, and observer registry.
+use std::borrow::Cow;
 use std::fmt;
 use std::{collections::HashMap, sync::Arc};
 
-use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, TrajectorySet, MJD};
+use crate::constants::{ArcSec, Degree, ObjectNumber, Observations, Radian, TrajectorySet, MJD};
+use crate::conversion::arcsec_to_rad;
 use crate::initial_orbit_determination::gauss_result::GaussResult;
 use crate::initial_orbit_determination::IODParams;
 use crate::observations::observation_from_batch;
@@ -143,6 +145,47 @@ use std::time::Duration;
 /// ```
 pub type FullOrbitResult =
     HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>;
+
+/// Borrow a Gauss solution (if any) and its RMS for a given key.
+///
+/// Arguments
+/// -----------------
+/// * `all`: The map of all IOD outcomes.
+/// * `key`: The object identifier.
+///
+/// Return
+/// ----------
+/// * `Ok(Some((&GaussResult, f64)))` – a solution is present for the key.
+/// * `Ok(None)` – key absent OR present but no acceptable solution (`None`).
+/// * `Err(&OutfitError)` – the IOD attempt failed for that key.
+///
+/// See also
+/// ------------
+/// * [`GaussResult`] – Gauss IOD output structure.
+pub fn gauss_result_for<'a>(
+    all: &'a FullOrbitResult,
+    key: &ObjectNumber,
+) -> Result<Option<(&'a GaussResult, f64)>, &'a OutfitError> {
+    match all.get(key) {
+        None => Ok(None),
+        Some(Err(e)) => Err(e),
+        Some(Ok((None, _))) => Ok(None),
+        Some(Ok((Some(g), rms))) => Ok(Some((g, *rms))),
+    }
+}
+
+/// Take ownership of the solution for `key`, removing it from the map.
+pub fn take_gauss_result(
+    all: &mut FullOrbitResult,
+    key: &ObjectNumber,
+) -> Result<Option<(GaussResult, f64)>, OutfitError> {
+    match all.remove(key) {
+        None => Ok(None),
+        Some(Err(e)) => Err(e),
+        Some(Ok((None, _))) => Ok(None),
+        Some(Ok((Some(g), rms))) => Ok(Some((g, rms))),
+    }
+}
 
 /// Summary statistics for per-trajectory observation counts.
 ///
@@ -220,12 +263,173 @@ impl fmt::Display for ObsCountStats {
     }
 }
 
+/// Batch of observations from a single observer (angles in **radians**).
+///
+/// This container groups multiple astrometric measurements sharing the same
+/// observer into a single batch, ready to be turned into [`Observation`](crate::observations::Observation)s.
+/// Right ascension and declination are stored in **radians**, and their
+/// 1-σ uncertainties are also **radians**. Epochs are given as **MJD (TT)**.
+///
+/// Fields
+/// -----------------
+/// * `ra` — Right ascension values (**radians**). Length must match `dec` and `time`.
+/// * `error_ra` — 1-σ uncertainty on right ascension (**radians**) applied uniformly to the batch.
+/// * `dec` — Declination values (**radians**). Length must match `ra` and `time`.
+/// * `error_dec` — 1-σ uncertainty on declination (**radians**) applied uniformly to the batch.
+/// * `time` — Observation epochs as **MJD (TT)** (days).
+///
+/// Invariants
+/// -----------------
+/// * `ra.len() == dec.len() == time.len()`
+/// * Angles and uncertainties are expressed in **radians**.
+/// * Time scale is **TT** (use appropriate conversion if your source data are in UTC/TAI).
+///
+/// Construction
+/// -----------------
+/// Prefer the dedicated constructors:
+/// * [`ObservationBatch::from_radians_borrowed`] — zero-copy when your inputs are already in radians.
+/// * [`ObservationBatch::from_degrees_owned`] — converts degrees/arcseconds once into owned buffers.
+///
+/// Example
+/// -----------------
+/// ```rust, no_run
+/// # use outfit::observations::trajectory_ext::ObservationBatch;
+/// # let (ra_deg, dec_deg, mjd) = (vec![14.62], vec![9.98], vec![43785.35799]);
+/// // Inputs in degrees / arcseconds (converted once to radians internally):
+/// let batch = ObservationBatch::from_degrees_owned(&ra_deg, &dec_deg, 0.5, 0.5, &mjd);
+///
+/// // Or, if you already have radians:
+/// // let batch = ObservationBatch::from_radians_borrowed(&ra_rad, &dec_rad, err_ra_rad, err_dec_rad, &mjd);
+/// ```
+///
+/// See also
+/// ------------
+/// * [`ObservationBatch::from_radians_borrowed`] – Borrow slices already in radians (zero-copy).
+/// * [`ObservationBatch::from_degrees_owned`] – Convert degrees/arcseconds → radians once.
+/// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
+/// * [`TrajectoryExt::new_from_vec`] – Create a `TrajectorySet` from a single batch.
+///
 pub struct ObservationBatch<'a> {
-    pub ra: &'a [Degree],
-    pub error_ra: ArcSec,
-    pub dec: &'a [Degree],
-    pub error_dec: ArcSec,
-    pub time: &'a [MJD],
+    /// Right ascension values (**radians**). Must have the same length as `dec` and `time`.
+    pub ra: Cow<'a, [Radian]>,
+
+    /// 1-σ uncertainty on right ascension (**radians**), applied uniformly to the batch.
+    /// Note: the weighting scheme accounts for the RA geometry (e.g., cos δ factors) downstream.
+    pub error_ra: Radian,
+
+    /// Declination values (**radians**). Must have the same length as `ra` and `time`.
+    pub dec: Cow<'a, [Radian]>,
+
+    /// 1-σ uncertainty on declination (**radians**), applied uniformly to the batch.
+    pub error_dec: Radian,
+
+    /// Observation epochs as **MJD (TT)**, in days. Must have the same length as `ra`/`dec`.
+    pub time: Cow<'a, [MJD]>,
+}
+
+impl<'a> ObservationBatch<'a> {
+    /// Construct a batch by **borrowing** slices that are already in radians.
+    ///
+    /// The returned batch holds `Cow::Borrowed` views of the provided slices,
+    /// performing **no allocation** and **no unit conversion**. Use this when your
+    /// upstream pipeline already provides angles in radians and uncertainties in radians.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `ra_rad` — Right ascension values in **radians** (borrowed).
+    /// * `dec_rad` — Declination values in **radians** (borrowed).
+    /// * `error_ra_rad` — 1-σ uncertainty on RA in **radians**, applied uniformly to the batch.
+    /// * `error_dec_rad` — 1-σ uncertainty on DEC in **radians**, applied uniformly to the batch.
+    /// * `time_mjd` — Observation epochs as **MJD (TT)** (borrowed).
+    ///
+    /// Return
+    /// ----------
+    /// * A batch borrowing the provided slices (**zero-copy**).
+    ///
+    /// Panics
+    /// ----------
+    /// * Debug builds only: panics if `ra_rad.len() != dec_rad.len()` or `ra_rad.len() != time_mjd.len()`.
+    ///
+    /// Complexity
+    /// ----------
+    /// * O(1) — no allocation, no conversion.
+    ///
+    /// See also
+    /// ------------
+    /// * [`ObservationBatch::from_degrees_owned`] – Convert degrees/arcseconds to radians and own the buffers.
+    /// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
+    pub fn from_radians_borrowed(
+        ra_rad: &'a [Radian],
+        dec_rad: &'a [Radian],
+        error_ra_rad: Radian,
+        error_dec_rad: Radian,
+        time_mjd: &'a [MJD],
+    ) -> Self {
+        debug_assert_eq!(ra_rad.len(), dec_rad.len(), "RA/DEC length mismatch");
+        debug_assert_eq!(ra_rad.len(), time_mjd.len(), "RA/time length mismatch");
+
+        Self {
+            ra: Cow::Borrowed(ra_rad),
+            dec: Cow::Borrowed(dec_rad),
+            time: Cow::Borrowed(time_mjd),
+            error_ra: error_ra_rad,
+            error_dec: error_dec_rad,
+        }
+    }
+
+    /// Construct a batch from **degrees** (angles) and **arcseconds** (uncertainties),
+    /// converting to **radians** and **owning** the resulting buffers.
+    ///
+    /// Use this when your inputs come from common astrometric formats (e.g., MPC/ADES)
+    /// that report RA/DEC in degrees and uncertainties in arcseconds. Conversion is
+    /// performed **once** at construction; downstream code operates purely in radians.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `ra_deg` — Right ascension in **degrees** (borrowed); converted to radians.
+    /// * `dec_deg` — Declination in **degrees** (borrowed); converted to radians.
+    /// * `error_ra_arcsec` — 1-σ uncertainty on RA in **arcseconds**; converted to radians.
+    /// * `error_dec_arcsec` — 1-σ uncertainty on DEC in **arcseconds**; converted to radians.
+    /// * `time_mjd` — Observation epochs as **MJD (TT)** (borrowed; cloned to owned buffer).
+    ///
+    /// Return
+    /// ----------
+    /// * A batch **owning** converted buffers (no dangling slices).
+    ///
+    /// Panics
+    /// ----------
+    /// * Panics if `ra_deg.len() != dec_deg.len()` or `ra_deg.len() != time_mjd.len()`.
+    ///
+    /// Complexity
+    /// ----------
+    /// * O(n) for the degree→radian and arcsec→radian conversions + one `to_vec()` for time.
+    ///
+    /// See also
+    /// ------------
+    /// * [`ObservationBatch::from_radians_borrowed`] – Zero-copy constructor when inputs are already radians.
+    /// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
+    pub fn from_degrees_owned(
+        ra_deg: &[Degree],
+        dec_deg: &[Degree],
+        error_ra_arcsec: ArcSec,
+        error_dec_arcsec: ArcSec,
+        time_mjd: &[MJD],
+    ) -> Self {
+        assert_eq!(ra_deg.len(), dec_deg.len(), "RA/DEC length mismatch");
+        assert_eq!(ra_deg.len(), time_mjd.len(), "RA/time length mismatch");
+
+        let ra: Vec<f64> = ra_deg.iter().map(|&d| d.to_radians()).collect();
+        let dec: Vec<f64> = dec_deg.iter().map(|&d| d.to_radians()).collect();
+        let time: Vec<MJD> = time_mjd.to_vec();
+
+        Self {
+            ra: Cow::Owned(ra),
+            dec: Cow::Owned(dec),
+            time: Cow::Owned(time),
+            error_ra: arcsec_to_rad(error_ra_arcsec),
+            error_dec: arcsec_to_rad(error_dec_arcsec),
+        }
+    }
 }
 
 /// A trait for the TrajectorySet type def.

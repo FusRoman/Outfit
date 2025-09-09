@@ -8,7 +8,8 @@ use std::collections::hash_map::Entry;
 use std::io;
 use std::sync::Arc;
 
-use crate::constants::{ArcSec, RADEG};
+use crate::constants::ArcSec;
+use crate::conversion::arcsec_to_rad;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
@@ -23,7 +24,7 @@ use parquet::arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ProjectionMa
 use ahash::RandomState;
 use std::collections::HashMap;
 
-type FastHashMap<K, V> = HashMap<K, V, RandomState>;
+pub type FastHashMap<K, V> = HashMap<K, V, RandomState>;
 
 /// Load astrometric observations from a Parquet file into an existing [`TrajectorySet`].
 ///
@@ -78,8 +79,8 @@ pub(crate) fn parquet_to_trajset(
     batch_size: Option<usize>,
 ) -> Result<(), OutfitError> {
     // Convert arcsecond uncertainties to radians once (cheap).
-    let error_ra_rad = error_ra.to_radians();
-    let error_dec_rad = error_dec.to_radians();
+    let error_ra_rad = arcsec_to_rad(error_ra);
+    let error_dec_rad = arcsec_to_rad(error_dec);
 
     // Resolve observer to its compact u16 key once (hot path avoids map lookups later).
     let uint16_obs = env_state.uint16_from_observer(observer);
@@ -183,8 +184,8 @@ pub(crate) fn parquet_to_trajset(
             // Hot loop: build `Observation`s with positions sourced from the per-file cache.
             for i in 0..len {
                 // Convert degrees → radians (fast path: one multiply each).
-                let ra_rad = ra_vals[i] * RADEG;
-                let dec_rad = dec_vals[i] * RADEG;
+                let ra_rad = ra_vals[i].to_radians();
+                let dec_rad = dec_vals[i].to_radians();
 
                 // Convert JD → MJD(TT). Assumes `jd` is already in TT scale in the file;
                 // if not, convert scales here before caching.
@@ -241,8 +242,8 @@ pub(crate) fn parquet_to_trajset(
                     continue; // Drop incomplete rows (policy: skip; alternatively, surface an error)
                 }
 
-                let ra_rad: f64 = ra_arr.value(i) * RADEG;
-                let dec_rad = dec_arr.value(i) * RADEG;
+                let ra_rad: f64 = ra_arr.value(i).to_radians();
+                let dec_rad = dec_arr.value(i).to_radians();
                 let mjd_time = jd_arr.value(i) - JDTOMJD;
                 let tid = tid_arr.value(i);
                 let key = OrderedFloat(mjd_time);

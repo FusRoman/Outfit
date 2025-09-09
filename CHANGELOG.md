@@ -19,23 +19,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `Outfit::write_observatories<W: io::Write>()` — write formatted listing to any writer
 - **Observer pretty-printing**:
   - `impl Display for Observer` with **compact** one-line default (`{}`) and **verbose** multi-line **alternate** formatting (`{:#}`) including parallax constants, geocentric latitude `φ_geo`, geocentric distance `ρ` (RE), and optional RA/DEC 1-σ accuracies (arcsec)
+- **Angle conversions**:
+  - `conversion::arcsec_to_rad(f64) -> f64` — utility to convert **arcseconds → radians**, implemented via `.to_radians()` for numerical consistency
+
 
 ### Changed
 - Documentation expanded and clarified:
   - Docstrings for the inversion routine (units, ellipsoid, numerical notes)
   - Docstrings for `ObservatoriesView` and the Outfit display helpers, including usage examples and “See also” sections
 - Display output now explicitly states units and section ordering; internal indices remain hidden from users
+- **ObservationBatch now stores angles in radians and supports zero-copy or owned buffers**:
+  - Representation switched to **`Cow<'a, [f64]>`** for `ra`, `dec`, and `time`
+  - New constructors:
+    - `ObservationBatch::from_radians_borrowed(&[f64], &[f64], err_ra_rad, err_dec_rad, &[MJD])`
+    - `ObservationBatch::from_degrees_owned(&[f64], &[f64], err_ra_arcsec, err_dec_arcsec, &[MJD])`
+  - Internally, RA/DEC and their uncertainties are **radians**; degree/arcsec inputs are converted **once** at construction
+  - **Migration note** (source-compatible pattern):
+    - **Before**
+      ```rust
+      let batch = ObservationBatch {
+          ra: &ra_deg,
+          error_ra: 0.5,           // arcsec
+          dec: &dec_deg,
+          error_dec: 0.5,          // arcsec
+          time: &time_mjd,
+      };
+      ```
+    - **After** (choose one)
+      ```rust
+      // If your inputs are in degrees / arcseconds:
+      let batch = ObservationBatch::from_degrees_owned(&ra_deg, &dec_deg, 0.5, 0.5, &time_mjd);
+
+      // If your inputs are already radians:
+      let batch = ObservationBatch::from_radians_borrowed(&ra_rad, &dec_rad, err_ra_rad, err_dec_rad, &time_mjd);
+      ```
+- **`observation_from_batch` performance/clarity improvements** (parity with `parquet_to_trajset`):
+  - Resolve observer → compact `u16` **once** before the loop
+  - Pre-fetch UT1 provider once
+  - Introduce an **epoch-position cache**: unique MJD(TT) → `(geo_pos, helio_pos)` so positions are computed once per timestamp
+  - Hot loop no longer performs angle unit conversions; it assumes batch angles/uncertainties are already **radians** (as guaranteed by `ObservationBatch` constructors)
+
 
 ### Fixed
 - **Critical bug – `parquet_to_trajset` RA/DEC uncertainties**:
   - Observational uncertainties for RA/DEC provided in **arcseconds** were being treated as **radians**.  
     The routine now **converts arcseconds → radians** (`ArcSec::to_radians()`) once per file before constructing `Observation`s, ensuring correct weighting in the fit and realistic residuals.
 - **Documentation**: corrected `Observer` docs — elevation is in **meters** (previously incorrectly stated as kilometers). APIs and internal computations were already in meters; this is a documentation fix only (no breaking change).
-- Added unit tests for:
+- Added unit/integration tests for:
   - BiMap iteration symmetry (`iter` vs `iter_rev`)
   - Observatories `Display` output (presence of headers, user/MPC sections)
   - Outfit display helpers (`show_observatories` vs `show_observatories_string` parity)
   - Geodetic inversion round-trips on real sites (Haleakalā, Mauna Kea, Paranal, Cerro Pachón, La Silla, Kitt Peak, Roque de los Muchachos), with tolerant assertions via `approx`
+  - **Integration test `tests/vec_to_iod.rs`** — end-to-end pipeline:
+    `Vec<deg/arcsec> → ObservationBatch::from_degrees_owned → TrajectorySet → estimate_all_orbits (Gauss IOD) → gauss_result_for → KeplerianElements`.  
+    Uses `approx` with angle wrap-around, seeded RNG (`StdRng::seed_from_u64(42)`) for reproducibility, and `jd_to_mjd` for epoch conversion.
 
 ### Notes
 - Iteration order for `BiMap`/`Observatories` is hash-based and not guaranteed to be stable; switch to `indexmap` if deterministic insertion order is required.
