@@ -231,6 +231,7 @@ pub use crate::outfit::Outfit;
 
 // Core data types & units
 pub use crate::constants::{ArcSec, Degree, ObjectNumber, TrajectorySet, MJD};
+pub use crate::observers::Observer;
 
 // Orbital element representations
 pub use crate::orbit_type::{
@@ -270,7 +271,7 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 pub mod prelude {
     pub use crate::{
         ArcSec, Degree, ErrorModel, GaussResult, IODParams, JPLEphem, ObjectNumber, ObservationIOD,
-        Outfit, OutfitError, TrajectoryExt, TrajectorySet, MJD,
+        Observer, Outfit, OutfitError, TrajectoryExt, TrajectorySet, MJD,
     };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
