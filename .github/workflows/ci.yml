@@ -132,7 +132,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
+        # IMPORTANT: full history so the base SHA exists locally
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Check semver (baseline = PR base)
         uses: obi1kenobi/cargo-semver-checks-action@v2
