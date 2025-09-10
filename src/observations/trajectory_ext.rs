@@ -266,21 +266,29 @@ impl fmt::Display for ObsCountStats {
 /// Batch of observations from a single observer (angles in **radians**).
 ///
 /// This container groups multiple astrometric measurements sharing the same
-/// observer into a single batch, ready to be turned into [`Observation`](crate::observations::Observation)s.
-/// Right ascension and declination are stored in **radians**, and their
-/// 1-σ uncertainties are also **radians**. Epochs are given as **MJD (TT)**.
+/// observer into a single batch, ready to be expanded into
+/// [`Observation`](crate::observations::Observation)s and stored in a
+/// [`TrajectorySet`].
+///
+/// Each measurement includes:
+/// - A trajectory identifier (`trajectory_id`) so that a single batch can hold
+///   observations for multiple objects simultaneously.
+/// - Right ascension and declination in **radians**, with uniform 1-σ uncertainties
+///   (also in **radians**).
+/// - Epochs in **MJD (TT)** (days).
 ///
 /// Fields
 /// -----------------
-/// * `ra` — Right ascension values (**radians**). Length must match `dec` and `time`.
+/// * `trajectory_id` — Integer trajectory IDs (object numbers). Length must match `ra`/`dec`/`time`.
+/// * `ra` — Right ascension values (**radians**). Length must match `dec`, `time`, and `trajectory_id`.
 /// * `error_ra` — 1-σ uncertainty on right ascension (**radians**) applied uniformly to the batch.
-/// * `dec` — Declination values (**radians**). Length must match `ra` and `time`.
+/// * `dec` — Declination values (**radians**). Length must match `ra`, `time`, and `trajectory_id`.
 /// * `error_dec` — 1-σ uncertainty on declination (**radians**) applied uniformly to the batch.
-/// * `time` — Observation epochs as **MJD (TT)** (days).
+/// * `time` — Observation epochs as **MJD (TT)** (days). Length must match `ra`/`dec`/`trajectory_id`.
 ///
 /// Invariants
 /// -----------------
-/// * `ra.len() == dec.len() == time.len()`
+/// * `trajectory_id.len() == ra.len() == dec.len() == time.len()`
 /// * Angles and uncertainties are expressed in **radians**.
 /// * Time scale is **TT** (use appropriate conversion if your source data are in UTC/TAI).
 ///
@@ -294,9 +302,9 @@ impl fmt::Display for ObsCountStats {
 /// -----------------
 /// ```rust, no_run
 /// # use outfit::observations::trajectory_ext::ObservationBatch;
-/// # let (ra_deg, dec_deg, mjd) = (vec![14.62], vec![9.98], vec![43785.35799]);
+/// # let (traj_id, ra_deg, dec_deg, mjd) = (vec![0, 0, 1], vec![14.62, 14.63, 15.01], vec![9.98, 10.01, 11.02], vec![43785.35, 43785.36, 43785.40]);
 /// // Inputs in degrees / arcseconds (converted once to radians internally):
-/// let batch = ObservationBatch::from_degrees_owned(&ra_deg, &dec_deg, 0.5, 0.5, &mjd);
+/// let batch = ObservationBatch::from_degrees_owned(&traj_id, &ra_deg, &dec_deg, 0.5, 0.5, &mjd);
 ///
 /// // Or, if you already have radians:
 /// // let batch = ObservationBatch::from_radians_borrowed(&ra_rad, &dec_rad, err_ra_rad, err_dec_rad, &mjd);
@@ -307,9 +315,10 @@ impl fmt::Display for ObsCountStats {
 /// * [`ObservationBatch::from_radians_borrowed`] – Borrow slices already in radians (zero-copy).
 /// * [`ObservationBatch::from_degrees_owned`] – Convert degrees/arcseconds → radians once.
 /// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
-/// * [`TrajectoryExt::new_from_vec`] – Create a `TrajectorySet` from a single batch.
-///
+#[derive(Debug, Clone)]
 pub struct ObservationBatch<'a> {
+    pub trajectory_id: Cow<'a, [u32]>,
+
     /// Right ascension values (**radians**). Must have the same length as `dec` and `time`.
     pub ra: Cow<'a, [Radian]>,
 
@@ -331,11 +340,16 @@ impl<'a> ObservationBatch<'a> {
     /// Construct a batch by **borrowing** slices that are already in radians.
     ///
     /// The returned batch holds `Cow::Borrowed` views of the provided slices,
-    /// performing **no allocation** and **no unit conversion**. Use this when your
-    /// upstream pipeline already provides angles in radians and uncertainties in radians.
+    /// performing **no allocation** and **no unit conversion**.
+    /// Use this when your upstream pipeline already provides:
+    /// - Trajectory identifiers (`trajectory_id`)
+    /// - Right ascension / declination in **radians**
+    /// - Uncertainties in **radians**
+    /// - Epochs in **MJD (TT)**
     ///
     /// Arguments
     /// -----------------
+    /// * `trajectory_id` — Integer trajectory IDs; length must match all angle/time slices.
     /// * `ra_rad` — Right ascension values in **radians** (borrowed).
     /// * `dec_rad` — Declination values in **radians** (borrowed).
     /// * `error_ra_rad` — 1-σ uncertainty on RA in **radians**, applied uniformly to the batch.
@@ -346,9 +360,13 @@ impl<'a> ObservationBatch<'a> {
     /// ----------
     /// * A batch borrowing the provided slices (**zero-copy**).
     ///
+    /// Invariants
+    /// ----------
+    /// * `trajectory_id.len() == ra_rad.len() == dec_rad.len() == time_mjd.len()`
+    ///
     /// Panics
     /// ----------
-    /// * Debug builds only: panics if `ra_rad.len() != dec_rad.len()` or `ra_rad.len() != time_mjd.len()`.
+    /// * Debug builds only: panics if the slice lengths do not match.
     ///
     /// Complexity
     /// ----------
@@ -356,9 +374,10 @@ impl<'a> ObservationBatch<'a> {
     ///
     /// See also
     /// ------------
-    /// * [`ObservationBatch::from_degrees_owned`] – Convert degrees/arcseconds to radians and own the buffers.
+    /// * [`ObservationBatch::from_degrees_owned`] – Convert degrees/arcseconds → radians and own the buffers.
     /// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
     pub fn from_radians_borrowed(
+        trajectory_id: &'a [u32],
         ra_rad: &'a [Radian],
         dec_rad: &'a [Radian],
         error_ra_rad: Radian,
@@ -369,6 +388,7 @@ impl<'a> ObservationBatch<'a> {
         debug_assert_eq!(ra_rad.len(), time_mjd.len(), "RA/time length mismatch");
 
         Self {
+            trajectory_id: Cow::Borrowed(trajectory_id),
             ra: Cow::Borrowed(ra_rad),
             dec: Cow::Borrowed(dec_rad),
             time: Cow::Borrowed(time_mjd),
@@ -381,11 +401,12 @@ impl<'a> ObservationBatch<'a> {
     /// converting to **radians** and **owning** the resulting buffers.
     ///
     /// Use this when your inputs come from common astrometric formats (e.g., MPC/ADES)
-    /// that report RA/DEC in degrees and uncertainties in arcseconds. Conversion is
-    /// performed **once** at construction; downstream code operates purely in radians.
+    /// that report RA/DEC in degrees and uncertainties in arcseconds.
+    /// Conversion is performed **once** at construction; downstream code operates purely in radians.
     ///
     /// Arguments
     /// -----------------
+    /// * `trajectory_id` — Integer trajectory IDs; length must match all angle/time slices.
     /// * `ra_deg` — Right ascension in **degrees** (borrowed); converted to radians.
     /// * `dec_deg` — Declination in **degrees** (borrowed); converted to radians.
     /// * `error_ra_arcsec` — 1-σ uncertainty on RA in **arcseconds**; converted to radians.
@@ -396,9 +417,13 @@ impl<'a> ObservationBatch<'a> {
     /// ----------
     /// * A batch **owning** converted buffers (no dangling slices).
     ///
+    /// Invariants
+    /// ----------
+    /// * `trajectory_id.len() == ra_deg.len() == dec_deg.len() == time_mjd.len()`
+    ///
     /// Panics
     /// ----------
-    /// * Panics if `ra_deg.len() != dec_deg.len()` or `ra_deg.len() != time_mjd.len()`.
+    /// * Panics if the slice lengths do not match.
     ///
     /// Complexity
     /// ----------
@@ -406,9 +431,10 @@ impl<'a> ObservationBatch<'a> {
     ///
     /// See also
     /// ------------
-    /// * [`ObservationBatch::from_radians_borrowed`] – Zero-copy constructor when inputs are already radians.
+    /// * [`ObservationBatch::from_radians_borrowed`] – Zero-copy constructor when inputs are already in radians.
     /// * [`conversion::arcsec_to_rad`](crate::conversion::arcsec_to_rad) – Arcseconds → radians helper.
     pub fn from_degrees_owned(
+        trajectory_id: &'a [u32],
         ra_deg: &[Degree],
         dec_deg: &[Degree],
         error_ra_arcsec: ArcSec,
@@ -423,6 +449,7 @@ impl<'a> ObservationBatch<'a> {
         let time: Vec<MJD> = time_mjd.to_vec();
 
         Self {
+            trajectory_id: Cow::Owned(trajectory_id.to_vec()),
             ra: Cow::Owned(ra),
             dec: Cow::Owned(dec),
             time: Cow::Owned(time),
@@ -485,50 +512,89 @@ pub trait TrajectoryExt {
     ///   * ref: <https://www.minorplanetcenter.net/iau/info/OpticalObs.html>
     fn add_from_80col(&mut self, env_state: &mut Outfit, colfile: &Utf8Path);
 
-    /// Create a TrajectorySet from an object number, right ascension, declination, time, and one observer.
-    /// Each observations should have been observed by the same observer.
+    /// Create a new [`TrajectorySet`] from a batch of observations taken by a single observer.
+    ///
+    /// This constructor consumes an [`ObservationBatch`] and groups its observations
+    /// into trajectories, keyed by their `trajectory_id`.  
+    /// Each observation in the batch must have been recorded by the **same observer**,
+    /// but may belong to **different objects** (distinguished by `trajectory_id`).
     ///
     /// Arguments
-    /// ---------
-    /// * `env_state`: a mutable reference to the Outfit instance
-    /// * `object_number`: the object number
-    /// * `ra`: a vector of right ascension
-    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
-    /// * `dec`: a vector of declination
-    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
-    /// * `time`: a vector of time in MJD
-    /// * `observer`: the observer
+    /// -----------------
+    /// * `env_state` — Mutable reference to the global [`Outfit`] state (used for ephemerides, UT1, etc.).
+    /// * `batch` — An [`ObservationBatch`] containing RA/DEC/epoch values (radians + MJD/TT) and trajectory IDs.
+    /// * `observer` — The observer that recorded all observations in the batch.
     ///
     /// Return
-    /// ------
-    /// * a TrajectorySet containing the observations
+    /// -----------------
+    /// * `Ok(Self)` — A new [`TrajectorySet`] containing one or more trajectories populated from the batch.
+    /// * `Err(OutfitError)` — If observation construction or position computations fail.
+    ///
+    /// Invariants
+    /// -----------------
+    /// * `batch.trajectory_id.len() == batch.ra.len() == batch.dec.len() == batch.time.len()`
+    /// * Angles and uncertainties in the batch must already be in **radians**.
+    ///
+    /// Example
+    /// -----------------
+    /// ```rust, no_run
+    /// # use outfit::observations::trajectory_ext::{ObservationBatch, TrajectorySet};
+    /// # use outfit::{Outfit, ErrorModel};
+    /// # use std::sync::Arc;
+    /// # let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+    /// # let observer = env.get_observer_from_mpc_code(&"I41".to_string());
+    /// # let (traj_id, ra_deg, dec_deg, mjd) = (vec![0, 0, 1], vec![14.62, 14.63, 15.01], vec![9.98, 10.01, 11.02], vec![43785.35, 43785.36, 43785.40]);
+    /// let batch = ObservationBatch::from_degrees_owned(&traj_id, &ra_deg, &dec_deg, 0.5, 0.5, &mjd);
+    ///
+    /// // Build a trajectory set directly from the batch:
+    /// let ts = TrajectorySet::new_from_vec(&mut env, &batch, observer).unwrap();
+    /// ```
     fn new_from_vec(
         env_state: &mut Outfit,
-        object_number: &str,
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
-    ) -> Self;
+    ) -> Result<Self, OutfitError>
+    where
+        Self: Sized;
 
-    /// Add the observations of an object number, right ascension, declination, time, and one observer to a TrajectorySet
-    /// Each observations should have been observed by the same observer.
+    /// Add the observations from a batch to an existing [`TrajectorySet`].
+    ///
+    /// This method inserts all observations from the provided [`ObservationBatch`] into
+    /// the current set, grouping them into trajectories by `trajectory_id`.
+    /// Each observation in the batch must have been recorded by the **same observer**,
+    /// but may belong to multiple distinct objects.
     ///
     /// Arguments
-    /// ---------
-    /// * `env_state`: a mutable reference to the Outfit instance
-    /// * `object_number`: the object number
-    /// * `ra`: a vector of right ascension
-    /// * `error_ra`: the error in right ascension (it is the same for all observations as it is the same observer)
-    /// * `dec`: a vector of declination
-    /// * `error_dec`: the error in declination (it is the same for all observations as it is the same observer)
-    /// * `time`: a vector of time in MJD
-    /// * `observer`: the observer
+    /// -----------------
+    /// * `env_state` — Mutable reference to the global [`Outfit`] state (used for ephemerides, UT1, etc.).
+    /// * `batch` — An [`ObservationBatch`] containing RA/DEC/epoch values (radians + MJD/TT) and trajectory IDs.
+    /// * `observer` — The observer that recorded all observations in the batch.
+    ///
+    /// Return
+    /// -----------------
+    /// * `Ok(())` — If all observations were successfully inserted into the `TrajectorySet`.
+    /// * `Err(OutfitError)` — If observation construction or position computations fail.
+    ///
+    /// Example
+    /// -----------------
+    /// ```rust, no_run
+    /// # use outfit::observations::trajectory_ext::{ObservationBatch, TrajectorySet};
+    /// # use outfit::{Outfit, ErrorModel};
+    /// # use std::sync::Arc;
+    /// # let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+    /// # let observer = env.get_observer_from_mpc_code(&"I41".to_string());
+    /// # let (traj_id, ra_deg, dec_deg, mjd) = (vec![0, 0, 1], vec![14.62, 14.63, 15.01], vec![9.98, 10.01, 11.02], vec![43785.35, 43785.36, 43785.40]);
+    /// let batch = ObservationBatch::from_degrees_owned(&traj_id, &ra_deg, &dec_deg, 0.5, 0.5, &mjd);
+    ///
+    /// let mut ts = TrajectorySet::new(); // empty set
+    /// ts.add_from_vec(&mut env, &batch, observer).unwrap();
+    /// ```
     fn add_from_vec(
         &mut self,
         env_state: &mut Outfit,
-        object_number: &str,
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
-    );
+    ) -> Result<(), OutfitError>;
 
     /// Create a new [`TrajectorySet`] from a Parquet file.
     ///
@@ -738,28 +804,22 @@ pub trait TrajectoryExt {
 impl TrajectoryExt for TrajectorySet {
     fn new_from_vec(
         env_state: &mut Outfit,
-        object_number: &str,
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
-    ) -> Self {
-        let observations: Observations = observation_from_batch(env_state, batch, observer);
+    ) -> Result<Self, OutfitError> {
         let mut traj_set: TrajectorySet = HashMap::default();
-        traj_set.insert(ObjectNumber::String(object_number.into()), observations);
-        traj_set
+        observation_from_batch(&mut traj_set, env_state, batch, observer)?;
+        Ok(traj_set)
     }
 
     fn add_from_vec(
         &mut self,
         env_state: &mut Outfit,
-        object_number: &str,
         batch: &ObservationBatch<'_>,
         observer: Arc<Observer>,
-    ) {
-        let observations: Observations = observation_from_batch(env_state, batch, observer);
-        self.insert(
-            ObjectNumber::String(object_number.to_string()),
-            observations,
-        );
+    ) -> Result<(), OutfitError> {
+        observation_from_batch(self, env_state, batch, observer)?;
+        Ok(())
     }
 
     fn add_from_parquet(

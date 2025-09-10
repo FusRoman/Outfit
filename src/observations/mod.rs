@@ -108,13 +108,15 @@ use crate::{
     outfit::Outfit,
     outfit_errors::OutfitError,
     time::frac_date_to_mjd,
+    TrajectorySet,
 };
 use ahash::RandomState;
 use camino::Utf8Path;
 use hifitime::Epoch;
 use nalgebra::Vector3;
 use ordered_float::OrderedFloat;
-use std::{collections::hash_map::Entry, f64::consts::PI, ops::Range, sync::Arc};
+use smallvec::SmallVec;
+use std::{f64::consts::PI, ops::Range, sync::Arc};
 use thiserror::Error;
 
 /// Astrometric observation with site and precomputed observer positions.
@@ -643,114 +645,133 @@ pub(crate) fn extract_80col(
     ))
 }
 
-/// Build concrete [`Observation`]s from a single-observer batch (angles in **radians**).
+/// Expand a single-observer batch into concrete [`Observation`]s and append them into a [`TrajectorySet`].
 ///
-/// This routine expands an [`ObservationBatch`] (RA/DEC in **radians**, 1-σ uncertainties
-/// in **radians**, epochs in **MJD (TT)**) into a vector of [`Observation`]s. It assumes
-/// all measurements come from the **same observer** and therefore:
+/// This routine ingests an [`ObservationBatch`] whose angles and uncertainties are in **radians**
+/// and whose epochs are **MJD (TT)**, then materializes per-sample [`Observation`]s enriched with
+/// site geocentric and heliocentric positions. All measurements are assumed to come from the **same
+/// observer** (hence a single `observer: Arc<Observer>` argument).
 ///
-/// * resolves the observer to a compact `u16` **once** (hot path),
-/// * pre-fetches the UT1 provider **once**,
-/// * caches observer positions by epoch: **MJD(TT) → (geo_pos, helio_pos)**, so that
-///   expensive geocentric/heliocentric position computations are performed **once per
-///   unique timestamp** instead of once per sample.
+/// For performance, it:
+/// - resolves the observer into a compact `u16` **once** (hot path),
+/// - pre-fetches the UT1 provider **once**,
+/// - caches observer positions by epoch: **MJD(TT) → (geo_pos, helio_pos)**,
+///   so repeated timestamps incur **no extra** position computation.
 ///
-/// Internally, epoch keys are wrapped in `OrderedFloat` to allow use as `HashMap` keys
-/// (total order over `f64` while rejecting `NaN` inputs by construction).
+/// Internally, epoch keys are wrapped in `OrderedFloat` to enable their use in a hash map
+/// (total order on `f64` while rejecting `NaN` inputs by construction).
 ///
 /// Arguments
 /// -----------------
-/// * `env_state` – Global Outfit state (ephemerides, EOP/UT1 provider, error model, …).
-/// * `batch` – Angles in **radians** and 1-σ uncertainties in **radians**; epochs as **MJD (TT)**.
-/// * `observer` – The (single) observer for all samples in the batch (site geometry, etc.).
+/// * `trajectories` — Target container to receive observations, bucketed by `trajectory_id`.
+/// * `env_state` — Global [`Outfit`] state (ephemerides, EOP/UT1 providers, etc.).
+/// * `batch` — Angles and 1-σ uncertainties in **radians**; epochs as **MJD (TT)**; includes `trajectory_id`.
+/// * `observer` — The (single) observer for **all** samples in `batch`.
 ///
 /// Return
 /// ----------
-/// * A vector of [`Observation`] built from the input batch, with per-sample site/heliocentric
-///   positions retrieved from the epoch cache.
+/// * `Ok(())` if all observations were successfully appended into `trajectories`,
+/// * `Err(OutfitError)` if site position or heliocentric position computations fail.
 ///
 /// Panics
 /// ----------
-/// * Panics if `observer.pvobs(...)` or `observer.helio_position(...)` return an error
-///   (due to the `unwrap()`s). If you need fallible behavior, introduce a `Result<Observations, OutfitError>`
-///   variant and propagate errors instead of panicking.
-/// * Assumes `batch.ra.len() == batch.dec.len() == batch.time.len()`; length checks are expected to be
-///   enforced at construction time (see `ObservationBatch` constructors).
+/// * **Debug builds only**: length mismatches across `ra/dec/time/trajectory_id` trigger `debug_assert!`.
 ///
 /// Complexity
 /// ----------
-/// * Time: **O(n)**, with **O(u)** geocentric/heliocentric computations where `u` is the number of
-///   **unique** epochs in the batch (`u ≤ n`).  
+/// * Time: **O(n)**, with at most **O(u)** geocentric/heliocentric computations where `u` is the number of
+///   **unique** epochs in the batch (`u ≤ n`) thanks to the epoch→position cache.
 /// * Space: **O(u)** for the epoch→position cache.
 ///
 /// Notes
 /// ----------
-/// * Input angles (RA/DEC) and uncertainties **must already be in radians**. Use
-///   [`ObservationBatch::from_degrees_owned`] if your source data are in degrees/arcseconds.
-/// * The current signature uses `&mut Outfit` and computes per-sample positions, which limits
-///   parallelization. If you need Rayon-style parallel loops, consider pre-extracting immutable
-///   data from `env_state` and/or redesigning the position providers to accept shared references.
+/// * Input angles (RA/DEC) and uncertainties **must already be in radians**. If your source is degrees/arcsec,
+///   build the batch via [`ObservationBatch::from_degrees_owned`] (conversion done once at construction).
+/// * Epochs are expected as **TT**. Convert upstream if your pipeline feeds UTC/TAI.
+/// * This function mutates `trajectories` and reads from `env_state`. If you need parallelization, consider
+///   extracting immutable position providers beforehand, or designing providers that accept shared references.
 ///
 /// See also
 /// ------------
 /// * [`ObservationBatch::from_radians_borrowed`] – Zero-copy batch when inputs are already radians.
 /// * [`ObservationBatch::from_degrees_owned`] – Degree/arcsec → rad conversion once at construction.
-/// * [`parquet_to_trajset`] – Batch ingestion from Parquet using the same unit/weighting logic.
+/// * [`parquet_to_trajset`] – Parquet ingestion using the same unit/weighting logic.
 /// * [`conversion::arcsec_to_rad`] – Arcseconds → radians helper.
 pub(crate) fn observation_from_batch(
+    trajectories: &mut TrajectorySet,
     env_state: &mut Outfit,
     batch: &ObservationBatch<'_>,
     observer: Arc<Observer>,
-) -> Observations {
-    // Resolve the observer to its compact u16 key once (avoids repeated lookups in the hot loop).
+) -> Result<(), OutfitError> {
+    // --- Fast sanity checks (debug only) ---------------------------------------
+    // All slices must be aligned one-to-one. These checks are enforced at construction
+    // time for production, but we keep them here in debug builds to catch regressions.
+    debug_assert_eq!(batch.ra.len(), batch.dec.len(), "RA/DEC length mismatch");
+    debug_assert_eq!(batch.ra.len(), batch.time.len(), "RA/time length mismatch");
+    debug_assert_eq!(
+        batch.ra.len(),
+        batch.trajectory_id.len(),
+        "RA/trajectory_id length mismatch"
+    );
+
+    // Resolve observer ID once (hot path avoids map lookups later).
     let uint16_obs = env_state.uint16_from_observer(observer.clone());
 
-    // Pre-fetch the UT1 provider once.
+    // Pre-fetch UT1 provider once.
     let ut1 = env_state.get_ut1_provider();
 
-    // Cache MJD(TT) → (geocentric_position, heliocentric_position).
-    // Note: this assumes a single observer. If ingesting multiple observers, extend the key to
-    // (observer_id, time) e.g., pack into a u64 or use a tuple key.
+    // Heuristic: many surveys repeat epochs per exposure → cache a fraction of N.
+    let n = batch.ra.len();
+    let est_cache_cap = (n / 4).clamp(64, 4096);
     let mut pos_cache: FastHashMap<OrderedFloat<f64>, (Vector3<f64>, Vector3<f64>)> =
-        FastHashMap::with_capacity_and_hasher(4096, RandomState::default());
+        FastHashMap::with_capacity_and_hasher(est_cache_cap, RandomState::default());
 
-    batch
-        .ra
-        .iter()
-        .zip(batch.dec.iter())
-        .zip(batch.time.iter())
-        .map(|((ra, dec), time)| {
-            // Use OrderedFloat to allow f64 keys with a total order in the cache map.
-            let key = OrderedFloat(*time);
+    // Safe and fast: iterators avoid per-iteration bounds checks
+    let ra_it = batch.ra.iter().copied();
+    let dec_it = batch.dec.iter().copied();
+    let time_it = batch.time.iter().copied();
+    let id_it = batch.trajectory_id.iter().copied();
 
-            // Compute observer positions once per unique epoch.
-            let (geo_pos, helio_pos) = match pos_cache.entry(key) {
-                Entry::Occupied(e) => *e.get(),
-                Entry::Vacant(v) => {
-                    let epoch = Epoch::from_mjd_in_time_scale(*time, hifitime::TimeScale::TT);
+    for ((ra, dec), (mjd_tt, traj_id)) in ra_it.zip(dec_it).zip(time_it.zip(id_it)) {
+        // Use OrderedFloat to permit f64 as a key with a total order.
+        let key = OrderedFloat(mjd_tt);
 
-                    // Geocentric position (velocity unused here, but available if needed).
-                    let (geo, _vel) = observer.pvobs(&epoch, ut1).unwrap();
-                    // Heliocentric position (requires geocentric as input).
-                    let helio = observer.helio_position(env_state, &epoch, &geo).unwrap();
+        // Compute (or reuse) positions at this epoch.
+        let (geo_pos, helio_pos) = if let Some(&(geo, helio)) = pos_cache.get(&key) {
+            (geo, helio)
+        } else {
+            let epoch = Epoch::from_mjd_in_time_scale(mjd_tt, hifitime::TimeScale::TT);
 
-                    v.insert((geo, helio));
-                    (geo, helio)
-                }
-            };
+            // Geocentric position (velocity returned but unused here).
+            let (geo, _vel) = observer.pvobs(&epoch, ut1)?;
 
-            Observation::with_positions(
-                uint16_obs,
-                *ra,             // radians
-                batch.error_ra,  // radians
-                *dec,            // radians
-                batch.error_dec, // radians
-                *time,           // MJD (TT)
-                geo_pos,
-                helio_pos,
-            )
-        })
-        .collect()
+            // Heliocentric position (uses geocentric position).
+            let helio = observer.helio_position(env_state, &epoch, &geo)?;
+
+            pos_cache.insert(key, (geo, helio));
+            (geo, helio)
+        };
+
+        // Build observation and append to the right trajectory bucket.
+        let obs = Observation::with_positions(
+            uint16_obs,
+            ra,              // radians
+            batch.error_ra,  // radians
+            dec,             // radians
+            batch.error_dec, // radians
+            mjd_tt,          // MJD(TT)
+            geo_pos,
+            helio_pos,
+        );
+
+        let obj = ObjectNumber::Int(traj_id);
+        trajectories
+            .entry(obj)
+            .or_insert_with(|| SmallVec::with_capacity(32))
+            .push(obs);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

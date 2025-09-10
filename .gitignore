@@ -16,3 +16,4 @@ perf_data.data
 run_perf_bench.sh
 run_perf_example.sh
 lcov.info
+run_semver.sh

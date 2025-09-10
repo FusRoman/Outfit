@@ -2,7 +2,7 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2025-09-08
+## [2.0.0] - 2025-09-10
 
 ### Added
 - **BiMap iteration API**:
@@ -21,7 +21,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `impl Display for Observer` with **compact** one-line default (`{}`) and **verbose** multi-line **alternate** formatting (`{:#}`) including parallax constants, geocentric latitude `φ_geo`, geocentric distance `ρ` (RE), and optional RA/DEC 1-σ accuracies (arcsec)
 - **Angle conversions**:
   - `conversion::arcsec_to_rad(f64) -> f64` — utility to convert **arcseconds → radians**, implemented via `.to_radians()` for numerical consistency
-
+- **ObjectNumber ordering traits**:
+  - `ObjectNumber` now derives `PartialOrd` and `Ord` (in addition to `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`):
+    ```rust
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub enum ObjectNumber {
+        /// Integer-based MPC designation (e.g. 1, 433…)
+        Int(u32),
+        /// String-based designation (provisional, comet, etc.)
+        String(String),
+    }
+    ```
+  - This allows deterministic sorting of objects (useful for stable iteration in tests & reports).
 
 ### Changed
 - Documentation expanded and clarified:
@@ -53,11 +64,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
       // If your inputs are already radians:
       let batch = ObservationBatch::from_radians_borrowed(&ra_rad, &dec_rad, err_ra_rad, err_dec_rad, &time_mjd);
       ```
+- **`observation_from_batch` now fills the entire `TrajectorySet`**:
+  - Previously returned a single `Observations` vector for one trajectory.
+  - Now takes a `&mut TrajectorySet` and **inserts observations for all trajectory IDs found in the batch** (grouping by `trajectory_id`).
+  - See **Breaking Changes** for details and migration snippet.
 - **`observation_from_batch` performance/clarity improvements** (parity with `parquet_to_trajset`):
   - Resolve observer → compact `u16` **once** before the loop
   - Pre-fetch UT1 provider once
   - Introduce an **epoch-position cache**: unique MJD(TT) → `(geo_pos, helio_pos)` so positions are computed once per timestamp
   - Hot loop no longer performs angle unit conversions; it assumes batch angles/uncertainties are already **radians** (as guaranteed by `ObservationBatch` constructors)
+
 
 
 ### Fixed
@@ -74,8 +90,89 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     `Vec<deg/arcsec> → ObservationBatch::from_degrees_owned → TrajectorySet → estimate_all_orbits (Gauss IOD) → gauss_result_for → KeplerianElements`.  
     Uses `approx` with angle wrap-around, seeded RNG (`StdRng::seed_from_u64(42)`) for reproducibility, and `jd_to_mjd` for epoch conversion.
 
+### Breaking Changes
+- **`TrajectorySet::new_from_vec` and `add_from_vec` signatures changed**:
+  - **Before**
+    ```rust
+    fn new_from_vec(
+        env_state: &mut Outfit,
+        object_number: &str,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    ) -> Self;
+
+    fn add_from_vec(
+        &mut self,
+        env_state: &mut Outfit,
+        object_number: &str,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    );
+    ```
+  - **After**
+    ```rust
+    fn new_from_vec(
+        env_state: &mut Outfit,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    ) -> Result<Self, OutfitError>
+    where
+        Self: Sized;
+
+    fn add_from_vec(
+        &mut self,
+        env_state: &mut Outfit,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    ) -> Result<(), OutfitError>;
+    ```
+  - **Migration note**:
+    - The `object_number` parameter was removed; the object identity is now taken from `batch.trajectory_id`.
+    - Error handling switched to `Result<..., OutfitError>`.
+    - Typical update:
+      ```rust
+      // Before
+      let mut ts = TrajectorySet::new_from_vec(&mut env, "33803", &batch, observer);
+
+      // After
+      let mut ts = TrajectorySet::new_from_vec(&mut env, &batch, observer)?;
+      ```
+
+- **`observation_from_batch` now populates all trajectories**:
+  - **Before**: returned `Observations` for a single trajectory.
+    ```rust
+    pub(crate) fn observation_from_batch(
+        env_state: &mut Outfit,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    ) -> Observations
+    ```
+  - **After**: returns `Result<(), OutfitError>` and appends observations directly into a `TrajectorySet`, grouping by `batch.trajectory_id`.
+    ```rust
+    pub(crate) fn observation_from_batch(
+        trajectories: &mut TrajectorySet,
+        env_state: &mut Outfit,
+        batch: &ObservationBatch<'_>,
+        observer: Arc<Observer>,
+    ) -> Result<(), OutfitError>
+    ```
+  - **Migration note**:
+    - If you previously did:
+      ```rust
+      let obs = observation_from_batch(&mut env, &batch, observer);
+      ts.insert(object_number, obs);
+      ```
+    - You should now do:
+      ```rust
+      observation_from_batch(&mut ts, &mut env, &batch, observer)?;
+      ```
+
 ### Notes
 - Iteration order for `BiMap`/`Observatories` is hash-based and not guaranteed to be stable; switch to `indexmap` if deterministic insertion order is required.
+- With `ObjectNumber: Ord`, you can now sort keys for stable iteration in tests and reports:
+  ```rust
+  let mut keys: Vec<_> = traj_set.keys().cloned().collect();
+  keys.sort();
 
 ---
 

@@ -107,7 +107,7 @@ pub type MJD = f64;
 /// - An asteroid number (e.g. `Int(1234)`)
 /// - A comet number (e.g. `"1234P"`)
 /// - A provisional designation (e.g. `"K25D50B"`)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ObjectNumber {
     /// Integer-based MPC designation (e.g. 1, 433…)
     Int(u32),
