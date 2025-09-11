@@ -82,8 +82,7 @@
 //! // Iterate results
 //! for (obj, outcome) in results {
 //!     match outcome {
-//!         Ok((Some(orbit), rms)) => eprintln!("{:?} → {:?}, rms={:.4}", obj, orbit, rms),
-//!         Ok((None, _))          => eprintln!("{:?} → no viable orbit", obj),
+//!         Ok((orbit, rms)) => eprintln!("{:?} → {:?}, rms={:.4}", obj, orbit, rms),
 //!         Err(err)               => eprintln!("{:?} → error: {}", obj, err),
 //!     }
 //! }
@@ -144,7 +143,7 @@ use std::time::Duration;
 /// HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>
 /// ```
 pub type FullOrbitResult =
-    HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>;
+    HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>;
 
 /// Borrow a Gauss solution (if any) and its RMS for a given key.
 ///
@@ -169,8 +168,7 @@ pub fn gauss_result_for<'a>(
     match all.get(key) {
         None => Ok(None),
         Some(Err(e)) => Err(e),
-        Some(Ok((None, _))) => Ok(None),
-        Some(Ok((Some(g), rms))) => Ok(Some((g, *rms))),
+        Some(Ok((g, rms))) => Ok(Some((g, *rms))),
     }
 }
 
@@ -182,8 +180,7 @@ pub fn take_gauss_result(
     match all.remove(key) {
         None => Ok(None),
         Some(Err(e)) => Err(e),
-        Some(Ok((None, _))) => Ok(None),
-        Some(Ok((Some(g), rms))) => Ok(Some((g, rms))),
+        Some(Ok((g, rms))) => Ok(Some((g, rms))),
     }
 }
 
@@ -538,7 +535,9 @@ pub trait TrajectoryExt {
     /// Example
     /// -----------------
     /// ```rust, no_run
-    /// # use outfit::observations::trajectory_ext::{ObservationBatch, TrajectorySet};
+    /// # use outfit::observations::trajectory_ext::ObservationBatch;
+    /// # use outfit::TrajectorySet;
+    /// # use outfit::TrajectoryExt;
     /// # use outfit::{Outfit, ErrorModel};
     /// # use std::sync::Arc;
     /// # let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
@@ -578,15 +577,20 @@ pub trait TrajectoryExt {
     /// Example
     /// -----------------
     /// ```rust, no_run
-    /// # use outfit::observations::trajectory_ext::{ObservationBatch, TrajectorySet};
-    /// # use outfit::{Outfit, ErrorModel};
-    /// # use std::sync::Arc;
-    /// # let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-    /// # let observer = env.get_observer_from_mpc_code(&"I41".to_string());
-    /// # let (traj_id, ra_deg, dec_deg, mjd) = (vec![0, 0, 1], vec![14.62, 14.63, 15.01], vec![9.98, 10.01, 11.02], vec![43785.35, 43785.36, 43785.40]);
+    /// use outfit::observations::trajectory_ext::ObservationBatch;
+    /// use outfit::TrajectorySet;
+    /// use outfit::TrajectoryExt;
+    /// use outfit::{Outfit, ErrorModel};
+    /// use std::sync::Arc;
+    /// use ahash::RandomState;
+    /// use std::collections::HashMap;
+    ///
+    /// let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+    /// let observer = env.get_observer_from_mpc_code(&"I41".to_string());
+    /// let (traj_id, ra_deg, dec_deg, mjd) = (vec![0, 0, 1], vec![14.62, 14.63, 15.01], vec![9.98, 10.01, 11.02], vec![43785.35, 43785.36, 43785.40]);
     /// let batch = ObservationBatch::from_degrees_owned(&traj_id, &ra_deg, &dec_deg, 0.5, 0.5, &mjd);
     ///
-    /// let mut ts = TrajectorySet::new(); // empty set
+    /// let mut ts = HashMap::with_hasher(RandomState::new());
     /// ts.add_from_vec(&mut env, &batch, observer).unwrap();
     /// ```
     fn add_from_vec(

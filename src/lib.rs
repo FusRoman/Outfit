@@ -247,8 +247,9 @@ pub use crate::outfit_errors::OutfitError;
 pub use crate::initial_orbit_determination::gauss_result::GaussResult;
 pub use crate::initial_orbit_determination::IODParams;
 
-// Frequently-used extension traits (ergonomic entry points)
+// Frequently-used extension traits (ergonomic entry points) and key types
 pub use crate::observations::observations_ext::ObservationIOD;
+pub use crate::observations::trajectory_ext::FullOrbitResult;
 pub use crate::observations::trajectory_ext::TrajectoryExt;
 
 // Selected constants that are widely useful
@@ -270,8 +271,9 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// ```
 pub mod prelude {
     pub use crate::{
-        ArcSec, Degree, ErrorModel, GaussResult, IODParams, JPLEphem, ObjectNumber, ObservationIOD,
-        Observer, Outfit, OutfitError, TrajectoryExt, TrajectorySet, MJD,
+        ArcSec, Degree, ErrorModel, FullOrbitResult, GaussResult, IODParams, JPLEphem,
+        ObjectNumber, ObservationIOD, Observer, Outfit, OutfitError, TrajectoryExt, TrajectorySet,
+        MJD,
     };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};

@@ -181,7 +181,7 @@ struct IodBatchSummary {
 // ======================= summarizer =======================
 #[allow(clippy::type_complexity)]
 fn summarize_estimates<S>(
-    results: &HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, S>,
+    results: &HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, S>,
     k: usize,
 ) -> IodBatchSummary
 where
@@ -206,47 +206,29 @@ where
 
     for (obj, res) in results {
         match res {
-            Ok((maybe_orbit, rms)) => {
-                if let Some(orbit_res) = maybe_orbit {
-                    let corrected = matches!(orbit_res, GaussResult::CorrectedOrbit(_));
-                    if corrected {
-                        corrected_count += 1;
-                    } else {
-                        prelim_count += 1;
-                    }
-                    rms_values.push((obj.clone(), *rms, corrected));
-
-                    if let Some(kep) = kepler_of(orbit_res) {
-                        let a_au = kep.semi_major_axis;
-                        let e_ = kep.eccentricity;
-                        let i_rad = kep.inclination;
-                        let q_au = a_au * (1.0 - e_);
-                        let Q_au = a_au * (1.0 + e_);
-                        a.push(a_au);
-                        e.push(e_);
-                        i.push(i_rad);
-                        q.push(q_au);
-                        Q.push(Q_au);
-
-                        let cls = classify_orbit(a_au, e_, i_rad);
-                        *class_counts.entry(cls).or_default() += 1;
-                    }
+            Ok((orbit_res, rms)) => {
+                let corrected = matches!(orbit_res, GaussResult::CorrectedOrbit(_));
+                if corrected {
+                    corrected_count += 1;
                 } else {
-                    let entry =
-                        buckets
-                            .entry("Ok(None) unexpected")
-                            .or_insert_with(|| ErrorStats {
-                                count: 0,
-                                samples: Vec::new(),
-                                attempts_sum: 0,
-                                attempts_n: 0,
-                            });
-                    entry.count += 1;
-                    if entry.samples.len() < MAX_SAMPLES_PER_KIND {
-                        entry
-                            .samples
-                            .push("Ok(None) returned in success branch".to_string());
-                    }
+                    prelim_count += 1;
+                }
+                rms_values.push((obj.clone(), *rms, corrected));
+
+                if let Some(kep) = kepler_of(orbit_res) {
+                    let a_au = kep.semi_major_axis;
+                    let e_ = kep.eccentricity;
+                    let i_rad = kep.inclination;
+                    let q_au = a_au * (1.0 - e_);
+                    let Q_au = a_au * (1.0 + e_);
+                    a.push(a_au);
+                    e.push(e_);
+                    i.push(i_rad);
+                    q.push(q_au);
+                    Q.push(Q_au);
+
+                    let cls = classify_orbit(a_au, e_, i_rad);
+                    *class_counts.entry(cls).or_default() += 1;
                 }
             }
             Err(e) => {

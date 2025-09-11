@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
       // If your inputs are already radians:
       let batch = ObservationBatch::from_radians_borrowed(&ra_rad, &dec_rad, err_ra_rad, err_dec_rad, &time_mjd);
       ```
+
 - **`observation_from_batch` now fills the entire `TrajectorySet`**:
   - Previously returned a single `Observations` vector for one trajectory.
   - Now takes a `&mut TrajectorySet` and **inserts observations for all trajectory IDs found in the batch** (grouping by `trajectory_id`).
@@ -74,6 +75,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Introduce an **epoch-position cache**: unique MJD(TT) → `(geo_pos, helio_pos)` so positions are computed once per timestamp
   - Hot loop no longer performs angle unit conversions; it assumes batch angles/uncertainties are already **radians** (as guaranteed by `ObservationBatch` constructors)
 
+- **`estimate_best_orbit` signature changed**:
+  - **Before**
+    ```rust
+    fn estimate_best_orbit(
+        &mut self,
+        state: &Outfit,
+        error_model: &ErrorModel,
+        rng: &mut impl rand::Rng,
+        params: &IODParams,
+    ) -> Result<(Option<GaussResult>, f64), OutfitError>
+    ```
+  - **After**
+    ```rust
+    fn estimate_best_orbit(
+        &mut self,
+        state: &Outfit,
+        error_model: &ErrorModel,
+        rng: &mut impl rand::Rng,
+        params: &IODParams,
+    ) -> Result<(GaussResult, f64), OutfitError>
+    ```
+  - **Migration note**:
+    - Previously, you had to handle `Ok((None, rms))` as a “no solution” case.
+    - Now, a successful `Ok` **always** contains a valid `GaussResult`.  
+      Absence of a solution is reported as an `Err(OutfitError)`.
+    - Typical update:
+      ```rust
+      // Before
+      match obs.estimate_best_orbit(&env, &error_model, &mut rng, &params) {
+          Ok((Some(gauss), rms)) => { /* use orbit */ }
+          Ok((None, rms)) => { /* no solution */ }
+          Err(e) => { /* error */ }
+      }
+
+      // After
+      match obs.estimate_best_orbit(&env, &error_model, &mut rng, &params) {
+          Ok((gauss, rms)) => { /* always valid orbit */ }
+          Err(e) => { /* error (includes no-solution case) */ }
+      }
+      ```
 
 
 ### Fixed

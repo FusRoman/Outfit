@@ -31,7 +31,7 @@ fn run_iod_once(
     env_state: &mut Outfit,
     traj_set: &mut TrajectorySet,
     traj_number: &ObjectNumber,
-) -> Result<(Option<GaussResult>, f64), OutfitError> {
+) -> Result<(GaussResult, f64), OutfitError> {
     let obs = traj_set
         .get_mut(traj_number)
         .expect("trajectory not found in set");
@@ -85,18 +85,10 @@ fn main() -> Result<(), OutfitError> {
 
     if verbose {
         eprintln!("[gauss_iod_once] object = {obj:?}, rms(mas) = {rms}");
-        if let Some(gr) = best {
-            eprintln!("[gauss_iod_once] orbit = {:?}", gr.get_orbit());
-        } else {
-            eprintln!("[gauss_iod_once] no orbit found");
-        }
+        eprintln!("[gauss_iod_once] orbit = {:?}", best.get_orbit());
 
         eprintln!("[gauss_iod_once] object = {obj:?}, rms(mas) = {rms2}");
-        if let Some(gr) = best2 {
-            eprintln!("[gauss_iod_once] orbit = {:?}", gr.get_orbit());
-        } else {
-            eprintln!("[gauss_iod_once] no orbit found");
-        }
+        eprintln!("[gauss_iod_once] orbit = {:?}", best2.get_orbit());
     }
 
     Ok(())

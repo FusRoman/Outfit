@@ -22,7 +22,7 @@ mod benches_impl {
         env_state: &mut Outfit,
         traj_set: &mut TrajectorySet,
         traj_number: &ObjectNumber,
-    ) -> Result<(Option<GaussResult>, f64), OutfitError> {
+    ) -> Result<(GaussResult, f64), OutfitError> {
         let obs = traj_set.get_mut(traj_number).expect("trajectory not found");
         let mut rng = StdRng::seed_from_u64(42);
 

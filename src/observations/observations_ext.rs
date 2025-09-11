@@ -59,10 +59,7 @@
 //! let (best_orbit, rms) = observations.estimate_best_orbit(
 //!     &state, &error_model, &mut rng, &params
 //! ).unwrap();
-//!
-//! if let Some(orbit) = best_orbit {
-//!     println!("Best preliminary orbit RMS = {rms}");
-//! }
+//! println!("Best preliminary orbit RMS = {rms}");
 //! ```
 //!
 //! ## References
@@ -412,10 +409,7 @@ pub trait ObservationsExt {
 ///
 /// let (best_orbit, rms) = observations.estimate_best_orbit(
 ///     &state, &error_model, &mut rng, &params).unwrap();
-///
-/// if let Some(orbit) = best_orbit {
-///     println!("Best preliminary orbit RMS = {rms}");
-/// }
+/// println!("Best preliminary orbit RMS = {rms}");
 /// ```
 ///
 /// ## Algorithmic steps
@@ -534,7 +528,7 @@ pub trait ObservationIOD {
         error_model: &ErrorModel,
         rng: &mut impl rand::Rng,
         params: &IODParams,
-    ) -> Result<(Option<GaussResult>, f64), OutfitError>;
+    ) -> Result<(GaussResult, f64), OutfitError>;
 }
 
 impl ObservationsExt for Observations {
@@ -760,7 +754,7 @@ impl ObservationIOD for Observations {
         error_model: &ErrorModel,
         rng: &mut impl rand::Rng,
         params: &IODParams,
-    ) -> Result<(Option<GaussResult>, f64), OutfitError> {
+    ) -> Result<(GaussResult, f64), OutfitError> {
         // --- Stage 1: Calibrate uncertainties once for the whole batch.
         // This aligns quoted per-obs errors with empirical RMS statistics.
         self.apply_batch_rms_correction(error_model, params.gap_max);
@@ -855,7 +849,7 @@ impl ObservationIOD for Observations {
 
         // --- Stage 5: If at least one candidate succeeded, return the best; otherwise, propagate an error.
         if let Some(orbit) = best_orbit {
-            Ok((Some(orbit), best_rms))
+            Ok((orbit, best_rms))
         } else {
             // If nothing succeeded, propagate a structured error with the last underlying cause.
             // Fallback to a domain-specific unit error if we never captured any (e.g., no attempts).
@@ -1225,7 +1219,7 @@ mod test_obs_ext {
             )
             .unwrap();
 
-        let binding = best_orbit.unwrap();
+        let binding = best_orbit;
         let orbit = binding.get_orbit();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {

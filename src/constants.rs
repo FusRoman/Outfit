@@ -115,6 +115,54 @@ pub enum ObjectNumber {
     String(String),
 }
 
+impl std::fmt::Display for ObjectNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectNumber::Int(n) => write!(f, "{n}"),
+            ObjectNumber::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl From<u32> for ObjectNumber {
+    fn from(n: u32) -> Self {
+        ObjectNumber::Int(n)
+    }
+}
+
+impl From<String> for ObjectNumber {
+    fn from(s: String) -> Self {
+        ObjectNumber::String(s)
+    }
+}
+
+impl From<&str> for ObjectNumber {
+    fn from(s: &str) -> Self {
+        ObjectNumber::String(s.to_string())
+    }
+}
+
+impl std::str::FromStr for ObjectNumber {
+    type Err = std::num::ParseIntError;
+
+    /// Try to parse an `ObjectNumber` from a string.
+    /// - Pure digits → `Int(u32)`
+    /// - Otherwise  → `String(String)`
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<u32>() {
+            Ok(n) => Ok(ObjectNumber::Int(n)),
+            Err(e) => {
+                // If parse as int failed but it's a legit designation, fallback to String
+                if s.chars().any(|c| !c.is_ascii_digit()) {
+                    Ok(ObjectNumber::String(s.to_string()))
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
 /// A small, inline-optimized container for observations of a single object.
 pub type Observations = SmallVec<[Observation; 6]>;
 
