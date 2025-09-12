@@ -497,11 +497,10 @@ mod triplets_iod_tests {
         use camino::Utf8Path;
 
         use crate::{
-            error_models::ErrorModel, outfit::Outfit,
-            trajectories::trajectory_file::TrajectoryFile, TrajectorySet,
+            trajectories::trajectory_file::TrajectoryFile, unit_test_global::OUTFIT_HORIZON_TEST, TrajectorySet
         };
 
-        let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
         let mut traj_set =
             TrajectorySet::new_from_80col(&mut env_state, Utf8Path::new("tests/data/2015AB.obs"));
 
