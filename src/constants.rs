@@ -17,7 +17,6 @@
 
 use crate::observations::Observation;
 use crate::observers::Observer;
-use ahash::RandomState;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,6 +85,8 @@ pub type ArcSec = f64;
 pub type Radian = f64;
 /// Distance in kilometers
 pub type Kilometer = f64;
+/// Distance in meters
+pub type Meter = f64;
 /// MPC code identifying an observatory (3 characters)
 pub type MpcCode = String;
 
@@ -105,7 +106,7 @@ pub type MJD = f64;
 /// - An asteroid number (e.g. `Int(1234)`)
 /// - A comet number (e.g. `"1234P"`)
 /// - A provisional designation (e.g. `"K25D50B"`)
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ObjectNumber {
     /// Integer-based MPC designation (e.g. 1, 433…)
     Int(u32),
@@ -113,13 +114,53 @@ pub enum ObjectNumber {
     String(String),
 }
 
+impl std::fmt::Display for ObjectNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectNumber::Int(n) => write!(f, "{n}"),
+            ObjectNumber::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl From<u32> for ObjectNumber {
+    fn from(n: u32) -> Self {
+        ObjectNumber::Int(n)
+    }
+}
+
+impl From<String> for ObjectNumber {
+    fn from(s: String) -> Self {
+        ObjectNumber::String(s)
+    }
+}
+
+impl From<&str> for ObjectNumber {
+    fn from(s: &str) -> Self {
+        ObjectNumber::String(s.to_string())
+    }
+}
+
+impl std::str::FromStr for ObjectNumber {
+    type Err = std::num::ParseIntError;
+
+    /// Try to parse an `ObjectNumber` from a string.
+    /// - Pure digits → `Int(u32)`
+    /// - Otherwise  → `String(String)`
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<u32>() {
+            Ok(n) => Ok(ObjectNumber::Int(n)),
+            Err(e) => {
+                // If parse as int failed but it's a legit designation, fallback to String
+                if s.chars().any(|c| !c.is_ascii_digit()) {
+                    Ok(ObjectNumber::String(s.to_string()))
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+}
+
 /// A small, inline-optimized container for observations of a single object.
 pub type Observations = SmallVec<[Observation; 6]>;
-
-/// A full set of trajectories for multiple objects.
-///
-/// The key is the [`ObjectNumber`] (identifier of an object).
-/// The value is the list of [`Observation`] associated with this object.
-///
-/// Uses [`ahash`](https://docs.rs/ahash) for fast hashing.
-pub type TrajectorySet = HashMap<ObjectNumber, Observations, RandomState>;

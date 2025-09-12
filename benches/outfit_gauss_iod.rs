@@ -6,14 +6,15 @@ mod benches_impl {
 
     use camino::Utf8Path;
     use criterion::{black_box, BatchSize, Criterion};
-    use outfit::constants::{ObjectNumber, TrajectorySet};
+    use outfit::constants::ObjectNumber;
     use outfit::error_models::ErrorModel;
     use outfit::initial_orbit_determination::gauss_result::GaussResult;
     use outfit::initial_orbit_determination::IODParams;
     use outfit::observations::observations_ext::ObservationIOD;
-    use outfit::observations::trajectory_ext::TrajectoryExt;
     use outfit::outfit::Outfit;
     use outfit::outfit_errors::OutfitError;
+    use outfit::trajectories::trajectory_file::TrajectoryFile;
+    use outfit::TrajectorySet;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -22,7 +23,7 @@ mod benches_impl {
         env_state: &mut Outfit,
         traj_set: &mut TrajectorySet,
         traj_number: &ObjectNumber,
-    ) -> Result<(Option<GaussResult>, f64), OutfitError> {
+    ) -> Result<(GaussResult, f64), OutfitError> {
         let obs = traj_set.get_mut(traj_number).expect("trajectory not found");
         let mut rng = StdRng::seed_from_u64(42);
 

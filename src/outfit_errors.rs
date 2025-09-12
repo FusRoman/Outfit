@@ -54,18 +54,21 @@
 //! **Remediation**: strengthen parsers; surface line/column context; round-trip with golden files;
 //! validate Parquet schema and logical types.
 //!
-//! ## 4) Numerical methods & stochastic routines
+//! ## 4) Numerical methods, scoring & stochastic routines
 //!
-//! **When**: Root finding, polynomial solving, Gaussian noise injection.
+//! **When**: Root finding, polynomial solving, Gaussian noise injection, scoring functions.
 //!
 //! - [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError)
 //! - [`PolynomialRootFindingFailed`](crate::outfit_errors::OutfitError::PolynomialRootFindingFailed)
 //! - [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError)
 //! - [`InvalidFloatValue`](crate::outfit_errors::OutfitError::InvalidFloatValue)
+//! - [`NonFiniteScore`](crate::outfit_errors::OutfitError::NonFiniteScore)
 //!
-//! **Typical causes**: poor initial guesses; ill-conditioned polynomials; invalid σ; NaN propagation.
+//! **Typical causes**: poor initial guesses; ill-conditioned polynomials; invalid σ; NaN propagation;
+//! scores producing `NaN`/`±∞` due to division by zero, log of non-positive values, or overflow.
 //!
-//! **Remediation**: guard parameter ranges; multiple seeds; log residuals; check NaN early.
+//! **Remediation**: guard parameter ranges; multiple seeds; log residuals; check NaN early;
+//! clamp inputs with epsilons; add safe-guards in score computations (e.g., `max(x, EPS)`).
 //!
 //! ## 5) Reference frames & orbit determination
 //!
@@ -129,11 +132,11 @@
 //! ## See also
 //! -------------
 //! * [`Outfit`](crate::outfit::Outfit) – main crate context using this error type.
-//! * [`ParseObsError`](crate::observations::ParseObsError) – observation parsing errors.
+//! * [`ParseObsError`](crate::trajectories::mpc_80col_reader::ParseObsError) – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
 
-use crate::observations::ParseObsError;
+use crate::trajectories::mpc_80col_reader::ParseObsError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -247,6 +250,9 @@ pub enum OutfitError {
         dt_min: f64,
         dt_max: f64,
     },
+
+    #[error("Non-finite score encountered: {0}")]
+    NonFiniteScore(f64),
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -296,6 +302,7 @@ impl PartialEq for OutfitError {
             (InvalidFloatValue(a), InvalidFloatValue(b)) => a == b,
             (RmsComputationFailed(a), RmsComputationFailed(b)) => a == b,
             (GaussPrelimOrbitFailed(a), GaussPrelimOrbitFailed(b)) => a == b,
+            (NonFiniteScore(a), NonFiniteScore(b)) => a == b,
             (
                 NoViableOrbit {
                     cause: a,

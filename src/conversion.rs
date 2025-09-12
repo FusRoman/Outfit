@@ -59,7 +59,7 @@
 
 use nalgebra::Vector3;
 
-use crate::constants::{ArcSec, Degree, DPI};
+use crate::constants::{ArcSec, Degree, Radian, DPI};
 
 /// Estimate the accuracy of a numeric string based on its decimal precision.
 ///
@@ -80,6 +80,20 @@ fn compute_accuracy(field: &str, factor: f64) -> Option<f64> {
     } else {
         Some(1.0 * factor)
     }
+}
+
+/// Convert an angle from **arcseconds** to **radians**.
+///
+/// Arguments
+/// -----------------
+/// * `arcsec` — Angle in **arcseconds**.
+///
+/// Return
+/// ----------
+/// * Angle in **radians** (`Radian`).
+#[inline]
+pub fn arcsec_to_rad(arcsec: ArcSec) -> Radian {
+    (arcsec / 3600.0).to_radians()
 }
 
 /// Parse a right ascension (RA) string and convert it to degrees, with an estimate of its accuracy.
