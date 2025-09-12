@@ -438,8 +438,8 @@ impl<'a> ObservationBatch<'a> {
         error_dec_arcsec: ArcSec,
         time_mjd: &[MJD],
     ) -> Self {
-        assert_eq!(ra_deg.len(), dec_deg.len(), "RA/DEC length mismatch");
-        assert_eq!(ra_deg.len(), time_mjd.len(), "RA/time length mismatch");
+        debug_assert_eq!(ra_deg.len(), dec_deg.len(), "RA/DEC length mismatch");
+        debug_assert_eq!(ra_deg.len(), time_mjd.len(), "RA/time length mismatch");
 
         let ra: Vec<f64> = ra_deg.iter().map(|&d| d.to_radians()).collect();
         let dec: Vec<f64> = dec_deg.iter().map(|&d| d.to_radians()).collect();
@@ -803,6 +803,20 @@ pub trait TrajectoryExt {
     /// ------------
     /// * [`total_observations`](crate::observations::trajectory_ext::TrajectoryExt::total_observations) – Sum of all observations across trajectories.
     fn obs_count_stats(&self) -> Option<ObsCountStats>;
+
+    /// Return the number of distinct trajectories (objects) in the set.
+    ////
+    /// This is simply the number of keys in the underlying map.
+    ///
+    /// Return
+    /// ------
+    /// * The number of distinct trajectories (objects) in the set.
+    ///
+    /// See also
+    /// ------------
+    /// * [`total_observations`](crate::observations::trajectory_ext::TrajectoryExt::total_observations) – Sum of all observations across trajectories.
+    /// * [`obs_count_stats`](crate::observations::trajectory_ext::TrajectoryExt::obs_count_stats) – Statistics on the number of observations per trajectory.
+    fn number_of_trajectories(&self) -> usize;
 }
 
 impl TrajectoryExt for TrajectorySet {
@@ -953,6 +967,11 @@ impl TrajectoryExt for TrajectorySet {
     #[inline]
     fn total_observations(&self) -> usize {
         self.values().map(|obs: &Observations| obs.len()).sum()
+    }
+
+    #[inline]
+    fn number_of_trajectories(&self) -> usize {
+        self.len()
     }
 
     fn obs_count_stats(&self) -> Option<ObsCountStats> {

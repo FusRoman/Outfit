@@ -515,37 +515,56 @@ fn flatten_error_for_bucket(e: &OutfitError) -> (&'static str, String, Option<us
             let (k, _, _) = flatten_error_for_bucket(cause);
             (k, format!("{e}"), Some(*attempts))
         }
+        NoFeasibleTriplets { .. } => ("NoFeasibleTriplets", format!("{e}"), None),
+
+        // Numerical / algebraic failures
         GaussNoRootsFound => ("GaussNoRootsFound", format!("{e}"), None),
         PolynomialRootFindingFailed => ("PolynomialRootFindingFailed", format!("{e}"), None),
         SpuriousRootDetected => ("SpuriousRootDetected", format!("{e}"), None),
         SingularDirectionMatrix => ("SingularDirectionMatrix", format!("{e}"), None),
         RmsComputationFailed(_) => ("RmsComputationFailed", format!("{e}"), None),
         GaussPrelimOrbitFailed(_) => ("GaussPrelimOrbitFailed", format!("{e}"), None),
+        RootFindingError(_) => ("RootFindingError", format!("{e}"), None),
+        InvalidFloatValue(_) => ("InvalidFloatValue", format!("{e}"), None),
+        NonFiniteScore(_) => ("NonFiniteScore", format!("{e}"), None),
+
+        // Orbit / reference frame
         InvalidOrbit(_) => ("InvalidOrbit", format!("{e}"), None),
         InvalidIODParameter(_) => ("InvalidIODParameter", format!("{e}"), None),
         InvalidConversion(_) => ("InvalidConversion", format!("{e}"), None),
-        RootFindingError(_) => ("RootFindingError", format!("{e}"), None),
-        NoiseInjectionError(_) => ("NoiseInjectionError", format!("{e}"), None),
         InvalidRefSystem(_) => ("InvalidRefSystem", format!("{e}"), None),
+        VelocityCorrectionError(_) => ("VelocityCorrectionError", format!("{e}"), None),
+
+        // Observation handling
         ObservationNotFound(_) => ("ObservationNotFound", format!("{e}"), None),
+
+        // Parsing / ingestion
+        NomParsingError(_) => ("NomParsingError", format!("{e}"), None),
+        Parsing80ColumnFileError(_) => ("Parsing80ColumnFileError", format!("{e}"), None),
         Parquet(_) => ("Parquet", format!("{e}"), None),
-        IoError(_) => ("IoError", format!("{e}"), None),
-        UreqHttpError(_) => ("UreqHttpError", format!("{e}"), None),
-        #[cfg(feature = "jpl-download")]
-        ReqwestError(_) => ("ReqwestError", format!("{e}"), None),
+
+        // Error model
+        InvalidErrorModel(_) => ("InvalidErrorModel", format!("{e}"), None),
+        InvalidErrorModelFilePath(_) => ("InvalidErrorModelFilePath", format!("{e}"), None),
+
+        // Ephemerides / SPK
         InvalidJPLStringFormat(_) => ("InvalidJPLStringFormat", format!("{e}"), None),
         InvalidJPLEphemFileSource(_) => ("InvalidJPLEphemFileSource", format!("{e}"), None),
         InvalidJPLEphemFileVersion(_) => ("InvalidJPLEphemFileVersion", format!("{e}"), None),
         JPLFileNotFound(_) => ("JPLFileNotFound", format!("{e}"), None),
+        InvalidSpkDataType(_) => ("InvalidSpkDataType", format!("{e}"), None),
+
+        // I/O
+        IoError(_) => ("IoError", format!("{e}"), None),
+        UreqHttpError(_) => ("UreqHttpError", format!("{e}"), None),
+        #[cfg(feature = "jpl-download")]
+        ReqwestError(_) => ("ReqwestError", format!("{e}"), None),
         Utf8PathError(_) => ("Utf8PathError", format!("{e}"), None),
         UnableToCreateBaseDir(_) => ("UnableToCreateBaseDir", format!("{e}"), None),
-        NomParsingError(_) => ("NomParsingError", format!("{e}"), None),
-        Parsing80ColumnFileError(_) => ("Parsing80ColumnFileError", format!("{e}"), None),
-        InvalidErrorModel(_) => ("InvalidErrorModel", format!("{e}"), None),
-        InvalidErrorModelFilePath(_) => ("InvalidErrorModelFilePath", format!("{e}"), None),
-        InvalidSpkDataType(_) => ("InvalidSpkDataType", format!("{e}"), None),
-        InvalidFloatValue(_) => ("InvalidFloatValue", format!("{e}"), None),
-        _ => ("Other", format!("{e}"), None),
+        InvalidUrl(_) => ("InvalidUrl", format!("{e}"), None),
+
+        // Stochastic
+        NoiseInjectionError(_) => ("NoiseInjectionError", format!("{e}"), None),
     }
 }
 
@@ -593,7 +612,7 @@ fn fmt_opt(x: f64) -> String {
 fn main() -> Result<(), OutfitError> {
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
-    let test_data = "tests/data/test_from_fink.parquet";
+    let test_data = "/home/roman/Documents/Programmation/Rust/Outfit/orbfit_tests/with_python/asteroid_data_fink.parquet";
 
     println!("Loading observations from {test_data}");
     let path_file = Utf8Path::new(test_data);

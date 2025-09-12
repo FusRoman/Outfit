@@ -6,10 +6,11 @@ use std::hash::DefaultHasher;
 
 use approx::assert_relative_eq;
 use outfit::observations::trajectory_ext::{gauss_result_for, FullOrbitResult};
+use outfit::time::utc_jd_slice_to_tt_mjd;
 use outfit::ObservationIOD;
 use outfit::{
-    observations::trajectory_ext::ObservationBatch, time::jd_to_mjd, ErrorModel, IODParams, Outfit,
-    TrajectoryExt, TrajectorySet,
+    observations::trajectory_ext::ObservationBatch, ErrorModel, IODParams, Outfit, TrajectoryExt,
+    TrajectorySet,
 };
 use outfit::{KeplerianElements, ObjectNumber};
 use rand::rngs::StdRng;
@@ -137,7 +138,6 @@ fn vec_to_iod() {
         .build()
         .unwrap();
 
-    // ---------- Observations for object 33803 ----------
     // Trajectory IDs: link each RA/DEC/time entry to one of the 3 objects (0,1,2).
     let traj_id = vec![0, 1, 2, 1, 2, 1, 0, 0, 0, 1, 2, 1, 1, 0, 2, 2, 0, 2, 2];
 
@@ -155,8 +155,8 @@ fn vec_to_iod() {
         26.830301, 26.9256271, 20.7096409, 27.1602652, 27.160642,
     ];
 
-    // Convert Julian Dates to Modified Julian Dates (MJD).
-    let time = jd_to_mjd(&[
+    // Convert Julian Dates (UTC) to Modified Julian Dates (TT).
+    let time = utc_jd_slice_to_tt_mjd(&[
         2458789.6362963,
         2458789.638125,
         2458789.638125,
@@ -182,6 +182,7 @@ fn vec_to_iod() {
     let observer = env_state.get_observer_from_mpc_code(&"I41".to_string());
 
     // Build a batch of observations from RA/DEC/time arrays, with fixed uncertainties.
+    // MJD needs to be in TT time scale for the IOD.
     let batch = ObservationBatch::from_degrees_owned(&traj_id, &ra_deg, &dec_deg, 0.5, 0.5, &time);
 
     // Build the trajectory set (group observations by object).
@@ -212,17 +213,19 @@ fn vec_to_iod() {
         orbits.insert(obj.clone(), res);
     }
 
+    dbg!(&orbits);
+
     // ----- Validation for object 0 -----
     let exp_orbit = KeplerianElements {
-        reference_epoch: 58793.18361620379,
-        semi_major_axis: 2.680321948009517,
-        eccentricity: 0.26576097594162024,
-        inclination: 0.2658768839694609,
-        ascending_node_longitude: 0.22349850406366945,
-        periapsis_argument: 6.230543636807269,
-        mean_anomaly: 0.25104832980477115,
+        reference_epoch: 58793.18441761835,
+        semi_major_axis: 2.6800907148611213,
+        eccentricity: 0.26569343266377593,
+        inclination: 0.26583378821788056,
+        ascending_node_longitude: 0.22346768893017788,
+        periapsis_argument: 6.2312396358686435,
+        mean_anomaly: 0.25070862689966067,
     };
-    let exp_rms = 0.4158324307673343;
+    let exp_rms = 0.41763854460398925;
 
     // Check that the computed orbit for object 0 matches the expected orbit.
     assert_orbit(
@@ -236,15 +239,15 @@ fn vec_to_iod() {
 
     // ----- Validation for object 1 -----
     let exp_orb_1 = KeplerianElements {
-        reference_epoch: 58791.337449219325,
-        semi_major_axis: 2.7056924831662297,
-        eccentricity: 0.3018553463731629,
-        inclination: 0.25291201431596033,
-        ascending_node_longitude: 0.31813159627073595,
-        periapsis_argument: 5.47504097011782,
-        mean_anomaly: 0.6842839613405808,
+        reference_epoch: 58791.33825502848,
+        semi_major_axis: 2.703826713146142,
+        eccentricity: 0.30117809906476944,
+        inclination: 0.25266176525888534,
+        ascending_node_longitude: 0.317864582295561,
+        periapsis_argument: 5.476805665094764,
+        mean_anomaly: 0.6842587006557854,
     };
-    let exp_rms_1 = 0.1180934760046372;
+    let exp_rms_1 = 0.11855689104894801;
 
     assert_orbit(
         &orbits,
@@ -257,15 +260,15 @@ fn vec_to_iod() {
 
     // ----- Validation for object 2 -----
     let exp_orb_2 = KeplerianElements {
-        reference_epoch: 58796.29095261191,
-        semi_major_axis: 2.64466760759563,
-        eccentricity: 0.29350139116711776,
-        inclination: 0.23468909974301905,
-        ascending_node_longitude: 0.2110929116522168,
-        periapsis_argument: 6.262861175270487,
-        mean_anomaly: 0.29622726153396,
+        reference_epoch: 58796.291754201615,
+        semi_major_axis: 2.644301062854281,
+        eccentricity: 0.29340523662320855,
+        inclination: 0.23464394041365277,
+        ascending_node_longitude: 0.21103621973001643,
+        periapsis_argument: 6.263448848536585,
+        mean_anomaly: 0.2960051245443382,
     };
-    let exp_rms_2 = 0.30995644911745346;
+    let exp_rms_2 = 0.3095556572660671;
 
     assert_orbit(
         &orbits,

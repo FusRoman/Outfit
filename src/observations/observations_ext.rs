@@ -832,7 +832,14 @@ impl ObservationIOD for Observations {
                     params.dtmax,
                     Some(best_rms),
                 ) {
-                    Ok(v) => v,
+                    Ok(v) => {
+                        if !v.is_finite() {
+                            last_error = Some(OutfitError::NonFiniteScore(v));
+                            continue;
+                        } else {
+                            v
+                        }
+                    }
                     Err(e) => {
                         last_error = Some(e);
                         continue;

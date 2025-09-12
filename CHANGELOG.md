@@ -33,6 +33,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     }
     ```
   - This allows deterministic sorting of objects (useful for stable iteration in tests & reports).
+- **TrajectorySet convenience**:
+  - `number_of_trajectories(&self) -> usize` — returns the total number of trajectories
+    stored in the set (simple wrapper around `len()`).
+- **Error handling**:
+  - New `OutfitError::NonFiniteScore(f64)` variant — raised when a non-finite RMS
+    value (`NaN`, `±∞`) is produced during orbit scoring in `estimate_best_orbit`.
+    Provides the offending floating-point value for diagnostics.
 
 ### Changed
 - Documentation expanded and clarified:
@@ -130,6 +137,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - **Integration test `tests/vec_to_iod.rs`** — end-to-end pipeline:
     `Vec<deg/arcsec> → ObservationBatch::from_degrees_owned → TrajectorySet → estimate_all_orbits (Gauss IOD) → gauss_result_for → KeplerianElements`.  
     Uses `approx` with angle wrap-around, seeded RNG (`StdRng::seed_from_u64(42)`) for reproducibility, and `jd_to_mjd` for epoch conversion.
+- **`estimate_best_orbit` robustness**:
+  - Now explicitly rejects **non-finite RMS scores** (`NaN`, `±∞`) during orbit scoring.
+  - Such cases are recorded as `OutfitError::NonFiniteScore(value)` and skipped,
+    instead of being considered as valid candidates.
+  - This prevents spurious “best orbit” selections when numerical instabilities
+    produce invalid residuals.
+
 
 ### Breaking Changes
 - **`TrajectorySet::new_from_vec` and `add_from_vec` signatures changed**:

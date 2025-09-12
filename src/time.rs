@@ -120,6 +120,38 @@ pub fn jd_to_mjd(jd: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// Map a slice of MJD(UTC) into a newly allocated Vec of MJD(TT).
+///
+/// Arguments
+/// -----------------
+/// * `mjds_utc`: Slice of MJD expressed on the UTC time scale.
+///
+/// Return
+/// ----------
+/// * A `Vec<f64>` containing the converted MJD(TT).
+pub fn utc_mjd_slice_to_tt(mjds_utc: &[f64]) -> Vec<f64> {
+    mjds_utc
+        .iter()
+        .map(|&m| Epoch::from_mjd_utc(m).to_mjd_tt_days())
+        .collect()
+}
+
+/// Map a slice of JD(UTC) into a newly allocated Vec of MJD(TT).
+///
+/// Arguments
+/// -----------------
+/// * `jds_utc`: Slice of JD expressed on the UTC time scale.
+///
+/// Return
+/// ----------
+/// * A `Vec<f64>` containing the converted MJD(TT).
+pub fn utc_jd_slice_to_tt_mjd(jds_utc: &[f64]) -> Vec<f64> {
+    jds_utc
+        .iter()
+        .map(|&m| Epoch::from_jde_utc(m).to_mjd_tt_days())
+        .collect()
+}
+
 /// Transformation from date in the format YYYY MM DD.FFFFF UTC frame to modified julian date (MJD) TT frame
 ///
 /// Argument
