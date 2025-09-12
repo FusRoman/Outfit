@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [2.0.0] - 2025-09-10
 
 ### Added
+- **Trajectories module split (new folder `trajectories/`)**  
+  Public submodules and their roles:
+  - `trajectories::batch_reader` — `ObservationBatch` (zero-copy or owned), `observation_from_batch` (crate-private).
+  - `trajectories::trajectory_file` — public ingestion trait with `new_from_*` / `add_from_*` entry points.
+  - `trajectories::trajectory_fit` — batch Gauss IOD (`TrajectoryFit`), results map, stats, helpers.
+  - `trajectories::parquet_reader` — high-throughput Arrow/Parquet ingestion with projection & epoch cache.
+  - `trajectories::mpc_80col_reader` — MPC 80-column reader with precise field slicing and CCD filtering.
+- **Batch IOD APIs on `TrajectorySet`** (`TrajectoryFit`):
+  - `estimate_all_orbits(&mut self, &Outfit, &mut impl Rng, &IODParams) -> FullOrbitResult`
+  - `estimate_all_orbits_with_cancel(&mut self, &Outfit, &mut impl Rng, &IODParams, should_cancel: impl FnMut() -> bool) -> FullOrbitResult`
+  - `total_observations(&self) -> usize` — total samples across all trajectories.
+  - `obs_count_stats(&self) -> Option<ObsCountStats>` — min/p25/median/p95/max of per-trajectory counts.
+- **Result helpers & types**
+  - `type FullOrbitResult = HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>`
+  - `gauss_result_for(&FullOrbitResult, &ObjectNumber)` — borrow solution & RMS if present.
+  - `take_gauss_result(&mut FullOrbitResult, &ObjectNumber)` — move solution & RMS out of the map.
+  - `ObsCountStats` + `Display` (compact `{}` / pretty `{:#}`).
+- **Progress feature**
+  - With `--features progress`: live progress bar via `indicatif` + moving-average timing, and a timer-based cooperative cancel in `estimate_all_orbits_with_cancel`.
 - **BiMap iteration API**:
   - `iter()` → `(&K, &V)` over the forward map
   - `iter_rev()` → `(&V, &K)` over the reverse map
@@ -42,6 +61,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     Provides the offending floating-point value for diagnostics.
 
 ### Changed
+- **Folder & paths**  
+  Trajectory logic moved out of `observations` into dedicated `trajectories/`. Public docs and examples now reference:
+  - `crate::trajectories::batch_reader::ObservationBatch`
+  - `crate::trajectories::trajectory_file::TrajectoryFile`
+  - `crate::trajectories::trajectory_fit::{TrajectoryFit, FullOrbitResult, ObsCountStats}`
+- **Documentation (top-level & modules)**  
+  Added/overhauled top-level docs for:
+  - `trajectories/mod.rs` — overview, data model, ingestion sources, units/time scales, feature flags, quick-start.
+  - `trajectories/trajectory_file.rs` — public ingestion surface (80-col, Parquet, ADES, in-memory batches), error semantics.
+  - `trajectories/parquet_reader.rs` — expected schema, null policy, projection & cache, performance notes.
+  - `trajectories/mpc_80col_reader.rs` — field map, CCD filter, RA/Dec/time parsing, uncertainty handling.
+  - `trajectories/tra
 - Documentation expanded and clarified:
   - Docstrings for the inversion routine (units, ellipsoid, numerical notes)
   - Docstrings for `ObservatoriesView` and the Outfit display helpers, including usage examples and “See also” sections
@@ -143,6 +174,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     instead of being considered as valid candidates.
   - This prevents spurious “best orbit” selections when numerical instabilities
     produce invalid residuals.
+- **MPC 80-column parsing docs & weighting clarity**  
+  Docstrings now explicitly document the `cos δ` factor on RA uncertainties, TT/MJD handling, and the CCD-only policy; errors surface as `OutfitError::Parsing80ColumnFileError`.
+
 
 
 ### Breaking Changes
@@ -221,6 +255,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
       ```rust
       observation_from_batch(&mut ts, &mut env, &batch, observer)?;
       ```
+- **`estimate_best_orbit` now returns a *definite* solution on `Ok`**
+  This cascades to batch outcomes: `FullOrbitResult` holds `Result<(GaussResult, f64), OutfitError>` (no `Option`).
+  - **Migration**:
+    ```rust
+    // Before:
+    match results.get(&obj) {
+        Some(Ok((Some(g), rms))) => { /* use */ }
+        Some(Ok((None, _)))      => { /* no solution */ }
+        Some(Err(e))            => { /* error */ }
+        _ => {}
+    }
+
+    // After:
+    match results.get(&obj) {
+        Some(Ok((g, rms))) => { /* always a valid orbit */ }
+        Some(Err(e))       => { /* error (includes no-solution cases) */ }
+        _ => {}
+    }
+    ```
+- **Ingestion from in-memory batches**  
+  `TrajectoryFile::{new_from_vec, add_from_vec}` switched to `Result<…>` and derive object IDs from `ObservationBatch::trajectory_id`.  
+  `observation_from_batch` now appends **all** trajectories found in the batch into a provided `&mut TrajectorySet`.
+
 
 ### Notes
 - Iteration order for `BiMap`/`Observatories` is hash-based and not guaranteed to be stable; switch to `indexmap` if deterministic insertion order is required.

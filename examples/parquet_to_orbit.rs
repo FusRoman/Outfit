@@ -1,6 +1,7 @@
 #![cfg(feature = "jpl-download")]
 #![allow(non_snake_case)]
 use camino::Utf8Path;
+use outfit::trajectories::trajectory_fit::TrajectoryFit;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 

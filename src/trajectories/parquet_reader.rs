@@ -1,3 +1,79 @@
+//! # Parquet Reader for Astrometric Observations
+//!
+//! High-throughput ingestion of angle-only astrometric detections from **Apache Parquet**
+//! into a [`TrajectorySet`]. This module focuses on a minimal, column-projected read path,
+//! converts **JD→MJD (TT)**, and constructs [`Observation`]s while caching observer positions
+//! by unique epoch to avoid repeated ephemeris calls.
+//!
+//! ## Overview
+//! -----------------
+//! The primary entry point is a crate-internal routine that reads Parquet record batches,
+//! projects only the required columns, and appends parsed samples to an existing
+//! [`TrajectorySet`]. It is typically called by higher-level, public ingestion helpers
+//! (e.g., methods exposed by a `TrajectoryFile` trait).
+//!
+//! Key design points:
+//! - **Projection-first**: materialize only the columns used by Outfit.
+//! - **Typed downcast once per batch**: avoid per-row dynamic checks.
+//! - **Fast path for non-null columns**: iterate over `&[f64]` / `&[u32]` slices.
+//! - **Epoch→position cache**: compute `(geo_pos, helio_pos)` at most once per unique MJD(TT).
+//!
+//! ## Expected Parquet Schema
+//! -----------------
+//! The input file must contain (at least) the following leaf columns:
+//! - `ra: Float64` — Right ascension in **degrees**.
+//! - `dec: Float64` — Declination in **degrees**.
+//! - `jd:  Float64` — Epoch in **Julian Date (TT)**.
+//! - `trajectory_id: UInt32` — Grouping key used as [`ObjectNumber::Int`].
+//!
+//! Columns are accessed by **name** at setup (to build the projection mask) and then by
+//! **index** in the hot loop. If a required column is missing, a clean `io::Error` is returned.
+//!
+//! ## Units & Conventions
+//! -----------------
+//! - **Angles:** `ra`, `dec` are stored in **degrees** on disk and converted to **radians**
+//!   before building [`Observation`]s.
+//! - **Uncertainties:** provided as **arcseconds** at call-site, converted to **radians** once;
+//!   applied uniformly to all rows of the file (per-component).
+//! - **Time scale:** `jd` is assumed to be **TT** on disk. It is converted to **MJD (TT)**
+//!   via subtraction by [`JDTOMJD`].
+//! - **Observer:** the file is read under a **single** [`Observer`]. If you ingest heterogeneous
+//!   observers, extend the cache key to `(observer_id, mjd_tt)` or build one cache per observer.
+//!
+//! ## Null Handling Policy
+//! -----------------
+//! Two execution paths:
+//! - **No nulls** (fast path): raw slice iteration with minimal overhead.
+//! - **With nulls** (fallback): per-row checks; incomplete rows are **skipped** to preserve
+//!   correctness. Prefer cleaning datasets upstream for best performance.
+//!
+//! ## Performance Notes
+//! -----------------
+//! - **Projection** avoids unnecessary I/O and deserialization.
+//! - **Batch size** (`8192` by default) amortizes decompression and Arrow decoding;
+//!   tune between `8k` and `64k` depending on storage/CPU.
+//! - **Caching** uses `FastHashMap<OrderedFloat<f64>, (Vector3<f64>, Vector3<f64>)>`
+//!   keyed by MJD(TT), typically yielding large savings whenever exposures share timestamps.
+//! - **Zero-ephemeris constructor**: [`Observation::with_positions`] prevents recomputing
+//!   positions during construction.
+//!
+//! ## Error Handling
+//! -----------------
+//! - I/O and schema issues surface as `io::Error` or `ParquetError` wrapped into [`OutfitError`].
+//! - Ephemeris/observer computations (`pvobs`, `helio_position`) may return [`OutfitError`].
+//! - Missing required columns produce an `io::ErrorKind::NotFound` with a clear message.
+//!
+//! > **Note**  
+//! > This reader is **crate-private** and is used under the hood by higher-level,
+//! > public ingestion helpers (e.g., methods implementing a `TrajectoryFile` trait).
+//!
+//! ## See also
+//! ------------
+//! * [`Observation::with_positions`] – Lagrange-friendly constructor with precomputed positions.
+//! * [`Observer::pvobs`] – Geocentric site position at epoch.
+//! * [`Observer::helio_position`] – Heliocentric site position at epoch.
+//! * [`JDTOMJD`] – Constant used for `JD → MJD (TT)` conversion.
+//! * [`ObjectNumber`] – Key type for per-object bucketing in [`TrajectorySet`].
 use arrow_array::Array;
 use hifitime::Epoch;
 use nalgebra::Vector3;
@@ -13,8 +89,9 @@ use crate::conversion::arcsec_to_rad;
 use crate::observers::Observer;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
+use crate::TrajectorySet;
 use crate::{
-    constants::{ObjectNumber, TrajectorySet, JDTOMJD},
+    constants::{ObjectNumber, JDTOMJD},
     observations::Observation,
 };
 use arrow_array::array::{Float64Array, UInt32Array};

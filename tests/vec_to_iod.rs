@@ -5,11 +5,11 @@ use std::f64::consts::PI;
 use std::hash::DefaultHasher;
 
 use approx::assert_relative_eq;
-use outfit::observations::trajectory_ext::{gauss_result_for, FullOrbitResult};
 use outfit::time::utc_jd_slice_to_tt_mjd;
+use outfit::trajectories::trajectory_fit::{gauss_result_for, FullOrbitResult};
 use outfit::ObservationIOD;
 use outfit::{
-    observations::trajectory_ext::ObservationBatch, ErrorModel, IODParams, Outfit, TrajectoryExt,
+    trajectories::batch_reader::ObservationBatch, ErrorModel, IODParams, Outfit, TrajectoryFile,
     TrajectorySet,
 };
 use outfit::{KeplerianElements, ObjectNumber};

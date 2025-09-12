@@ -497,8 +497,8 @@ mod triplets_iod_tests {
         use camino::Utf8Path;
 
         use crate::{
-            constants::TrajectorySet, error_models::ErrorModel,
-            observations::trajectory_ext::TrajectoryExt, outfit::Outfit,
+            error_models::ErrorModel, outfit::Outfit,
+            trajectories::trajectory_file::TrajectoryFile, TrajectorySet,
         };
 
         let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();

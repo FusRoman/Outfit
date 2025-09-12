@@ -17,7 +17,6 @@
 
 use crate::observations::Observation;
 use crate::observers::Observer;
-use ahash::RandomState;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -165,11 +164,3 @@ impl std::str::FromStr for ObjectNumber {
 
 /// A small, inline-optimized container for observations of a single object.
 pub type Observations = SmallVec<[Observation; 6]>;
-
-/// A full set of trajectories for multiple objects.
-///
-/// The key is the [`ObjectNumber`] (identifier of an object).
-/// The value is the list of [`Observation`] associated with this object.
-///
-/// Uses [`ahash`](https://docs.rs/ahash) for fast hashing.
-pub type TrajectorySet = HashMap<ObjectNumber, Observations, RandomState>;

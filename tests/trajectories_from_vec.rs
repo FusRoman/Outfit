@@ -1,7 +1,7 @@
 use outfit::constants::ObjectNumber;
 use outfit::error_models::ErrorModel;
-use outfit::observations::trajectory_ext::{ObservationBatch, TrajectoryExt};
 use outfit::outfit::Outfit;
+use outfit::trajectories::{batch_reader::ObservationBatch, trajectory_file::TrajectoryFile};
 use outfit::TrajectorySet;
 
 use std::sync::Arc;

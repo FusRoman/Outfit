@@ -132,11 +132,11 @@
 //! ## See also
 //! -------------
 //! * [`Outfit`](crate::outfit::Outfit) – main crate context using this error type.
-//! * [`ParseObsError`](crate::observations::ParseObsError) – observation parsing errors.
+//! * [`ParseObsError`](crate::trajectories::mpc_80col_reader::ParseObsError) – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
 
-use crate::observations::ParseObsError;
+use crate::trajectories::mpc_80col_reader::ParseObsError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

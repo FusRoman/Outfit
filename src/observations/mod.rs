@@ -12,11 +12,11 @@
 //!
 //! - Parsing & I/O:
 //!   - `from_80col` (private) and `extract_80col` (private) — read **80-column MPC** formatted files.
-//!   - [`ades_reader`](crate::observations::ades_reader) — ADES ingestion utilities (XML/CSV).
+//!   - [`ades_reader`](crate::trajectories::ades_reader) — ADES ingestion utilities (XML/CSV).
 //!   - `parquet_reader` (private) — internal helpers to read columnar batches.
 //!
 //! - Batch/transform helpers:
-//!   - [`trajectory_ext`](crate::observations::trajectory_ext) — build batches of observations (RA/DEC/time + σ) and convert to [`Observation`](crate::observations::Observation)s.
+//!   - [`trajectory_file`](crate::trajectories::trajectory_file) — build batches of observations (RA/DEC/time + σ) and convert to [`Observation`](crate::observations::Observation)s.
 //!   - [`observations_ext`](crate::observations::observations_ext) — higher-level operations on collections (triplet selection, RMS windows, metrics).
 //!   - [`triplets_iod`](crate::observations::triplets_iod) — construction of observation triplets for **Gauss IOD**.
 //!
@@ -34,7 +34,7 @@
 //!
 //! 1. **Ingest** observations:
 //!    - From MPC 80-col: \[`extract_80col`\] → `Vec<Observation>` + object identifier.
-//!    - From ADES: via [`ades_reader`](crate::observations::ades_reader) into typed batches, then \[`observation_from_batch`\].
+//!    - From ADES: via [`ades_reader`](crate::trajectories::ades_reader) into typed batches, then \[`observation_from_batch`\].
 //!
 //! 2. **Precompute/Access positions** per observation:
 //!    - `get_observer_earth_position()` — geocentric site vector at epoch.
@@ -90,34 +90,21 @@
 //! - [`observers`] — site database, Earth-fixed coordinates, and transformations.
 //! - [`orbit_type::equinoctial_element::EquinoctialElements`] — propagation utilities used here.
 //! - [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) and [`correct_aberration`](crate::observations::correct_aberration) — sky-projection helpers.
-pub mod ades_reader;
 pub mod observations_ext;
-mod parquet_reader;
-#[cfg(feature = "progress")]
-pub(crate) mod progress_bar;
-pub mod trajectory_ext;
 pub mod triplets_generator;
 pub mod triplets_iod;
 
 use crate::{
-    constants::{ObjectNumber, Observations, Radian, DPI, MJD, RADH, RADSEC, VLIGHT_AU},
-    conversion::{cartesian_to_radec, parse_dec_to_deg, parse_ra_to_deg},
-    observations::{parquet_reader::FastHashMap, trajectory_ext::ObservationBatch},
+    constants::{Observations, Radian, DPI, MJD, VLIGHT_AU},
+    conversion::cartesian_to_radec,
     observers::Observer,
     orbit_type::equinoctial_element::EquinoctialElements,
     outfit::Outfit,
     outfit_errors::OutfitError,
-    time::frac_date_to_mjd,
-    TrajectorySet,
 };
-use ahash::RandomState;
-use camino::Utf8Path;
 use hifitime::Epoch;
 use nalgebra::Vector3;
-use ordered_float::OrderedFloat;
-use smallvec::SmallVec;
-use std::{f64::consts::PI, ops::Range, sync::Arc};
-use thiserror::Error;
+use std::f64::consts::PI;
 
 /// Astrometric observation with site and precomputed observer positions.
 ///
@@ -150,8 +137,8 @@ pub struct Observation {
     pub dec: Radian,
     pub error_dec: Radian,
     pub time: MJD,
-    observer_earth_position: Vector3<f64>,
-    observer_helio_position: Vector3<f64>,
+    pub(crate) observer_earth_position: Vector3<f64>,
+    pub(crate) observer_helio_position: Vector3<f64>,
 }
 
 impl Observation {
@@ -187,7 +174,7 @@ impl Observation {
     /// ------------
     /// * [`Observer::pvobs`] – Geocentric position/velocity of the observing site.
     /// * [`Observer::helio_position`] – Heliocentric position of the observing site.
-    /// * [`crate::observations::trajectory_ext::ObservationBatch`] – Batch operations on observations.
+    /// * [`crate::trajectories::batch_reader::ObservationBatch`] – Batch operations on observations.
     pub fn new(
         state: &Outfit,
         observer: u16,
@@ -514,266 +501,6 @@ pub fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64
     xrel - dt * vrel
 }
 
-#[derive(Error, Debug, PartialEq)]
-pub enum ParseObsError {
-    #[error("The line is too short")]
-    TooShortLine,
-    #[error("The line is not a CCD observation")]
-    NotCCDObs,
-    #[error("Error parsing RA: {0}")]
-    InvalidRA(String),
-    #[error("Invalid Dec value: {0}")]
-    InvalidDec(String),
-    #[error("Invalid date: {0}")]
-    InvalidDate(String),
-}
-
-/// Parse a line from an 80 column file to an Observation
-///
-/// Arguments
-/// ---------
-/// * `line`: a string representing a line from an 80 column file
-///
-/// Return
-/// ------
-/// * an Observation struct
-fn from_80col(env_state: &mut Outfit, line: &str) -> Result<Observation, OutfitError> {
-    if line.len() < 80 {
-        return Err(OutfitError::Parsing80ColumnFileError(
-            ParseObsError::TooShortLine,
-        ));
-    }
-
-    if line.chars().nth(14) == Some('s') {
-        return Err(OutfitError::Parsing80ColumnFileError(
-            ParseObsError::NotCCDObs,
-        ));
-    }
-
-    let (ra, error_ra) = parse_ra_to_deg(line[32..44].trim()).ok_or_else(|| {
-        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidRA(
-            line[32..44].trim().to_string(),
-        ))
-    })?;
-
-    let (dec, error_dec) = parse_dec_to_deg(line[44..56].trim()).ok_or_else(|| {
-        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidDec(
-            line[44..56].trim().to_string(),
-        ))
-    })?;
-
-    let time = frac_date_to_mjd(line[15..32].trim()).map_err(|_| {
-        OutfitError::Parsing80ColumnFileError(ParseObsError::InvalidDate(
-            line[15..32].trim().to_string(),
-        ))
-    })?;
-
-    let observer_id = env_state.uint16_from_mpc_code(&line[77..80].trim().into());
-    let observer = env_state.get_observer_from_uint16(observer_id);
-
-    let max_rms = |observation_error: f64, observer_error: f64, factor: f64| {
-        f64::max(observation_error, observer_error * factor)
-    };
-
-    let dec_radians = dec.to_radians();
-    let dec_rad_cos = dec_radians.cos();
-
-    let ra_error = max_rms(
-        (error_ra * RADH) / dec_rad_cos,
-        observer.ra_accuracy.map(|v| v.into_inner()).unwrap_or(0.0),
-        RADSEC / dec_rad_cos,
-    );
-
-    let dec_error = max_rms(
-        error_dec.to_radians(),
-        observer.dec_accuracy.map(|v| v.into_inner()).unwrap_or(0.0),
-        RADSEC,
-    );
-
-    let observation = Observation::new(
-        env_state,
-        observer_id,
-        ra.to_radians(),
-        ra_error,
-        dec_radians,
-        dec_error,
-        time,
-    )?;
-    Ok(observation)
-}
-
-/// Extract the observations and the object number from a 80 column file
-///
-/// Arguments
-/// ---------
-/// * `colfile`: a path to an 80 column file
-///
-/// Return
-/// ------
-/// * a tuple containing the observations and the object number
-pub(crate) fn extract_80col(
-    env_state: &mut Outfit,
-    colfile: &Utf8Path,
-) -> Result<(Observations, ObjectNumber), OutfitError> {
-    let file_content = std::fs::read_to_string(colfile)
-        .unwrap_or_else(|_| panic!("Could not read file {}", colfile.as_str()));
-
-    let first_line = file_content
-        .lines()
-        .next()
-        .unwrap_or_else(|| panic!("Could not read first line of file {}", colfile.as_str()));
-
-    fn get_object_number(line: &str, range: Range<usize>) -> String {
-        line[range].trim_start_matches('0').trim().to_string()
-    }
-
-    let mut object_number = get_object_number(first_line, 0..5);
-    if object_number.is_empty() {
-        object_number = get_object_number(first_line, 5..12);
-    }
-
-    Ok((
-        file_content
-            .lines()
-            .filter_map(|line| match from_80col(env_state, line) {
-                Ok(obs) => Some(obs),
-                Err(OutfitError::Parsing80ColumnFileError(ParseObsError::NotCCDObs)) => None,
-                Err(e) => panic!("Error parsing line: {e:?}"),
-            })
-            .collect(),
-        ObjectNumber::String(object_number),
-    ))
-}
-
-/// Expand a single-observer batch into concrete [`Observation`]s and append them into a [`TrajectorySet`].
-///
-/// This routine ingests an [`ObservationBatch`] whose angles and uncertainties are in **radians**
-/// and whose epochs are **MJD (TT)**, then materializes per-sample [`Observation`]s enriched with
-/// site geocentric and heliocentric positions. All measurements are assumed to come from the **same
-/// observer** (hence a single `observer: Arc<Observer>` argument).
-///
-/// For performance, it:
-/// - resolves the observer into a compact `u16` **once** (hot path),
-/// - pre-fetches the UT1 provider **once**,
-/// - caches observer positions by epoch: **MJD(TT) → (geo_pos, helio_pos)**,
-///   so repeated timestamps incur **no extra** position computation.
-///
-/// Internally, epoch keys are wrapped in `OrderedFloat` to enable their use in a hash map
-/// (total order on `f64` while rejecting `NaN` inputs by construction).
-///
-/// Arguments
-/// -----------------
-/// * `trajectories` — Target container to receive observations, bucketed by `trajectory_id`.
-/// * `env_state` — Global [`Outfit`] state (ephemerides, EOP/UT1 providers, etc.).
-/// * `batch` — Angles and 1-σ uncertainties in **radians**; epochs as **MJD (TT)**; includes `trajectory_id`.
-/// * `observer` — The (single) observer for **all** samples in `batch`.
-///
-/// Return
-/// ----------
-/// * `Ok(())` if all observations were successfully appended into `trajectories`,
-/// * `Err(OutfitError)` if site position or heliocentric position computations fail.
-///
-/// Panics
-/// ----------
-/// * **Debug builds only**: length mismatches across `ra/dec/time/trajectory_id` trigger `debug_assert!`.
-///
-/// Complexity
-/// ----------
-/// * Time: **O(n)**, with at most **O(u)** geocentric/heliocentric computations where `u` is the number of
-///   **unique** epochs in the batch (`u ≤ n`) thanks to the epoch→position cache.
-/// * Space: **O(u)** for the epoch→position cache.
-///
-/// Notes
-/// ----------
-/// * Input angles (RA/DEC) and uncertainties **must already be in radians**. If your source is degrees/arcsec,
-///   build the batch via [`ObservationBatch::from_degrees_owned`] (conversion done once at construction).
-/// * Epochs are expected as **TT**. Convert upstream if your pipeline feeds UTC/TAI.
-/// * This function mutates `trajectories` and reads from `env_state`. If you need parallelization, consider
-///   extracting immutable position providers beforehand, or designing providers that accept shared references.
-///
-/// See also
-/// ------------
-/// * [`ObservationBatch::from_radians_borrowed`] – Zero-copy batch when inputs are already radians.
-/// * [`ObservationBatch::from_degrees_owned`] – Degree/arcsec → rad conversion once at construction.
-/// * [`parquet_to_trajset`] – Parquet ingestion using the same unit/weighting logic.
-/// * [`conversion::arcsec_to_rad`] – Arcseconds → radians helper.
-pub(crate) fn observation_from_batch(
-    trajectories: &mut TrajectorySet,
-    env_state: &mut Outfit,
-    batch: &ObservationBatch<'_>,
-    observer: Arc<Observer>,
-) -> Result<(), OutfitError> {
-    // --- Fast sanity checks (debug only) ---------------------------------------
-    // All slices must be aligned one-to-one. These checks are enforced at construction
-    // time for production, but we keep them here in debug builds to catch regressions.
-    debug_assert_eq!(batch.ra.len(), batch.dec.len(), "RA/DEC length mismatch");
-    debug_assert_eq!(batch.ra.len(), batch.time.len(), "RA/time length mismatch");
-    debug_assert_eq!(
-        batch.ra.len(),
-        batch.trajectory_id.len(),
-        "RA/trajectory_id length mismatch"
-    );
-
-    // Resolve observer ID once (hot path avoids map lookups later).
-    let uint16_obs = env_state.uint16_from_observer(observer.clone());
-
-    // Pre-fetch UT1 provider once.
-    let ut1 = env_state.get_ut1_provider();
-
-    // Heuristic: many surveys repeat epochs per exposure → cache a fraction of N.
-    let n = batch.ra.len();
-    let est_cache_cap = (n / 4).clamp(64, 4096);
-    let mut pos_cache: FastHashMap<OrderedFloat<f64>, (Vector3<f64>, Vector3<f64>)> =
-        FastHashMap::with_capacity_and_hasher(est_cache_cap, RandomState::default());
-
-    // Safe and fast: iterators avoid per-iteration bounds checks
-    let ra_it = batch.ra.iter().copied();
-    let dec_it = batch.dec.iter().copied();
-    let time_it = batch.time.iter().copied();
-    let id_it = batch.trajectory_id.iter().copied();
-
-    for ((ra, dec), (mjd_tt, traj_id)) in ra_it.zip(dec_it).zip(time_it.zip(id_it)) {
-        // Use OrderedFloat to permit f64 as a key with a total order.
-        let key = OrderedFloat(mjd_tt);
-
-        // Compute (or reuse) positions at this epoch.
-        let (geo_pos, helio_pos) = if let Some(&(geo, helio)) = pos_cache.get(&key) {
-            (geo, helio)
-        } else {
-            let epoch = Epoch::from_mjd_in_time_scale(mjd_tt, hifitime::TimeScale::TT);
-
-            // Geocentric position (velocity returned but unused here).
-            let (geo, _vel) = observer.pvobs(&epoch, ut1)?;
-
-            // Heliocentric position (uses geocentric position).
-            let helio = observer.helio_position(env_state, &epoch, &geo)?;
-
-            pos_cache.insert(key, (geo, helio));
-            (geo, helio)
-        };
-
-        // Build observation and append to the right trajectory bucket.
-        let obs = Observation::with_positions(
-            uint16_obs,
-            ra,              // radians
-            batch.error_ra,  // radians
-            dec,             // radians
-            batch.error_dec, // radians
-            mjd_tt,          // MJD(TT)
-            geo_pos,
-            helio_pos,
-        );
-
-        let obj = ObjectNumber::Int(traj_id);
-        trajectories
-            .entry(obj)
-            .or_insert_with(|| SmallVec::with_capacity(32))
-            .push(obs);
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 #[cfg(feature = "jpl-download")]
 mod test_observations {
@@ -882,6 +609,8 @@ mod test_observations {
         }
 
         mod proptests_apparent_position {
+            use std::sync::Arc;
+
             use super::*;
             use proptest::prelude::*;
 
@@ -1355,6 +1084,8 @@ mod test_observations {
         }
 
         mod proptests_ephemeris_error {
+            use std::sync::Arc;
+
             use super::*;
             use proptest::prelude::*;
 
@@ -1435,93 +1166,5 @@ mod test_observations {
                 }
             }
         }
-    }
-
-    #[test]
-    fn test_from_80col_valid_line() {
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-
-        let line =
-            "     K09R05F  C2009 09 15.23433 22 52 22.62 -14 47 03.2          20.8 Vr~097wG96";
-
-        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
-        let result = from_80col(&mut env_state, line);
-
-        assert!(result.is_ok());
-        let obs = result.unwrap();
-
-        assert_eq!(
-            obs,
-            Observation {
-                observer: 0,
-                ra: 5.988124307160555,
-                error_ra: 1.2535340843609459e-6,
-                dec: -0.25803335512429054,
-                error_dec: 1.0181086985431635e-6,
-                time: 55089.23509601851,
-                observer_earth_position: [
-                    3.0499942822953885e-5,
-                    -8.594304778250371e-6,
-                    2.8491013919142154e-5
-                ]
-                .into(),
-                observer_helio_position: [
-                    0.9968138444702415,
-                    -0.12221921296802639,
-                    -0.05295724448160355
-                ]
-                .into(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_from_80col_too_short_line() {
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-
-        let line = "short line";
-        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
-        let result = from_80col(&mut env_state, line);
-
-        assert!(matches!(
-            result,
-            Err(OutfitError::Parsing80ColumnFileError(
-                ParseObsError::TooShortLine
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_from_80col_invalid_date() {
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-
-        let line =
-            "     K09R05F  C20xx 09 15.23433 22 52 22.62 -14 47 03.2          20.8 Vr~097wG96";
-        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
-        let result = from_80col(&mut env_state, line);
-
-        assert!(matches!(
-            result,
-            Err(OutfitError::Parsing80ColumnFileError(
-                ParseObsError::InvalidDate(_)
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_from_80col_invalid_ra_dec() {
-        use crate::unit_test_global::OUTFIT_HORIZON_TEST;
-
-        let line =
-            "     K09R05F  C2009 09 15.23433 XX YY ZZ.ZZ -AA BB CC.C          20.8 Vr~097wG96";
-        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
-        let result = from_80col(&mut env_state, line);
-
-        assert!(matches!(
-            result,
-            Err(OutfitError::Parsing80ColumnFileError(
-                ParseObsError::InvalidRA(_)
-            ))
-        ));
     }
 }

@@ -63,7 +63,8 @@
 //! use camino::Utf8Path;
 //! use rand::{rngs::StdRng, SeedableRng};
 //! use outfit::{Outfit, ErrorModel, IODParams};
-//! use outfit::constants::{TrajectorySet, ObjectNumber};
+//! use outfit::constants::ObjectNumber;
+//! use outfit::TrajectorySet;
 //! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -204,6 +205,9 @@ pub mod orbit_type;
 /// Observation handling (RA, DEC, times).
 pub mod observations;
 
+/// Trajectory management and file I/O.
+pub mod trajectories;
+
 /// Observers and observatory positions.
 pub mod observers;
 
@@ -230,8 +234,9 @@ pub mod time;
 pub use crate::outfit::Outfit;
 
 // Core data types & units
-pub use crate::constants::{ArcSec, Degree, ObjectNumber, TrajectorySet, MJD};
+pub use crate::constants::{ArcSec, Degree, ObjectNumber, MJD};
 pub use crate::observers::Observer;
+pub use crate::trajectories::TrajectorySet;
 
 // Orbital element representations
 pub use crate::orbit_type::{
@@ -249,8 +254,9 @@ pub use crate::initial_orbit_determination::IODParams;
 
 // Frequently-used extension traits (ergonomic entry points) and key types
 pub use crate::observations::observations_ext::ObservationIOD;
-pub use crate::observations::trajectory_ext::FullOrbitResult;
-pub use crate::observations::trajectory_ext::TrajectoryExt;
+pub use crate::trajectories::trajectory_file::TrajectoryFile;
+pub use crate::trajectories::trajectory_fit::FullOrbitResult;
+pub use crate::trajectories::trajectory_fit::TrajectoryFit;
 
 // Selected constants that are widely useful
 pub use crate::constants::{
@@ -272,7 +278,7 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 pub mod prelude {
     pub use crate::{
         ArcSec, Degree, ErrorModel, FullOrbitResult, GaussResult, IODParams, JPLEphem,
-        ObjectNumber, ObservationIOD, Observer, Outfit, OutfitError, TrajectoryExt, TrajectorySet,
+        ObjectNumber, ObservationIOD, Observer, Outfit, OutfitError, TrajectoryFile, TrajectorySet,
         MJD,
     };
     // Optionally include widely-used constants:
@@ -287,11 +293,11 @@ pub(crate) mod unit_test_global {
     use camino::Utf8Path;
 
     use crate::{
-        constants::TrajectorySet,
         error_models::ErrorModel,
         jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
-        observations::trajectory_ext::TrajectoryExt,
         outfit::Outfit,
+        trajectories::trajectory_file::TrajectoryFile,
+        trajectories::TrajectorySet,
     };
 
     pub(crate) static OUTFIT_NAIF_TEST: LazyLock<Outfit> =

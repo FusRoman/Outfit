@@ -4,16 +4,17 @@ mod common;
 
 use approx::assert_relative_eq;
 use camino::Utf8Path;
-use outfit::constants::{ObjectNumber, TrajectorySet};
+use outfit::constants::ObjectNumber;
 use outfit::error_models::ErrorModel;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
 use outfit::initial_orbit_determination::IODParams;
 use outfit::observations::observations_ext::ObservationIOD;
-use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
 use outfit::outfit::Outfit;
 use outfit::outfit_errors::OutfitError;
+use outfit::trajectories::trajectory_file::TrajectoryFile;
+use outfit::TrajectorySet;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 

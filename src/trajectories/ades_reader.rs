@@ -7,11 +7,12 @@ use serde::{Deserialize, Deserializer};
 use smallvec::SmallVec;
 
 use crate::{
-    constants::{ArcSec, ObjectNumber, TrajectorySet},
+    constants::{ArcSec, ObjectNumber},
     outfit::Outfit,
+    TrajectorySet,
 };
 
-use super::Observation;
+use crate::observations::Observation;
 
 #[derive(Debug, Deserialize)]
 struct StructuredAdes {
