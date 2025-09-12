@@ -251,6 +251,7 @@ pub(crate) fn extract_80col(
 }
 
 #[cfg(test)]
+#[cfg(feature = "jpl-download")]
 mod mpc_80col_test {
     use super::*;
 
