@@ -497,7 +497,8 @@ mod triplets_iod_tests {
         use camino::Utf8Path;
 
         use crate::{
-            trajectories::trajectory_file::TrajectoryFile, unit_test_global::OUTFIT_HORIZON_TEST, TrajectorySet
+            trajectories::trajectory_file::TrajectoryFile, unit_test_global::OUTFIT_HORIZON_TEST,
+            TrajectorySet,
         };
 
         let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
