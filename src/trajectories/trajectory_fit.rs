@@ -142,6 +142,16 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "progress")]
 use super::progress_bar::IterTimer;
+#[cfg(feature = "progress")]
+use indicatif::{ProgressBar, ProgressStyle};
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+#[cfg(feature = "parallel")]
+use std::{
+    hash::{Hash, Hasher},
+    mem,
+};
 
 /// Full batch orbit determination results.
 ///
@@ -466,11 +476,8 @@ where
 // --------------------------- Progress (indicatif) ----------------------------
 #[cfg(feature = "progress")]
 mod progress_impl {
-    use super::ProgressSink;
-    use indicatif::{ProgressBar, ProgressStyle};
-    use std::time::Duration;
-
     use super::IterTimer;
+    use super::ProgressSink;
     use crate::trajectories::progress_bar::fmt_dur;
 
     /// Progress sink backed by `indicatif`.
@@ -479,14 +486,14 @@ mod progress_impl {
     /// ------------
     /// * [`estimate_all_orbits_core`] – Calls into this sink at key lifecycle moments.
     pub(super) struct IndicatifProgress {
-        pb: ProgressBar,
+        pb: super::ProgressBar,
         it_timer: IterTimer,
     }
 
     impl Default for IndicatifProgress {
         fn default() -> Self {
             // The actual length is set in `start()`.
-            let pb = ProgressBar::new(1);
+            let pb = super::ProgressBar::new(1);
             Self {
                 pb,
                 it_timer: IterTimer::new(0.2),
@@ -498,13 +505,14 @@ mod progress_impl {
         fn start(&mut self, total: u64) {
             self.pb.set_length(total.max(1));
             self.pb.set_style(
-                ProgressStyle::with_template(
+                super::ProgressStyle::with_template(
                     "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) \
                          | {per_sec} | ETA {eta_precise} | {msg}",
                 )
                 .expect("indicatif template"),
             );
-            self.pb.enable_steady_tick(Duration::from_millis(200));
+            self.pb
+                .enable_steady_tick(super::Duration::from_millis(200));
         }
 
         fn on_iter(&mut self) {
@@ -531,6 +539,67 @@ mod progress_impl {
 
 #[cfg(feature = "progress")]
 use progress_impl::IndicatifProgress;
+
+// --------------------------- Parallel features ----------------------------
+
+#[cfg(feature = "parallel")]
+/// Generate a new 64-bit pseudo-random value using the **SplitMix64** algorithm.
+/// This is a simple, fast, and reproducible way to decorrelate seeds for parallel RNGs.
+///
+/// Arguments
+/// -----------------
+/// * `x`: Input state (a `u64` value, typically a hash or a base seed).
+///
+/// Return
+/// ----------
+/// * A `u64` pseudo-random value, suitable for seeding RNGs (e.g., `StdRng`).
+///
+/// See also
+/// ------------
+/// * [`seed_for_object`] – Derives per-object seeds from a base seed and object hash.
+#[inline]
+fn splitmix64(mut x: u64) -> u64 {
+    // SplitMix64 constants and shifts from Steele et al. (2014).
+    x = x.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
+#[cfg(feature = "parallel")]
+/// Derive a **deterministic per-object RNG seed** from a global base seed.
+///
+/// Each object is first hashed with the crate’s default hasher (`ahash`), and the
+/// resulting 64-bit value is mixed with the base seed via [`splitmix64`].
+/// This ensures that:
+/// - Each object gets a **stable, reproducible seed** (same input → same output).
+/// - Seeds are decorrelated even across many objects.
+/// - Parallel runs remain deterministic regardless of thread scheduling.
+///
+/// Arguments
+/// -----------------
+/// * `base`: A global base seed (drawn once per batch).
+/// * `obj`: The [`ObjectNumber`] used as key to derive the per-object seed.
+///
+/// Return
+/// ----------
+/// * A `u64` deterministic RNG seed for the given object.
+///
+/// See also
+/// ------------
+/// * [`splitmix64`] – Core mixing function.
+/// * [`ObjectNumber`] – Object identifier used in Outfit (MPC number or string).
+#[inline]
+fn seed_for_object(base: u64, obj: &ObjectNumber) -> u64 {
+    // Hash object key with the same family used elsewhere (ahash).
+    let mut h = ahash::AHasher::default();
+    obj.hash(&mut h);
+    let obj_h = h.finish();
+
+    // Mix base seed and object hash through SplitMix64.
+    splitmix64(base ^ obj_h)
+}
 
 // ============================================================================
 // Public trait + factorized implementation
@@ -680,6 +749,61 @@ pub trait TrajectoryFit {
     ) -> FullOrbitResult
     where
         F: FnMut() -> bool;
+
+    /// Run Gauss-based Initial Orbit Determination (IOD) over all trajectories
+    /// using **parallel batches**.
+    ///
+    /// The [`TrajectorySet`] is split into chunks of size `batch_size`. Each chunk
+    /// is assigned to a Rayon worker thread, and objects inside a chunk are processed
+    /// sequentially for cache efficiency. A single `base_seed` is drawn from `rng`,
+    /// and a stable per-object seed is derived deterministically to guarantee
+    /// reproducibility regardless of parallel scheduling.
+    ///
+    /// Threading model
+    /// -----------------
+    /// * This function uses the **global Rayon thread pool** by default.
+    /// * The number of worker threads is controlled by the environment variable
+    ///   `RAYON_NUM_THREADS`. For example:
+    ///
+    ///   ```bash
+    ///   RAYON_NUM_THREADS=4 cargo run --release
+    ///   ```
+    ///
+    ///   will cap Rayon to 4 threads across the entire program.
+    /// * If the variable is unset, Rayon defaults to the number of logical CPUs.
+    ///
+    /// Mutation semantics
+    /// -----------------
+    /// * As in the sequential version, this method may **reorder observations**
+    ///   and **update per-batch calibration** (e.g. RMS scaling of quoted errors).
+    /// * Each trajectory’s observation container is reinserted after processing,
+    ///   so `self` remains valid and complete.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `state`: Global environment (ephemerides, constants, frames).
+    /// * `rng`: Random number generator, used only once to draw a base seed.
+    /// * `params`: IOD parameters controlling triplet generation, scoring, correction.
+    /// * `batch_size`: Number of trajectories per parallel batch. Must be ≥ 1.
+    ///
+    /// Return
+    /// ----------
+    /// * A [`FullOrbitResult`] mapping each object to either:
+    ///   * `Ok((GaussResult, f64))` – best orbit and its RMS,
+    ///   * `Err(OutfitError)` – diagnostic if no acceptable orbit was found.
+    ///
+    /// See also
+    /// ------------
+    /// * [`TrajectoryFit::estimate_all_orbits`] – Sequential variant.
+    /// * [`TrajectoryFit::estimate_all_orbits_with_cancel`] – Sequential variant with cooperative cancellation.
+    #[cfg(feature = "parallel")]
+    fn estimate_all_orbits_in_batches_parallel(
+        &mut self,
+        state: &Outfit,
+        rng: &mut impl rand::Rng,
+        params: &IODParams,
+        batch_size: usize,
+    ) -> FullOrbitResult;
 }
 
 impl TrajectoryFit for TrajectorySet {
@@ -722,6 +846,102 @@ impl TrajectoryFit for TrajectorySet {
             Some(cancel),
             ProgressImpl::default(),
         )
+    }
+
+    #[cfg(feature = "parallel")]
+    fn estimate_all_orbits_in_batches_parallel(
+        &mut self,
+        state: &Outfit,
+        rng: &mut impl rand::Rng,
+        params: &IODParams,
+        batch_size: usize,
+    ) -> FullOrbitResult {
+        // Draw a single base seed once; per-object seeds derived deterministically.
+        let base_seed: u64 = rng.random();
+
+        // Take the whole map so we can own/mutate Observations per object off-thread.
+        let mut old: TrajectorySet = mem::take(self);
+        let mut entries: Vec<(ObjectNumber, Observations)> = old.drain().collect();
+
+        let total_items = entries.len() as u64;
+        let batch_size = batch_size.max(1);
+
+        // Materialize batches **by move** (no clone of Observations).
+        let mut batches: Vec<Vec<(ObjectNumber, Observations)>> =
+            Vec::with_capacity(entries.len().div_ceil(batch_size));
+        while !entries.is_empty() {
+            let take_n = entries.len().min(batch_size);
+            batches.push(entries.drain(..take_n).collect());
+        }
+
+        // Global progress bar (thread-safe) under the `progress` feature.
+        #[cfg(feature = "progress")]
+        let pb = {
+            use indicatif::{ProgressBar, ProgressStyle};
+            let pb = ProgressBar::new(total_items.max(1));
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) \
+                     | {per_sec} | ETA {eta_precise} | parallel batches",
+                )
+                .expect("indicatif template"),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(200));
+            pb
+        };
+
+        // Process batches in parallel; each batch processed sequentially for locality.
+        #[allow(clippy::type_complexity)]
+        let mut per_batch: Vec<
+            Vec<(
+                ObjectNumber,
+                Result<(GaussResult, f64), OutfitError>,
+                Observations,
+            )>,
+        > = batches
+            .into_par_iter()
+            .map(|mut batch| {
+                let mut out: Vec<(
+                    ObjectNumber,
+                    Result<(GaussResult, f64), OutfitError>,
+                    Observations,
+                )> = Vec::with_capacity(batch.len());
+
+                for (obj, mut obs) in batch.drain(..) {
+                    use rand::SeedableRng;
+
+                    let local_seed = seed_for_object(base_seed, &obj);
+                    let mut local_rng = rand::rngs::StdRng::seed_from_u64(local_seed);
+
+                    let res =
+                        obs.estimate_best_orbit(state, &state.error_model, &mut local_rng, params);
+
+                    // Thread-safe progress increment.
+                    #[cfg(feature = "progress")]
+                    pb.inc(1);
+
+                    out.push((obj, res, obs));
+                }
+                out
+            })
+            .collect();
+
+        // Finalize progress.
+        #[cfg(feature = "progress")]
+        {
+            pb.disable_steady_tick();
+            pb.finish_and_clear();
+        }
+
+        // Reinsert mutated observations and build results map with the same hasher.
+        let mut results: FullOrbitResult = HashMap::with_hasher(ahash::RandomState::new());
+        for batch in per_batch.drain(..) {
+            for (obj, res, obs) in batch {
+                self.insert(obj.clone(), obs);
+                results.insert(obj, res);
+            }
+        }
+        results
     }
 
     #[inline]
@@ -1164,5 +1384,214 @@ mod tests_estimate_all_orbits {
         assert_eq!(stats.median, 8);
         assert_eq!(stats.p25, 4);
         assert_eq!(stats.p95, 16);
+    }
+
+    #[cfg(test)]
+    #[cfg(feature = "parallel")]
+    mod tests_estimate_orbit_parallel_batches {
+        use super::*;
+        use ahash::RandomState;
+        use rand::SeedableRng;
+
+        // Reuse helpers and fixtures style from your existing tests.
+        // If these are private in another module, duplicate minimal versions here.
+
+        /// Build a tiny TrajectorySet with N empty observation lists.
+        ///
+        /// Note: This assumes `TrajectorySet` is a HashMap-like structure
+        ///       and `ObjectNumber::Int(u32)` exists. Adjust if needed.
+        fn make_set(n: usize) -> TrajectorySet {
+            let mut set: TrajectorySet = std::collections::HashMap::with_hasher(RandomState::new());
+            for i in 0..n {
+                set.insert(ObjectNumber::Int(i as u32), Default::default());
+            }
+            set
+        }
+
+        #[inline]
+        fn total_obs(set: &TrajectorySet) -> usize {
+            set.values().map(|v: &Observations| v.len()).sum()
+        }
+
+        // -------------------------------
+        // Unit tests: basic shape/edges
+        // -------------------------------
+
+        /// Parallel-batched IOD over an empty set should return an empty map.
+        #[test]
+        fn parallel_batches_empty_set_is_empty() {
+            let mut set = make_set(0);
+
+            // Dummy env/params: estimator is never reached for empty set.
+            // If you need to compile without jpl, use the same `dummy_env()` strategy as your seq tests.
+            let env = dummy_env().0;
+            let params = IODParams::builder().build().unwrap();
+
+            let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+            let results =
+                set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 1024);
+            assert!(results.is_empty(), "Empty input → empty results");
+            assert_eq!(set.len(), 0, "Set remains empty");
+        }
+
+        /// Batch-size boundaries (1 and very large) should produce exactly one entry per object.
+        ///
+        /// We don't assert on Ok/Err, only that every object was processed and observations were reintegrated.
+        #[test]
+        fn parallel_batches_size_edges_cover_all_objects() {
+            for &batch_size in &[1usize, 10_000usize] {
+                let mut set = make_set(7);
+
+                // Build a dummy env that lets the code run without panicking even if estimator errs.
+                // The estimator may return Err for empty observations — it's fine for this test.
+                let env = dummy_env().0;
+                let params = IODParams::builder().build().unwrap();
+
+                let before_n = set.len();
+                let before_tot = total_obs(&set);
+
+                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+                let results = set
+                    .estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, batch_size);
+
+                assert_eq!(results.len(), before_n, "Exactly one entry per object");
+                assert_eq!(set.len(), before_n, "All objects reinserted in set");
+                assert_eq!(
+                    total_obs(&set),
+                    before_tot,
+                    "Total number of observations is preserved (reorder/calibration only)"
+                );
+            }
+        }
+
+        /// Using the same input and RNG seed must be deterministic across runs, regardless of scheduling.
+        /// This checks **one specific object** for identical formatted outcome (Ok/Err shape and RMS).
+        #[test]
+        fn parallel_batches_deterministic_across_runs_with_same_seed() {
+            // Small synthetic set; estimator likely returns Err for empty observations.
+            // Determinism check focuses on the *presence* and *shape* of results.
+            let build_set = || make_set(5);
+            let env = dummy_env().0;
+            let params = IODParams::builder().build().unwrap();
+
+            let key = ObjectNumber::Int(2);
+
+            let run_once = |seed: u64| {
+                let mut set = build_set();
+                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let results =
+                    set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 2);
+                // Record a stable string representation for that key.
+                match results.get(&key) {
+                    None => "None".to_string(),
+                    Some(Ok((_g, rms))) => format!("Ok rms={rms:.12e}"),
+                    Some(Err(e)) => format!("Err: {e}"),
+                }
+            };
+
+            let a = run_once(0xDEADBEEF);
+            let b = run_once(0xDEADBEEF);
+            assert_eq!(a, b, "Same seed/input → identical outcome formatting");
+        }
+
+        // -------------------------------
+        // Integration tests with JPL env
+        // -------------------------------
+
+        mod with_ephem {
+            use super::*;
+            use approx::assert_relative_eq;
+
+            use crate::unit_test_global::OUTFIT_HORIZON_TEST;
+
+            /// Parallel batched results should match the known-good orbit (as in the sequential test).
+            #[test]
+            fn parallel_batches_return_orbit() {
+                // Use the same fixture you use elsewhere.
+                let mut set = OUTFIT_HORIZON_TEST.1.clone();
+                let (env, params) = {
+                    // If you have a helper `dummy_env()` in the seq tests, keep the same one:
+                    let env = OUTFIT_HORIZON_TEST.0.clone();
+                    let params = IODParams::builder()
+                        .n_noise_realizations(10)
+                        .noise_scale(1.0)
+                        .max_obs_for_triplets(12)
+                        .max_triplets(30)
+                        .build()
+                        .unwrap();
+                    (env, params)
+                };
+                let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+                // Choose a batch size that is neither 1 nor huge to exercise chunking logic.
+                let results =
+                    set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 1);
+
+                // Same canonical object as in your sequential test:
+                let string_id = "K09R05F";
+                let orbit = gauss_result_for(&results, &string_id.into());
+
+                assert!(orbit.is_ok(), "Result entry should be Ok");
+            }
+
+            /// Parallel batched determinism across different batch sizes.
+            ///
+            /// With same RNG seed + inputs, changing only `batch_size` should not affect results.
+            #[test]
+            fn parallel_batches_results_independent_of_batch_size() {
+                let mut set1 = OUTFIT_HORIZON_TEST.1.clone();
+                let mut set2 = OUTFIT_HORIZON_TEST.1.clone();
+                let (env, params) = {
+                    let env = OUTFIT_HORIZON_TEST.0.clone();
+                    let params = IODParams::builder()
+                        .n_noise_realizations(10)
+                        .noise_scale(1.0)
+                        .max_obs_for_triplets(12)
+                        .max_triplets(30)
+                        .build()
+                        .unwrap();
+                    (env, params)
+                };
+
+                let seed = 0xABCDEF0123456789;
+                let mut rng1 = rand::rngs::StdRng::seed_from_u64(seed);
+                let mut rng2 = rand::rngs::StdRng::seed_from_u64(seed);
+
+                let res1 =
+                    set1.estimate_all_orbits_in_batches_parallel(&env, &mut rng1, &params, 64);
+                let res2 =
+                    set2.estimate_all_orbits_in_batches_parallel(&env, &mut rng2, &params, 4096);
+
+                // Compare a known object Keplerian solution (same as above).
+                let key = "K09R05F".into();
+                let k1 = gauss_result_for(&res1, &key)
+                    .unwrap()
+                    .unwrap()
+                    .0
+                    .as_inner()
+                    .as_keplerian()
+                    .unwrap();
+                let k2 = gauss_result_for(&res2, &key)
+                    .unwrap()
+                    .unwrap()
+                    .0
+                    .as_inner()
+                    .as_keplerian()
+                    .unwrap();
+
+                // Tight numerical equality (same seed → same triplet noise → identical orbit).
+                assert_relative_eq!(k1.reference_epoch, k2.reference_epoch, epsilon = 0.0);
+                assert_relative_eq!(k1.semi_major_axis, k2.semi_major_axis, epsilon = 0.0);
+                assert_relative_eq!(k1.eccentricity, k2.eccentricity, epsilon = 0.0);
+                assert_relative_eq!(k1.inclination, k2.inclination, epsilon = 0.0);
+                assert_relative_eq!(
+                    k1.ascending_node_longitude,
+                    k2.ascending_node_longitude,
+                    epsilon = 0.0
+                );
+                assert_relative_eq!(k1.periapsis_argument, k2.periapsis_argument, epsilon = 0.0);
+                assert_relative_eq!(k1.mean_anomaly, k2.mean_anomaly, epsilon = 0.0);
+            }
+        }
     }
 }

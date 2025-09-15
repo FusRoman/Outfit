@@ -74,6 +74,7 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
 - **Batch processing & benchmarking**
   - Stream triplets, evaluate, and rank candidates
   - Criterion-based micro/macro benchmarks
+  - Optional parallel batch IOD using Rayon (feature: `parallel`)
 
 ---
 
@@ -174,7 +175,8 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 | Feature         | Description                                                                 |
 |-----------------|-----------------------------------------------------------------------------|
 | `jpl-download`  | Automatically fetch JPL ephemerides on first use (e.g., DE440).            |
-| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.|
+| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.| 
+| `parallel`      | Optional parallel batch IOD using `rayon` to speed processing of many trajectories.| 
 
 ---
 

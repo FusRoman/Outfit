@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - `estimate_all_orbits_with_cancel(&mut self, &Outfit, &mut impl Rng, &IODParams, should_cancel: impl FnMut() -> bool) -> FullOrbitResult`
   - `total_observations(&self) -> usize` — total samples across all trajectories.
   - `obs_count_stats(&self) -> Option<ObsCountStats>` — min/p25/median/p95/max of per-trajectory counts.
+- **Parallel batch IOD** *(new feature flag `parallel`)*  
+  - New dependency: [`rayon`](https://crates.io/crates/rayon) (optional).  
+  - `estimate_all_orbits_in_batches_parallel(&mut self, &Outfit, &mut impl Rng, &IODParams, batch_size: usize) -> FullOrbitResult`  
+    Runs Initial Orbit Determination (IOD) in **parallel across batches**, each processed sequentially for locality.  
+    - Seeds are deterministically derived per object from a global random base seed.
+    - Observations are moved by batch, avoiding clones.
+    - Supports global, thread-safe progress bar under `progress` feature.
 - **Result helpers & types**
   - `type FullOrbitResult = HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>`
   - `gauss_result_for(&FullOrbitResult, &ObjectNumber)` — borrow solution & RMS if present.

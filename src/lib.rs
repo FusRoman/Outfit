@@ -43,6 +43,9 @@
 //!   - RMS computation of normalized astrometric residuals, filtering utilities.
 //! - **Examples & benches**:
 //!   - End-to-end examples in `examples/`, Criterion benchmarks for IOD.
+//! - **Parallel IOD (feature `parallel`)**:
+//!   - Batched multi-core execution via **Rayon**,
+//!     optional global progress bar when combined with the `progress` feature.
 //!
 //! ### Planned extensions
 //!
@@ -107,6 +110,68 @@
 //!
 //! For more end-to-end flows, see the [`examples/`](https://github.com/FusRoman/Outfit/tree/main/examples) folder (e.g. `parquet_to_orbit.rs`).
 //!
+//! ## Example (Parallel batched IOD)
+//!
+//! This example requires the `parallel` feature (and optionally `progress` for a global progress bar).
+//!
+//! ```rust
+//! use camino::Utf8Path;
+//! use rand::{rngs::StdRng, SeedableRng};
+//! use outfit::{Outfit, ErrorModel, IODParams};
+//! use outfit::constants::ObjectNumber;
+//! use outfit::TrajectorySet;
+//! use outfit::TrajectoryFit;
+//! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
+//!
+//! # #[cfg(all(feature = "parallel", feature = "jpl-download"))]
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//!     
+//!     let test_data = "tests/data/test_from_fink.parquet";
+//!     let path_file = Utf8Path::new(test_data);
+//!     
+//!     let ztf_observer = env.get_observer_from_mpc_code(&"I41".into());
+//!     let mut traj_set = TrajectorySet::new_from_parquet(
+//!         &mut env,
+//!         path_file,
+//!         ztf_observer,
+//!         0.5,
+//!         0.5,
+//!         None
+//!     )?;
+//!
+//!     let params = IODParams::builder()
+//!         .max_obs_for_triplets(12)
+//!         .n_noise_realizations(10)
+//!         .build()?;
+//!
+//!     let mut rng = StdRng::seed_from_u64(42);
+//!     let batch_size = 256; // tune for locality & memory
+//!
+//!     let results = traj_set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, batch_size);
+//!
+//!     for (obj, res) in results {
+//!         match res {
+//!             Ok((gauss, rms)) => {
+//!                 println!("{} → RMS = {rms:.4}", obj);
+//!                 println!("{gauss}");
+//!             }
+//!             Err(e) => eprintln!("{} → error: {e}", obj),
+//!         }
+//!     }
+//!
+//!     Ok(())
+//! }
+//!
+//! # #[cfg(not(feature = "parallel"))]
+//! # fn main() {}
+//! ```
+//!
+//! **Notes**
+//! - Batches are processed **in parallel**; each batch is handled **sequentially** to preserve cache locality.
+//! - Per-object RNG seeds are **deterministically derived** from a single base seed.
+//! - Set `RAYON_NUM_THREADS=N` to cap threads if needed.
+//!
 //! ## Data Formats
 //!
 //! - **MPC 80-column** — standard fixed-width astrometry  
@@ -134,11 +199,20 @@
 //! - **`progress`** *(optional)*  
 //!   Enables lightweight progress bars (via `indicatif`) and loop timing utilities for long-running jobs.
 //!
+//! - **`parallel`** *(optional)*  
+//!   Enables **multi-core** IOD via **Rayon**, exposing
+//!   [`TrajectorySet::estimate_all_orbits_in_batches_parallel`](crate::trajectories::trajectory_fit::TrajectoryFit::estimate_all_orbits_in_batches_parallel).
+//!   Combine with `progress` for a thread-safe global progress bar.
+//!
 //! ```toml
 //! [dependencies]
 //! outfit = { version = "...", features = ["jpl-download"] }
-//! # or, with progress indicators
+//! # with progress indicators
 //! outfit = { version = "...", features = ["jpl-download", "progress"] }
+//! # with multi-core IOD
+//! outfit = { version = "...", features = ["parallel"] }
+//! # combine as needed
+//! outfit = { version = "...", features = ["jpl-download", "progress", "parallel"] }
 //! ```
 //!
 //! ## Error Handling
