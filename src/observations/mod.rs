@@ -129,7 +129,7 @@ use std::f64::consts::PI;
 /// * `time` – Observation epoch as MJD (TT scale).
 /// * `observer_earth_position` – Geocentric position of the observer at `time` (AU, equatorial mean J2000).
 /// * `observer_helio_position` – Heliocentric position of the observer at `time` (AU, equatorial mean J2000).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct Observation {
     pub(crate) observer: u16,
     pub ra: Radian,
@@ -764,7 +764,7 @@ mod test_observations {
 
                     let obs_eps = Observation {
                         time: obs_time + 1e-3, // shift by 1.4 minutes
-                        ..obs.clone()
+                        ..obs
                     };
 
                     let r1 = obs.compute_apparent_position(state, &equinoctial);

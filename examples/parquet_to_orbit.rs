@@ -613,7 +613,7 @@ fn fmt_opt(x: f64) -> String {
 fn main() -> Result<(), OutfitError> {
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
-    let test_data = "/home/roman/Documents/Programmation/Rust/Outfit/orbfit_tests/with_python/asteroid_data_fink.parquet";
+    let test_data = "tests/data/test_from_fink.parquet";
 
     println!("Loading observations from {test_data}");
     let path_file = Utf8Path::new(test_data);

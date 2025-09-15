@@ -60,7 +60,7 @@
 //! -----------------
 //! * Failures are **per-object**: an error for one object does **not** abort
 //!   the batch.
-//! * The returned map always contains **one entry per processed object**,
+//! * The returned map contains **one entry per processed object**,
 //!   each entry being either `Ok((GaussResult, rms))` or `Err(OutfitError)`.
 //!
 //! ## Examples
@@ -101,7 +101,7 @@
 //! # ) -> outfit::trajectories::trajectory_fit::FullOrbitResult {
 //! let stop = AtomicBool::new(false);
 //! // … flip `stop` from another thread / signal handler …
-////!
+//!
 //! trajs.estimate_all_orbits_with_cancel(state, rng, params, || stop.load(Ordering::Relaxed))
 //! # }
 //! ```
@@ -142,27 +142,22 @@ use std::time::{Duration, Instant};
 
 #[cfg(feature = "progress")]
 use super::progress_bar::IterTimer;
-#[cfg(feature = "progress")]
-use indicatif::{ProgressBar, ProgressStyle};
 
 /// Full batch orbit determination results.
 ///
 /// Each entry maps an [`ObjectNumber`] to the outcome of a full
 /// Initial Orbit Determination (IOD) attempt on its set of observations.
-/// The result type is:
-///
-/// * `Ok((Option<GaussResult>, f64))` – successful execution of the IOD pipeline:
-///   * `Option<GaussResult>` – the best preliminary or corrected orbit found
-///     for this object (or `None` if no viable orbit was selected),
-///   * `f64` – the RMS of normalized astrometric residuals for that solution.
-/// * `Err(OutfitError)` – a failure during orbit estimation for this object.
-///   Errors are per-object and do not abort the rest of the batch.
 ///
 /// Internally, this is implemented as:
 ///
 /// ```ignore
-/// HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, RandomState>
+/// HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>
 /// ```
+///
+/// Return semantics
+/// -----------------
+/// * `Ok((GaussResult, f64))` – a successful IOD with its RMS of normalized residuals.
+/// * `Err(OutfitError)` – a failure isolated to that object.
 pub type FullOrbitResult =
     HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>;
 
@@ -176,7 +171,7 @@ pub type FullOrbitResult =
 /// Return
 /// ----------
 /// * `Ok(Some((&GaussResult, f64)))` – a solution is present for the key.
-/// * `Ok(None)` – key absent OR present but no acceptable solution (`None`).
+/// * `Ok(None)` – key absent.
 /// * `Err(&OutfitError)` – the IOD attempt failed for that key.
 ///
 /// See also
@@ -194,6 +189,21 @@ pub fn gauss_result_for<'a>(
 }
 
 /// Take ownership of the solution for `key`, removing it from the map.
+///
+/// Arguments
+/// -----------------
+/// * `all`: The map of all IOD outcomes (consumed entry will be removed).
+/// * `key`: The object identifier to extract.
+///
+/// Return
+/// ----------
+/// * `Ok(Some((GaussResult, f64)))` – ownership of the solution and its RMS.
+/// * `Ok(None)` – key absent.
+/// * `Err(OutfitError)` – the IOD attempt failed for that key.
+///
+/// See also
+/// ------------
+/// * [`gauss_result_for`] – Borrowing accessor.
 pub fn take_gauss_result(
     all: &mut FullOrbitResult,
     key: &ObjectNumber,
@@ -281,37 +291,292 @@ impl fmt::Display for ObsCountStats {
     }
 }
 
-pub trait TrajectoryFit {
-    /// Estimate an initial orbit for **every trajectory** in the set and collect the results.
+// ============================================================================
+// Factorized core + progress abstraction + cancel config
+// ============================================================================
+
+/// Cancellation guard polled at fixed wall-clock intervals.
+///
+/// A `CancelCfg` lets the main loop periodically check whether the user
+/// or an external controller has requested an early stop. The loop itself
+/// decides *when* to poll based on the `interval`, and *how* to react
+/// based on the `should_cancel` callback.
+///
+/// Arguments
+/// -----------------
+/// * `interval`: Minimum wall-clock delay between two cancellation checks.
+///   This prevents the loop from calling the callback at every
+///   iteration, which would be too costly.
+/// * `should_cancel`: User-provided closure returning `true` when cancellation
+///   is requested. If `true`, the loop terminates gracefully.
+///
+/// See also
+/// ------------
+/// * [`estimate_all_orbits_core`] – Main iteration loop that evaluates this configuration.
+struct CancelCfg<F> {
+    interval: Duration,
+    should_cancel: F,
+}
+
+/// Abstract interface for reporting progress to the outside world.
+///
+/// The purpose of this trait is to **decouple the heavy numerical loop**
+/// from any particular UI backend. The core orbit determination logic
+/// always calls into a `ProgressSink`, but the actual implementation
+/// depends on the build:
+///
+/// * with the `progress` feature, it is backed by an [`indicatif`] progress bar,
+/// * otherwise, a no-op implementation is used, so the loop compiles without UI.
+///
+/// This abstraction ensures that the loop has a consistent lifecycle:
+///   1. [`start`] is called once with the total number of objects.
+///   2. [`on_iter`] is called at the beginning of each iteration (e.g. to refresh messages).
+///   3. [`inc`] is called once per completed iteration.
+///   4. [`on_interrupt`] is called right before exiting due to cancellation.
+///   5. [`finish`] is always called at the end, successful or not.
+///
+/// By default, all methods are no-ops, so implementors only override the
+/// subset they need.
+trait ProgressSink {
+    /// Called once before entering the main loop, with the total number of items.
+    fn start(&mut self, _total: u64) {}
+    /// Called at the beginning of each iteration (e.g., refresh UI or logs).
+    fn on_iter(&mut self) {}
+    /// Increment the progress by one step.
+    fn inc(&mut self) {}
+    /// Called once if the loop exits because of cancellation.
+    fn on_interrupt(&mut self) {}
+    /// Called once at the very end, regardless of success or cancellation.
+    fn finish(&mut self) {}
+}
+
+/// Default no-op implementation, used when the `progress` feature is disabled.
+impl ProgressSink for () {}
+
+/// Blanket implementation so that `&mut T` also implements [`ProgressSink`].
+///
+/// This lets tests pass `&mut MockProgress` directly, while the core API
+/// continues to accept progress sinks by value.
+impl<T: ProgressSink + ?Sized> ProgressSink for &mut T {
+    #[inline]
+    fn start(&mut self, total: u64) {
+        (**self).start(total)
+    }
+    #[inline]
+    fn on_iter(&mut self) {
+        (**self).on_iter()
+    }
+    #[inline]
+    fn inc(&mut self) {
+        (**self).inc()
+    }
+    #[inline]
+    fn on_interrupt(&mut self) {
+        (**self).on_interrupt()
+    }
+    #[inline]
+    fn finish(&mut self) {
+        (**self).finish()
+    }
+}
+
+/// Concrete type selected depending on the `progress` feature:
+/// * [`IndicatifProgress`] when enabled,
+/// * [`()`] (no-op) when disabled.
+#[cfg(feature = "progress")]
+type ProgressImpl = IndicatifProgress;
+#[cfg(not(feature = "progress"))]
+type ProgressImpl = ();
+
+/// Central loop that runs orbit estimation for each trajectory.
+///
+/// This function is the **engine** behind the public APIs:
+/// [`TrajectoryFit::estimate_all_orbits`] and
+/// [`TrajectoryFit::estimate_all_orbits_with_cancel`].
+///
+/// It consumes a [`TrajectorySet`] and tries to estimate the best orbit
+/// for each contained object. Along the way it reports progress, and it
+/// may stop early if the provided cancellation config triggers.
+///
+/// Arguments
+/// -----------------
+/// * `set`: The trajectory set to process (mutable, results are inserted).
+/// * `state`: Global environment providing ephemerides, constants, and frames.
+/// * `rng`: Random number generator used for noisy triplet realizations.
+/// * `params`: IOD parameters controlling triplet generation and scoring.
+/// * `cancel`: Optional cancellation guard (poll interval + callback).
+/// * `progress`: Progress reporting sink (indicatif bar or no-op).
+///
+/// Return
+/// ----------
+/// * A [`FullOrbitResult`], i.e. a map from object → `Ok((GaussResult, rms))`
+///   or `Err(OutfitError)` depending on whether orbit estimation succeeded.
+///
+/// See also
+/// ------------
+/// * [`TrajectoryFit::estimate_all_orbits`] – Public API without cancellation.
+/// * [`TrajectoryFit::estimate_all_orbits_with_cancel`] – Public API with cancellation.
+fn estimate_all_orbits_core<F, P>(
+    set: &mut TrajectorySet,
+    state: &Outfit,
+    rng: &mut impl Rng,
+    params: &IODParams,
+    mut cancel: Option<CancelCfg<F>>,
+    mut progress: P,
+) -> FullOrbitResult
+where
+    F: FnMut() -> bool,
+    P: ProgressSink,
+{
+    let total = set.len() as u64;
+    progress.start(total.max(1));
+
+    let mut results: FullOrbitResult = HashMap::default();
+    let mut last_poll = Instant::now();
+
+    for (obj, observations) in set.iter_mut() {
+        // --- Timer-based cancellation (if configured)
+        if let Some(CancelCfg {
+            interval,
+            should_cancel,
+        }) = cancel.as_mut()
+        {
+            if last_poll.elapsed() >= *interval {
+                if should_cancel() {
+                    progress.on_interrupt();
+                    break;
+                }
+                last_poll = Instant::now();
+            }
+        }
+
+        progress.on_iter();
+
+        // Core work
+        let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
+        results.insert(obj.clone(), res);
+
+        progress.inc();
+    }
+
+    progress.finish();
+    results
+}
+
+// --------------------------- Progress (indicatif) ----------------------------
+#[cfg(feature = "progress")]
+mod progress_impl {
+    use super::ProgressSink;
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    use super::IterTimer;
+    use crate::trajectories::progress_bar::fmt_dur;
+
+    /// Progress sink backed by `indicatif`.
     ///
-    /// This method runs the Gauss-based IOD pipeline on each `(ObjectNumber → Observations)`
-    /// pair contained in the trajectory set. All objects are processed with the same
-    /// configuration (`state`, `error_model`, `params`) and random number generator.
-    /// Results are aggregated into a [`FullOrbitResult`] map.
+    /// See also
+    /// ------------
+    /// * [`estimate_all_orbits_core`] – Calls into this sink at key lifecycle moments.
+    pub(super) struct IndicatifProgress {
+        pb: ProgressBar,
+        it_timer: IterTimer,
+    }
+
+    impl Default for IndicatifProgress {
+        fn default() -> Self {
+            // The actual length is set in `start()`.
+            let pb = ProgressBar::new(1);
+            Self {
+                pb,
+                it_timer: IterTimer::new(0.2),
+            }
+        }
+    }
+
+    impl ProgressSink for IndicatifProgress {
+        fn start(&mut self, total: u64) {
+            self.pb.set_length(total.max(1));
+            self.pb.set_style(
+                ProgressStyle::with_template(
+                    "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) \
+                         | {per_sec} | ETA {eta_precise} | {msg}",
+                )
+                .expect("indicatif template"),
+            );
+            self.pb.enable_steady_tick(Duration::from_millis(200));
+        }
+
+        fn on_iter(&mut self) {
+            let last = self.it_timer.tick();
+            let avg = self.it_timer.avg();
+            self.pb
+                .set_message(format!("last: {}, avg: {}", fmt_dur(last), fmt_dur(avg)));
+        }
+
+        fn inc(&mut self) {
+            self.pb.inc(1);
+        }
+
+        fn on_interrupt(&mut self) {
+            self.pb.set_message("Interrupted");
+        }
+
+        fn finish(&mut self) {
+            self.pb.disable_steady_tick();
+            self.pb.finish_and_clear();
+        }
+    }
+}
+
+#[cfg(feature = "progress")]
+use progress_impl::IndicatifProgress;
+
+// ============================================================================
+// Public trait + factorized implementation
+// ============================================================================
+
+pub trait TrajectoryFit {
+    /// Run Gauss-based Initial Orbit Determination (IOD) for **every trajectory** in the set.
+    ///
+    /// This method iterates over each `(ObjectNumber → Observations)` entry and applies the
+    /// full IOD pipeline: candidate triplet enumeration, preliminary Gauss solution, and
+    /// scoring / selection of the best orbit. It aggregates results into a [`FullOrbitResult`].
+    ///
+    /// Mutation semantics
+    /// -----------------
+    /// * This function requires `&mut self` and may **reorder observations in-place** (e.g.,
+    ///   by time) and/or **update batch-level calibration** data (RMS scaling of quoted errors).
+    /// * The underlying astrometric measurements (RA/DEC/time) remain semantically identical,
+    ///   but their **container order** and **per-observation uncertainty metadata** may change
+    ///   due to calibration and sorting steps used by the estimator.
+    /// * If you rely on a specific iteration order elsewhere, do not assume it is preserved.
+    ///
+    /// Determinism
+    /// -----------------
+    /// * With a fixed RNG seed, the procedure is deterministic given identical inputs and params.
     ///
     /// Arguments
     /// -----------------
-    /// * `state`: The global environment providing ephemerides, constants, and reference frames.
-    /// * `rng`: Random number generator used for noisy triplet realizations (e.g., \[`StdRng`\]).
-    /// * `params`: Parameters controlling triplet generation, scoring, and correction loops.
+    /// * `state`: Global environment providing ephemerides, constants, and reference frames.
+    /// * `rng`: Random number generator used for noisy triplet realizations (e.g., [`StdRng`](rand::rngs::StdRng)).
+    /// * `params`: IOD parameters controlling triplet generation, scoring, and correction loops.
     ///
     /// Return
     /// ----------
     /// * A [`FullOrbitResult`] mapping each object to either:
-    ///   * `Ok((Option<GaussResult>, f64))` – a valid solution with its RMS,
-    ///   * `Err(OutfitError)` – an error diagnostic for that object.
+    ///   * `Ok((GaussResult, f64))` – selected orbit and its RMS,
+    ///   * `Err(OutfitError)` – diagnostic if no acceptable solution was found.
     ///
     /// Notes
     /// ----------
-    /// * The method iterates in place on the current set.  
-    /// * Observations themselves are not modified, but computation time scales
-    ///   with the number of trajectories and candidate triplets.  
-    /// * Errors are isolated: one object failing does not prevent others from being processed.
+    /// * Failures are isolated: one object failing does not prevent others from being processed.
+    /// * Runtime scales with the number of trajectories and candidate triplets per trajectory.
     ///
     /// See also
     /// ------------
     /// * [`ObservationIOD::estimate_best_orbit`] – Per-trajectory IOD with best-orbit selection.
-    /// * [`GaussResult`] – Variants for preliminary or corrected orbit solutions.
+    /// * [`TrajectoryFit::estimate_all_orbits_with_cancel`] – Same API with cooperative cancellation.
     /// * [`IODParams`] – Tuning parameters for IOD batch execution.
     fn estimate_all_orbits(
         &mut self,
@@ -356,7 +621,7 @@ pub trait TrajectoryFit {
     fn obs_count_stats(&self) -> Option<ObsCountStats>;
 
     /// Return the number of distinct trajectories (objects) in the set.
-    ////
+    ///
     /// This is simply the number of keys in the underlying map.
     ///
     /// Return
@@ -369,6 +634,43 @@ pub trait TrajectoryFit {
     /// * [`obs_count_stats`](crate::trajectories::trajectory_fit::TrajectoryFit::obs_count_stats) – Statistics on the number of observations per trajectory.
     fn number_of_trajectories(&self) -> usize;
 
+    /// Run Gauss-based IOD for all trajectories, with **cooperative cancellation** support.
+    ///
+    /// Behaves like [`TrajectoryFit::estimate_all_orbits`], but periodically polls a user
+    /// callback to decide whether to stop early. Returns **partial results** if cancelled.
+    ///
+    /// Mutation semantics
+    /// -----------------
+    /// * Same as the non-cancellable variant: the method may **reorder observations in-place**
+    ///   and update **per-batch calibration** (e.g., RMS alignment of quoted errors).
+    ///
+    /// Cancellation model
+    /// -----------------
+    /// * The loop polls `should_cancel` at ~20 ms wall-clock intervals. When it returns `true`,
+    ///   the loop terminates gracefully, calls `on_interrupt()` on the progress sink (if any),
+    ///   and returns the results accumulated so far.
+    ///
+    /// Determinism
+    /// -----------------
+    /// * With a fixed RNG seed, behavior is deterministic except for the **cut point** at which
+    ///   cancellation is observed (timing dependent).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `state`: Global environment and reference frames.
+    /// * `rng`: Random number generator for noisy triplet realizations.
+    /// * `params`: IOD parameters.
+    /// * `should_cancel`: Closure polled periodically; return `true` to request early stop.
+    ///
+    /// Return
+    /// ----------
+    /// * A [`FullOrbitResult`]:
+    ///   * Complete if the loop ran to completion,
+    ///   * Partial if cancellation was triggered mid-way.
+    ///
+    /// See also
+    /// ------------
+    /// * [`TrajectoryFit::estimate_all_orbits`] – Non-cancellable variant.
     fn estimate_all_orbits_with_cancel<F>(
         &mut self,
         state: &Outfit,
@@ -381,126 +683,23 @@ pub trait TrajectoryFit {
 }
 
 impl TrajectoryFit for TrajectorySet {
-    #[cfg(feature = "progress")]
     fn estimate_all_orbits(
         &mut self,
         state: &Outfit,
         rng: &mut impl Rng,
         params: &IODParams,
     ) -> FullOrbitResult {
-        let total = self.len() as u64;
-        let pb = ProgressBar::new(total.max(1));
-        pb.set_style(
-            ProgressStyle::with_template(
-                "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) \
-             | {per_sec} | ETA {eta_precise} | {msg}",
-            )
-            .expect("indicatif template"),
-        );
-        pb.enable_steady_tick(Duration::from_millis(200));
-
-        let mut results: FullOrbitResult = HashMap::default();
-        let mut it_timer = IterTimer::new(0.2);
-
-        for (obj, observations) in self.iter_mut() {
-            // Time of the previous loop (zero for the first, acceptable).
-
-            use super::progress_bar::fmt_dur;
-            let last = it_timer.tick();
-            let avg = it_timer.avg();
-            pb.set_message(format!("last: {}, avg: {}", fmt_dur(last), fmt_dur(avg)));
-
-            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
-            results.insert(obj.clone(), res);
-
-            pb.inc(1);
-        }
-
-        pb.finish_and_clear();
-        results
-    }
-
-    /// Cooperative cancellation version: the loop periodically calls `should_cancel()`
-    /// based on a wall-clock timer (not on iteration count).
-    #[cfg(feature = "progress")]
-    fn estimate_all_orbits_with_cancel<F>(
-        &mut self,
-        state: &Outfit,
-        rng: &mut impl Rng,
-        params: &IODParams,
-        mut should_cancel: F,
-    ) -> FullOrbitResult
-    where
-        F: FnMut() -> bool,
-    {
-        let total = self.len() as u64;
-        let pb = ProgressBar::new(total.max(1));
-        pb.set_style(
-        ProgressStyle::with_template(
-            "{bar:40.cyan/blue} {pos}/{len} ({percent:>3}%) | {per_sec} | ETA {eta_precise} | {msg}",
+        // `ProgressImpl` is `IndicatifProgress` when feature=progress, `()` otherwise.
+        estimate_all_orbits_core(
+            self,
+            state,
+            rng,
+            params,
+            None::<CancelCfg<fn() -> bool>>,
+            ProgressImpl::default(),
         )
-        .expect("indicatif template"),
-    );
-        pb.enable_steady_tick(Duration::from_millis(200));
-
-        let mut results: FullOrbitResult = HashMap::default();
-        let mut it_timer = IterTimer::new(0.2);
-
-        // --- Timer-based polling configuration
-        // Keep the cancellation latency roughly constant regardless of iteration cost.
-        const POLL_INTERVAL: Duration = Duration::from_millis(20);
-        let mut last_poll = Instant::now();
-
-        for (obj, observations) in self.iter_mut() {
-            // --- Cancellation poll based on elapsed time
-            // Only acquire the GIL / call should_cancel() if enough time has elapsed.
-            if last_poll.elapsed() >= POLL_INTERVAL {
-                if should_cancel() {
-                    pb.set_message("Interrupted");
-                    pb.disable_steady_tick();
-                    pb.finish_and_clear();
-                    break; // or early-return
-                }
-                last_poll = Instant::now();
-            }
-
-            // Progress message (kept as-is)
-            use super::progress_bar::fmt_dur;
-            let last = it_timer.tick();
-            let avg = it_timer.avg();
-            pb.set_message(format!("last: {}, avg: {}", fmt_dur(last), fmt_dur(avg)));
-
-            // Core work
-            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
-            results.insert(obj.clone(), res);
-
-            pb.inc(1);
-        }
-
-        pb.disable_steady_tick();
-        pb.finish_and_clear();
-        results
     }
 
-    #[cfg(not(feature = "progress"))]
-    fn estimate_all_orbits(
-        &mut self,
-        state: &Outfit,
-        rng: &mut impl Rng,
-        params: &IODParams,
-    ) -> FullOrbitResult {
-        // Output map using the same fast hasher as TrajectorySet.
-        let mut results: FullOrbitResult = HashMap::default();
-
-        for (obj, observations) in self.iter_mut() {
-            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
-            results.insert(obj.clone(), res);
-        }
-
-        results
-    }
-
-    #[cfg(not(feature = "progress"))]
     fn estimate_all_orbits_with_cancel<F>(
         &mut self,
         state: &Outfit,
@@ -511,26 +710,18 @@ impl TrajectoryFit for TrajectorySet {
     where
         F: FnMut() -> bool,
     {
-        let mut results: FullOrbitResult = HashMap::default();
-
-        // --- Timer configuration
-        let poll_interval = Duration::from_millis(20); // intervalle minimal
-        let mut last_poll = Instant::now();
-
-        for (obj, observations) in self.iter_mut() {
-            // --- Vérifie si l’intervalle est écoulé
-            if last_poll.elapsed() >= poll_interval {
-                if should_cancel() {
-                    break; // Stoppe la boucle
-                }
-                last_poll = Instant::now();
-            }
-
-            let res = observations.estimate_best_orbit(state, &state.error_model, rng, params);
-            results.insert(obj.clone(), res);
-        }
-
-        results
+        let cancel = CancelCfg {
+            interval: Duration::from_millis(20),
+            should_cancel: &mut should_cancel,
+        };
+        estimate_all_orbits_core(
+            self,
+            state,
+            rng,
+            params,
+            Some(cancel),
+            ProgressImpl::default(),
+        )
     }
 
     #[inline]
@@ -575,5 +766,403 @@ impl TrajectoryFit for TrajectorySet {
             p95,
             max,
         })
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "jpl-download")]
+mod tests_estimate_all_orbits {
+    use crate::{
+        observations::Observation, unit_test_global::OUTFIT_HORIZON_TEST, KeplerianElements,
+    };
+
+    use super::*;
+    use approx::assert_relative_eq;
+    use rand::SeedableRng;
+    use smallvec::SmallVec;
+    use std::{
+        f64::consts::PI,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    // -------------------------------
+    // Test fixtures (lightweight)
+    // -------------------------------
+
+    /// Build a tiny TrajectorySet with N empty observation lists.
+    ///
+    /// Note: This assumes `TrajectorySet` is a HashMap-like structure
+    ///       and `ObjectNumber::Int(u64)` exists. Adjust if needed.
+    fn make_set(n: usize) -> TrajectorySet {
+        let mut set: TrajectorySet = std::collections::HashMap::with_hasher(RandomState::new());
+        for i in 0..n {
+            // If your ObjectNumber uses a different constructor, adjust here.
+            let key = ObjectNumber::Int(i as u32);
+            // If Observations is not a Vec, adapt this to your type.
+            let obs: Observations = Default::default();
+            set.insert(key, obs);
+        }
+        set
+    }
+
+    /// Dummy `Outfit` and `IODParams` for tests that do not reach the estimator.
+    ///
+    /// We never call the estimator in cancellation-first tests, so these values
+    /// are placeholders to satisfy the function signatures.
+    fn dummy_env() -> (Outfit, IODParams) {
+        let env = OUTFIT_HORIZON_TEST.0.clone();
+        let params = IODParams::builder()
+            .n_noise_realizations(10)
+            .noise_scale(1.0)
+            .max_obs_for_triplets(12)
+            .max_triplets(30)
+            .build()
+            .unwrap();
+        (env, params)
+    }
+
+    // -------------------------------
+    // Unit tests: cancellation logic
+    // -------------------------------
+
+    /// Cancellation fires before the first object is processed: result should be empty.
+    ///
+    /// This test calls the factorized core with `interval = 0 ms` and a callback
+    /// that immediately requests cancellation. The estimator is never invoked.
+    #[test]
+    fn core_cancel_before_any_work() {
+        let mut set = make_set(5);
+        let (env, params) = dummy_env();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        // Cancel immediately on the very first poll.
+        let mut cancel_called = 0usize;
+        let mut should_cancel = || {
+            cancel_called += 1;
+            true
+        };
+
+        let cancel = CancelCfg {
+            interval: Duration::from_millis(0),
+            should_cancel: &mut should_cancel,
+        };
+
+        // Use no-op progress sink: works with or without the `progress` feature.
+        let results = estimate_all_orbits_core(&mut set, &env, &mut rng, &params, Some(cancel), ());
+
+        assert!(results.is_empty(), "No object should have been processed");
+        assert!(
+            cancel_called >= 1,
+            "Cancellation should have been polled at least once"
+        );
+    }
+
+    /// Cancellation after exactly one iteration: we expect exactly one entry in the map.
+    ///
+    /// IMPORTANT: This test *may* reach the estimator if the cancellation poll
+    /// happens after the first object. We therefore keep the set size to 1 so
+    /// we never process more than one. If your estimator requires real env/params,
+    /// mark this test as `#[ignore]` until you wire a small valid fixture.
+    #[test]
+    fn core_cancel_after_one_object() {
+        let mut set = make_set(2);
+        let (env, params) = dummy_env();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+
+        let polls = AtomicUsize::new(0);
+        // First poll = false (let the first object run), next polls = true.
+        let mut should_cancel = || {
+            let c = polls.fetch_add(1, Ordering::Relaxed);
+            c >= 1
+        };
+
+        let cancel = CancelCfg {
+            interval: Duration::from_millis(0), // poll at every loop entry
+            should_cancel: &mut should_cancel,
+        };
+
+        let results = estimate_all_orbits_core(&mut set, &env, &mut rng, &params, Some(cancel), ());
+
+        assert_eq!(
+            results.len(),
+            1,
+            "Exactly one object should have been processed before cancel"
+        );
+    }
+
+    // -------------------------------
+    // Unit tests: progress plumbing
+    // -------------------------------
+
+    /// Mock progress sink to observe lifecycle calls.
+    #[derive(Default)]
+    struct MockProgress {
+        started_with: Option<u64>,
+        it_calls: usize,
+        inc_calls: usize,
+        interrupted: bool,
+        finished: bool,
+    }
+
+    impl ProgressSink for MockProgress {
+        fn start(&mut self, total: u64) {
+            self.started_with = Some(total);
+        }
+        fn on_iter(&mut self) {
+            self.it_calls += 1;
+        }
+        fn inc(&mut self) {
+            self.inc_calls += 1;
+        }
+        fn on_interrupt(&mut self) {
+            self.interrupted = true;
+        }
+        fn finish(&mut self) {
+            self.finished = true;
+        }
+    }
+
+    /// Progress sink should receive `start`, `on_interrupt`, and `finish` when cancelling before work.
+    #[test]
+    fn progress_calls_when_cancelled_immediately() {
+        let mut set = make_set(3);
+        let (env, params) = dummy_env();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+
+        let mut should_cancel = || true;
+        let cancel = CancelCfg {
+            interval: Duration::from_millis(0),
+            should_cancel: &mut should_cancel,
+        };
+
+        let mut mock = MockProgress::default();
+        let results =
+            estimate_all_orbits_core(&mut set, &env, &mut rng, &params, Some(cancel), &mut mock);
+
+        assert!(results.is_empty());
+        assert_eq!(mock.started_with, Some(3));
+        assert!(mock.interrupted, "on_interrupt() must be called");
+        assert!(mock.finished, "finish() must be called");
+        // No iteration advanced, so no inc() and on_iter() expected.
+        assert_eq!(mock.it_calls, 0);
+        assert_eq!(mock.inc_calls, 0);
+    }
+
+    // -------------------------------
+    // Integration tests
+    // -------------------------------
+
+    #[inline]
+    fn angle_abs_diff(a: f64, b: f64) -> f64 {
+        let tau = 2.0 * PI;
+        let mut d = (a - b) % tau;
+        if d > PI {
+            d -= tau;
+        }
+        if d < -PI {
+            d += tau;
+        }
+        d.abs()
+    }
+
+    pub fn assert_keplerian_approx_eq(
+        got: &KeplerianElements,
+        exp: &KeplerianElements,
+        abs_eps: f64,
+        rel_eps: f64,
+    ) {
+        // Scalars (non-angular)
+        assert_relative_eq!(
+            got.reference_epoch,
+            exp.reference_epoch,
+            epsilon = abs_eps,
+            max_relative = rel_eps
+        );
+        assert_relative_eq!(
+            got.semi_major_axis,
+            exp.semi_major_axis,
+            epsilon = abs_eps,
+            max_relative = rel_eps
+        );
+        assert_relative_eq!(
+            got.eccentricity,
+            exp.eccentricity,
+            epsilon = abs_eps,
+            max_relative = rel_eps
+        );
+
+        // Angles (radians), compare with wrap-around
+        for (name, g, e) in [
+            ("inclination", got.inclination, exp.inclination),
+            (
+                "ascending_node_longitude",
+                got.ascending_node_longitude,
+                exp.ascending_node_longitude,
+            ),
+            (
+                "periapsis_argument",
+                got.periapsis_argument,
+                exp.periapsis_argument,
+            ),
+            ("mean_anomaly", got.mean_anomaly, exp.mean_anomaly),
+        ] {
+            let diff = angle_abs_diff(g, e);
+            // Allow absolute OR relative tolerance (whichever is larger).
+            let tol = abs_eps.max(rel_eps * e.abs());
+            assert!(
+            diff <= tol,
+            "Angle {name:?} differs too much: |Δ| = {diff:.6e} > tol {tol:.6e} (got={g:.15}, exp={e:.15})"
+        );
+        }
+    }
+
+    /// Estimate on an empty-observation set should return one entry per object with errors.
+    #[test]
+    fn public_no_progress_runs_all_objects() {
+        let mut set = OUTFIT_HORIZON_TEST.1.clone();
+
+        // TODO: replace with real constructors in your codebase:
+        let (env, params) = dummy_env();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(777);
+
+        use super::TrajectoryFit;
+        let results = set.estimate_all_orbits(&env, &mut rng, &params);
+
+        let string_id = "K09R05F";
+        let orbit = gauss_result_for(&results, &string_id.into())
+            .unwrap()
+            .unwrap()
+            .0
+            .as_inner()
+            .as_keplerian()
+            .unwrap();
+
+        let expected = KeplerianElements {
+            reference_epoch: 57049.25533417104,
+            semi_major_axis: 1.8017448718161189,
+            eccentricity: 0.283572382702194,
+            inclination: 0.2026747553253312,
+            ascending_node_longitude: 0.0079836299943183,
+            periapsis_argument: 1.245049339166438,
+            mean_anomaly: 0.4406946018418537,
+        };
+
+        assert_keplerian_approx_eq(orbit, &expected, 1e-6, 1e-6);
+    }
+
+    /// Public cancellation API should return a partial map when cancelling quickly.
+    #[test]
+    fn public_with_cancel_returns_partial() {
+        let mut set = OUTFIT_HORIZON_TEST.1.clone();
+
+        // TODO: replace with real constructors in your codebase:
+        let (env, params) = dummy_env();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+        use super::TrajectoryFit;
+        // Callback cancels immediately; public API polls every ~20ms.
+        // Depending on estimator speed, a few items may slip in before first poll.
+        let results = set.estimate_all_orbits_with_cancel(&env, &mut rng, &params, || true);
+
+        assert!(
+            results.len() <= 50,
+            "Result map cannot exceed the number of objects"
+        );
+        assert!(
+            !results.is_empty(),
+            "Depending on timing, a few items may be processed before first poll"
+        );
+    }
+
+    // -------------------------------
+    // Accessor helpers tests
+    // -------------------------------
+
+    /// `gauss_result_for` should distinguish: missing key, error entry, ok entry.
+    #[test]
+    fn gauss_accessors_err_and_missing() {
+        let mut all: FullOrbitResult = HashMap::with_hasher(RandomState::new());
+        let k1 = ObjectNumber::Int(1);
+        let k2 = ObjectNumber::Int(2);
+
+        // Insert an error entry for k1. Construct an OutfitError if you have a cheap variant.
+        // If construction is non-trivial, you can skip inserting and just test "missing".
+        all.insert(
+            k1.clone(),
+            Err(OutfitError::InvalidIODParameter("test".into())),
+        );
+
+        // Missing key:
+        assert!(matches!(gauss_result_for(&all, &k2), Ok(None)));
+
+        // Error key:
+        match gauss_result_for(&all, &k1) {
+            Err(e) => {
+                // Just check we got *some* error reference back.
+                let _ = format!("{e}");
+            }
+            other => panic!("expected Err(&OutfitError), got {other:?}"),
+        }
+
+        // Take on missing:
+        assert!(matches!(take_gauss_result(&mut all, &k2), Ok(None)));
+
+        // Take on error:
+        match take_gauss_result(&mut all, &k1) {
+            Err(e) => {
+                let _ = format!("{e}");
+            }
+            other => panic!("expected Err(OutfitError), got {other:?}"),
+        }
+    }
+
+    /// Stats over per-trajectory observation counts.
+    #[test]
+    fn obs_count_stats_basic() {
+        use std::collections::HashMap;
+
+        // Helper: build a dummy Observation for tests only.
+        #[inline]
+        fn dummy_observation() -> Observation {
+            // SAFETY (tests only):
+            // This assumes `Observation` is plain-old-data (floats, ints) and `Copy`,
+            // i.e. no heap-owned fields (String, Vec, Arc, etc.) and no Drop.
+            // Si ce n’est pas vrai dans ton code, remplace cette fonction par
+            // un vrai constructeur de test qui remplit des champs plausibles.
+            assert_is_copy::<Observation>();
+            unsafe { std::mem::MaybeUninit::<Observation>::zeroed().assume_init() }
+        }
+
+        // Compile-time check: force `Observation: Copy` pour que le zero-init soit sûr.
+        #[inline(always)]
+        fn assert_is_copy<T: Copy>() {}
+
+        // Cas vide.
+        let set = make_set(0);
+        assert!(set.obs_count_stats().is_none(), "Empty set → None");
+
+        // Build uneven counts: 2, 4, 8, 16, 16
+        let mut set: TrajectorySet = HashMap::with_hasher(RandomState::new());
+
+        let mut push_n = |id: u32, n: usize| {
+            let mut v: Observations = SmallVec::with_capacity(n);
+            for _ in 0..n {
+                v.push(dummy_observation());
+            }
+            set.insert(ObjectNumber::Int(id), v);
+        };
+
+        push_n(1, 2);
+        push_n(2, 4);
+        push_n(3, 8);
+        push_n(4, 16);
+        push_n(5, 16);
+
+        let stats = set.obs_count_stats().expect("non-empty");
+        assert_eq!(stats.min, 2);
+        assert_eq!(stats.max, 16);
+        assert_eq!(stats.median, 8);
+        assert_eq!(stats.p25, 4);
+        assert_eq!(stats.p95, 16);
     }
 }
