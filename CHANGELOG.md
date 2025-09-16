@@ -24,6 +24,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     - Seeds are deterministically derived per object from a global random base seed.
     - Observations are moved by batch, avoiding clones.
     - Supports global, thread-safe progress bar under `progress` feature.
+- **Parallel IOD parameter** in [`IODParams`]:
+  - New field `batch_size` (active only with feature `parallel`).
+  - Controls the number of trajectory batches to process concurrently
+    when multi-threading is enabled via Rayon (`batch_size > 1`).
+  - Default value: **4**.
 - **Result helpers & types**
   - `type FullOrbitResult = HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, RandomState>`
   - `gauss_result_for(&FullOrbitResult, &ObjectNumber)` — borrow solution & RMS if present.

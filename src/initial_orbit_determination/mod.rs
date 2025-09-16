@@ -156,6 +156,10 @@ pub mod gauss_result;
 /// * `max_tested_solutions` – maximum number of admissible Gauss solutions to collect
 ///   (e.g., cap at 3 for stack-only smallvec paths).
 ///
+/// **Multi-threading (if enabled)**
+/// * `batch_size` – number of trajectory batches to process in parallel
+///   (if `> 1` and `rayon` feature enabled).
+///
 /// Defaults
 /// -----------------
 /// The [`Default`] implementation provides a solid starting point:
@@ -191,6 +195,8 @@ pub mod gauss_result;
 /// * `aberth_eps`: 1.0e-6  
 /// * `kepler_eps`: 1e3 × `f64::EPSILON`  
 /// * `max_tested_solutions`: 3  
+///
+/// * `batch_size`: 4 (if `rayon` feature enabled)
 ///
 /// Notes & Validation
 /// -----------------
@@ -248,6 +254,11 @@ pub struct IODParams {
     pub newton_max_it: usize,
     /// Maximum allowed imaginary part magnitude for complex roots promoted to real (AU).
     pub root_imag_eps: f64,
+
+    // --- Multi-threading (if enabled) ---
+    #[cfg(feature = "parallel")]
+    /// Number of trajectory batches to process in parallel (if `> 1` and `rayon` feature enabled).
+    pub batch_size: usize,
 }
 
 impl IODParams {
@@ -329,6 +340,10 @@ impl Default for IODParams {
             newton_eps: 1.0e-10,
             newton_max_it: 50,
             root_imag_eps: 1.0e-6,
+
+            // Multi-threading (if enabled)
+            #[cfg(feature = "parallel")]
+            batch_size: 4,
         }
     }
 }
@@ -446,6 +461,13 @@ impl IODParamsBuilder {
     }
     pub fn root_imag_eps(mut self, v: f64) -> Self {
         self.params.root_imag_eps = v;
+        self
+    }
+
+    // --- Multi-threading (if enabled) ---
+    #[cfg(feature = "parallel")]
+    pub fn batch_size(mut self, v: usize) -> Self {
+        self.params.batch_size = v;
         self
     }
 
@@ -751,6 +773,16 @@ impl fmt::Display for IODParams {
                 self.max_tested_solutions,
                 "Max Gauss solutions kept"
             )?;
+
+            // --- Multi-threading (if enabled) ---
+            #[cfg(feature = "parallel")]
+            {
+                line!(
+                    "batch_size           = {}",
+                    self.batch_size,
+                    "Number of trajectory batches to process in parallel"
+                )?;
+            }
 
             Ok(())
         } else {

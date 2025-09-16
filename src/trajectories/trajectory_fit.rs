@@ -802,7 +802,6 @@ pub trait TrajectoryFit {
         state: &Outfit,
         rng: &mut impl rand::Rng,
         params: &IODParams,
-        batch_size: usize,
     ) -> FullOrbitResult;
 }
 
@@ -854,7 +853,6 @@ impl TrajectoryFit for TrajectorySet {
         state: &Outfit,
         rng: &mut impl rand::Rng,
         params: &IODParams,
-        batch_size: usize,
     ) -> FullOrbitResult {
         // Draw a single base seed once; per-object seeds derived deterministically.
         let base_seed: u64 = rng.random();
@@ -864,13 +862,12 @@ impl TrajectoryFit for TrajectorySet {
         let mut entries: Vec<(ObjectNumber, Observations)> = old.drain().collect();
 
         let total_items = entries.len() as u64;
-        let batch_size = batch_size.max(1);
 
         // Materialize batches **by move** (no clone of Observations).
         let mut batches: Vec<Vec<(ObjectNumber, Observations)>> =
-            Vec::with_capacity(entries.len().div_ceil(batch_size));
+            Vec::with_capacity(entries.len().div_ceil(params.batch_size.max(1)));
         while !entries.is_empty() {
-            let take_n = entries.len().min(batch_size);
+            let take_n = entries.len().min(params.batch_size);
             batches.push(entries.drain(..take_n).collect());
         }
 
@@ -1425,11 +1422,10 @@ mod tests_estimate_all_orbits {
             // Dummy env/params: estimator is never reached for empty set.
             // If you need to compile without jpl, use the same `dummy_env()` strategy as your seq tests.
             let env = dummy_env().0;
-            let params = IODParams::builder().build().unwrap();
+            let params = IODParams::builder().batch_size(1024).build().unwrap();
 
             let mut rng = rand::rngs::StdRng::seed_from_u64(1);
-            let results =
-                set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 1024);
+            let results = set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params);
             assert!(results.is_empty(), "Empty input → empty results");
             assert_eq!(set.len(), 0, "Set remains empty");
         }
@@ -1445,14 +1441,13 @@ mod tests_estimate_all_orbits {
                 // Build a dummy env that lets the code run without panicking even if estimator errs.
                 // The estimator may return Err for empty observations — it's fine for this test.
                 let env = dummy_env().0;
-                let params = IODParams::builder().build().unwrap();
+                let params = IODParams::builder().batch_size(batch_size).build().unwrap();
 
                 let before_n = set.len();
                 let before_tot = total_obs(&set);
 
                 let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-                let results = set
-                    .estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, batch_size);
+                let results = set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params);
 
                 assert_eq!(results.len(), before_n, "Exactly one entry per object");
                 assert_eq!(set.len(), before_n, "All objects reinserted in set");
@@ -1472,15 +1467,14 @@ mod tests_estimate_all_orbits {
             // Determinism check focuses on the *presence* and *shape* of results.
             let build_set = || make_set(5);
             let env = dummy_env().0;
-            let params = IODParams::builder().build().unwrap();
+            let params = IODParams::builder().batch_size(2).build().unwrap();
 
             let key = ObjectNumber::Int(2);
 
             let run_once = |seed: u64| {
                 let mut set = build_set();
                 let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-                let results =
-                    set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 2);
+                let results = set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params);
                 // Record a stable string representation for that key.
                 match results.get(&key) {
                     None => "None".to_string(),
@@ -1517,6 +1511,7 @@ mod tests_estimate_all_orbits {
                         .noise_scale(1.0)
                         .max_obs_for_triplets(12)
                         .max_triplets(30)
+                        .batch_size(1)
                         .build()
                         .unwrap();
                     (env, params)
@@ -1524,8 +1519,7 @@ mod tests_estimate_all_orbits {
                 let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
                 // Choose a batch size that is neither 1 nor huge to exercise chunking logic.
-                let results =
-                    set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, 1);
+                let results = set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params);
 
                 // Same canonical object as in your sequential test:
                 let string_id = "K09R05F";
@@ -1548,6 +1542,7 @@ mod tests_estimate_all_orbits {
                         .noise_scale(1.0)
                         .max_obs_for_triplets(12)
                         .max_triplets(30)
+                        .batch_size(64)
                         .build()
                         .unwrap();
                     (env, params)
@@ -1557,10 +1552,14 @@ mod tests_estimate_all_orbits {
                 let mut rng1 = rand::rngs::StdRng::seed_from_u64(seed);
                 let mut rng2 = rand::rngs::StdRng::seed_from_u64(seed);
 
-                let res1 =
-                    set1.estimate_all_orbits_in_batches_parallel(&env, &mut rng1, &params, 64);
-                let res2 =
-                    set2.estimate_all_orbits_in_batches_parallel(&env, &mut rng2, &params, 4096);
+                let res1 = set1.estimate_all_orbits_in_batches_parallel(&env, &mut rng1, &params);
+
+                let params2 = IODParams {
+                    batch_size: 4096,
+                    ..params.clone()
+                };
+
+                let res2 = set2.estimate_all_orbits_in_batches_parallel(&env, &mut rng2, &params2);
 
                 // Compare a known object Keplerian solution (same as above).
                 let key = "K09R05F".into();
