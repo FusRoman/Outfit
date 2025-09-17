@@ -3,7 +3,7 @@
 </p>
 
 <div align="center">
-# Outfit
+<h1>Outfit</h1>
 
 A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
 </div>
