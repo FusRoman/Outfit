@@ -86,28 +86,28 @@ Add Outfit to your `Cargo.toml`:
 
 ~~~toml
 [dependencies]
-outfit = "1.0.0"
+outfit = "2.0.0"
 ~~~
 
 Enable automatic ephemeris download (JPL DE440) with the `jpl-download` feature:
 
 ~~~toml
 [dependencies]
-outfit = { version = "1.0.0", features = ["jpl-download"] }
+outfit = { version = "2.0.0", features = ["jpl-download"] }
 ~~~
 
 Enable a CLI-style progress bar for long loops:
 
 ~~~toml
 [dependencies]
-outfit = { version = "1.0.0", features = ["progress"] }
+outfit = { version = "2.0.0", features = ["progress"] }
 ~~~
 
 Combine features as needed (example):
 
 ~~~toml
 [dependencies]
-outfit = { version = "1.0.0", features = ["jpl-download", "progress", "parquet", "ades", "mpc80"] }
+outfit = { version = "2.0.0", features = ["jpl-download", "progress", "parallel"] }
 ~~~
 
 ---
@@ -117,9 +117,9 @@ outfit = { version = "1.0.0", features = ["jpl-download", "progress", "parquet",
 The crate ships with several **ready-to-run examples** in the [`examples/`](examples) directory.  
 They demonstrate end-to-end workflows such as:
 
-- Reading observations (MPC 80-column, Parquet)
-- Building a `TrajectorySet`
-- Running Gauss initial orbit determination
+- Reading observations (MPC 80-column, ADES XML, Parquet)
+- Building a `TrajectorySet` (now via `TrajectoryFile` ingestion helpers)
+- Running Gauss initial orbit determination (single triplet or full batch)
 - Inspecting and printing orbital elements with RMS statistics
 
 Run an example directly with Cargo:
@@ -164,6 +164,32 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ---
 
+### Parallel batches
+
+Compile with `--features parallel` and prefer the adaptive batching API for very large sets:
+
+```bash
+cargo run --release --example parquet_to_orbit --features "jpl-download,parallel"
+```
+
+Then call `estimate_all_orbits_in_batches_parallel` (same signature + extra `batch_size` argument) for improved throughput when trajectory sets exceed CPU cache friendliness.
+
+### Result helpers
+
+Access individual solutions ergonomically:
+
+```rust
+use outfit::trajectories::trajectory_fit::{gauss_result_for, take_gauss_result};
+// Borrow without moving:
+if let Some(Ok((g, rms))) = gauss_result_for(&results, &some_object) {
+   println!("Semi-major axis: {} AU (rms={rms:.3})", g.keplerian.a);
+}
+```
+
+Errors are explicit (no `Option` inside `Result`); pathological numeric scores (`NaN`, `inf`) surface as `OutfitError::NonFiniteScore`.
+
+---
+
 ## Observers & Reference Frames
 
 - Observer lookup by **MPC code**.
@@ -174,11 +200,15 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ## Cargo Feature Flags
 
-| Feature         | Description                                                                 |
-|-----------------|-----------------------------------------------------------------------------|
-| `jpl-download`  | Automatically fetch JPL ephemerides on first use (e.g., DE440).            |
-| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.| 
-| `parallel`      | Optional parallel batch IOD using `rayon` to speed processing of many trajectories.| 
+The crate keeps the feature surface intentionally small and orthogonal. All core parsing (MPC 80-col, ADES XML, Parquet) and Gauss IOD logic are always compiled; features only toggle optional runtime dependencies.
+
+| Feature        | Adds                                                    | Notes |
+|----------------|---------------------------------------------------------|-------|
+| `jpl-download` | `reqwest`, `tokio` (multi-thread RT), on-demand fetch   | Downloads and caches JPL ephemerides (e.g. DE440) in the user data dir on first access. Offline re-use afterward. |
+| `progress`     | `indicatif` progress bars + moving average timing       | Enabled in long batch IOD loops; zero cost when not used. |
+| `parallel`     | `rayon`                                                 | Enables `TrajectoryFit::estimate_all_orbits_in_batches_parallel`; set `IODParams.batch_size` to tune batch granularity. |
+
+Planned (not yet implemented): least-squares refinement and alternative IOD methods will likely get their own feature gates.
 
 ---
 
@@ -193,6 +223,10 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 - Compile with `--release` for production.
 - Keep ephemerides cached locally (with `jpl-download` enabled) to avoid I/O stalls.
 - Use the `progress` feature to instrument long loops without cluttering core logic.
+- `ObservationBatch` conversions (deg/arcsec → rad) happen once; avoid re-normalizing angles inside tight loops.
+- Group observations by unique epoch to reuse cached observer positions (already done by built-in ingestion pipelines).
+- Handle errors rather than filtering silently: a non-finite RMS is raised early as `OutfitError::NonFiniteScore` to prevent propagating invalid states.
+- For very large trajectory sets, tune `IODParams.batch_size` (with `parallel`) so each batch fits comfortably in cache (start with 4–8 and benchmark).
 
 ---
 
