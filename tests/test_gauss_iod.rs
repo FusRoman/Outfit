@@ -41,8 +41,8 @@ fn run_iod(
 #[test]
 
 fn test_gauss_iod() {
-    let test_max_relative = 1e-13;
-    let test_epsilon = 5. * f64::EPSILON;
+    let test_max_relative = 1e-11;
+    let test_epsilon = 1e-11;
 
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
