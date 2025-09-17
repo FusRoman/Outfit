@@ -2,6 +2,10 @@
   <img src="https://raw.githubusercontent.com/FusRoman/Outfit/main/outfit_logo.jpeg" alt="Outfit Logo" width="160"/>
 </p>
 
+# Outfit
+
+A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
+
 <p align="center">
   <a href="https://crates.io/crates/outfit">
     <img src="https://img.shields.io/crates/v/outfit.svg" alt="Crates.io"/>
@@ -22,10 +26,6 @@
     <img src="https://img.shields.io/badge/MSRV-1.82%2B-orange" alt="MSRV"/>
   </a>
 </p>
-
-# Outfit
-
-A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
 
 > **Why Outfit?**  
 > Modern asteroid pipelines need a library that is **fast (Rust)**, **reproducible**, and **easy to integrate** in data-intensive workflows (batch files, Parquet, CI/benchmarks). Outfit re-implements classic OrbFit IOD logic with a **memory-safe**, **modular** design and production-grade ergonomics (features, docs, tests, benches). It is built to:
