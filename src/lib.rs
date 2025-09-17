@@ -308,6 +308,7 @@ pub mod time;
 pub use crate::outfit::Outfit;
 
 // Core data types & units
+pub use crate::constants::Observations;
 pub use crate::constants::{ArcSec, Degree, ObjectNumber, MJD};
 pub use crate::observers::Observer;
 pub use crate::trajectories::TrajectorySet;
