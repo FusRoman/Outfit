@@ -1,10 +1,27 @@
-[![Crates.io](https://img.shields.io/crates/v/outfit.svg)](https://crates.io/crates/outfit)
-[![Docs.rs](https://docs.rs/outfit/badge.svg)](https://docs.rs/outfit)
-[![License: CeCILL-C](https://img.shields.io/badge/license-CeCILL--C-blue.svg)](LICENSE)
-[![CI](https://github.com/FusRoman/Outfit/actions/workflows/ci.yml/badge.svg)](https://github.com/FusRoman/Outfit/actions)
-[![codecov](https://codecov.io/gh/FusRoman/Outfit/branch/main/graph/badge.svg)](https://codecov.io/gh/FusRoman/Outfit)
-[![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange)](https://www.rust-lang.org/)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/FusRoman/Outfit/main/outfit_logo.jpeg" alt="Outfit Logo" width="160"/>
+</p>
 
+<p align="center">
+  <a href="https://crates.io/crates/outfit">
+    <img src="https://img.shields.io/crates/v/outfit.svg" alt="Crates.io"/>
+  </a>
+  <a href="https://docs.rs/outfit">
+    <img src="https://docs.rs/outfit/badge.svg" alt="Docs.rs"/>
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-CeCILL--C-blue.svg" alt="License: CeCILL-C"/>
+  </a>
+  <a href="https://github.com/FusRoman/Outfit/actions">
+    <img src="https://github.com/FusRoman/Outfit/actions/workflows/ci.yml/badge.svg" alt="CI"/>
+  </a>
+  <a href="https://codecov.io/gh/FusRoman/Outfit">
+    <img src="https://codecov.io/gh/FusRoman/Outfit/branch/main/graph/badge.svg" alt="codecov"/>
+  </a>
+  <a href="https://www.rust-lang.org/">
+    <img src="https://img.shields.io/badge/MSRV-1.82%2B-orange" alt="MSRV"/>
+  </a>
+</p>
 
 # Outfit
 
@@ -57,6 +74,7 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
 - **Batch processing & benchmarking**
   - Stream triplets, evaluate, and rank candidates
   - Criterion-based micro/macro benchmarks
+  - Optional parallel batch IOD using Rayon (feature: `parallel`)
 
 ---
 
@@ -157,7 +175,8 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 | Feature         | Description                                                                 |
 |-----------------|-----------------------------------------------------------------------------|
 | `jpl-download`  | Automatically fetch JPL ephemerides on first use (e.g., DE440).            |
-| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.|
+| `progress`      | Lightweight progress indicators (e.g., via `indicatif`) for long pipelines.| 
+| `parallel`      | Optional parallel batch IOD using `rayon` to speed processing of many trajectories.| 
 
 ---
 

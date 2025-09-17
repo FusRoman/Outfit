@@ -112,13 +112,14 @@ use hifitime::Epoch;
 use nalgebra::{Matrix3, Vector3};
 use ordered_float::NotNan;
 
-use crate::constants::{Degree, Kilometer, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, MJD};
+use crate::constants::{Degree, Meter, EARTH_MAJOR_AXIS, EARTH_MINOR_AXIS, MJD};
 use crate::constants::{DPI, ERAU};
 use crate::earth_orientation::equequ;
 use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use crate::ref_system::{rotmt, rotpn, RefEpoch, RefSystem};
 use crate::time::gmst;
+use std::fmt;
 
 /// Convert an `Option<f64>` into an `Option<NotNan<f64>>`, propagating `NaN` as an error.
 ///
@@ -142,6 +143,7 @@ use crate::time::gmst;
 /// See also
 /// ------------
 /// * [`ordered_float::NotNan`] – NaN-forbidding wrapper used across the crate.
+#[inline]
 pub fn to_opt_notnan(x: Option<f64>) -> Result<Option<NotNan<f64>>, ordered_float::FloatIsNan> {
     x.map(NotNan::new).transpose()
 }
@@ -215,7 +217,7 @@ impl Observer {
     /// -----------------
     /// * `longitude`: Geodetic longitude in **degrees** (east positive).
     /// * `latitude`: Geodetic latitude in **degrees**.
-    /// * `elevation`: Height above the reference ellipsoid in **kilometers**.
+    /// * `elevation`: Height above the reference ellipsoid in **meters**.
     /// * `name`: Optional site name.
     /// * `ra_accuracy`: Optional RA accuracy in **radians**.
     /// * `dec_accuracy`: Optional DEC accuracy in **radians**.
@@ -236,7 +238,7 @@ impl Observer {
     pub fn new(
         longitude: Degree,
         latitude: Degree,
-        elevation: Kilometer,
+        elevation: Meter,
         name: Option<String>,
         ra_accuracy: Option<f64>,
         dec_accuracy: Option<f64>,
@@ -480,6 +482,137 @@ impl Observer {
 
         Ok(earth_pos + rot_matrix * observer_geocentric_position)
     }
+
+    /// Recover geodetic latitude and ellipsoidal height (WGS-84) from parallax constants.
+    ///
+    /// Inverts the stored parallax coordinates `(ρ·cosφ, ρ·sinφ)` to the **geodetic**
+    /// latitude `φ` (degrees) and the ellipsoidal height `h` (meters) above the
+    /// WGS-84 reference ellipsoid. The computation uses **Bowring’s closed-form**
+    /// formula (no iteration), which is usually sufficient for double-precision
+    /// accuracy at the centimeter level or better.
+    ///
+    /// Units & model
+    /// -------------
+    /// * Inputs: `ρ·cosφ` and `ρ·sinφ` are dimensionless, expressed in **Earth radii**
+    ///   (normalized by the equatorial radius). They are scaled internally by `a`
+    ///   (the equatorial radius) to meters.
+    /// * Output: latitude in **degrees**, height in **meters** (ellipsoidal height, not geoid/orthometric).
+    /// * Ellipsoid: WGS-84 radii from `constants.rs` (`EARTH_MAJOR_AXIS` = `a`, `EARTH_MINOR_AXIS` = `b`).
+    ///   If you prefer exact GRS-80 reproduction, use consistent `b` there; the difference vs WGS-84 is sub-millimetric.
+    ///
+    /// Notes
+    /// -----
+    /// * This routine **does not** compute the geodetic longitude; it only returns `(lat, h)`.
+    ///   Your `Observer` already stores the geodetic longitude independently.
+    /// * Numerical robustness is good across latitudes, including near the poles.
+    /// * If you require bit-for-bit parity with an external reference using a different ellipsoid,
+    ///   ensure `a`/`b` match that reference.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * None.
+    ///
+    /// Return
+    /// ----------
+    /// * `(geodetic_latitude_deg, height_meters)` — latitude in degrees, ellipsoidal height in meters.
+    ///
+    /// See also
+    /// ------------
+    /// * [`geodetic_to_parallax`] – Forward conversion used at construction.
+    /// * [`Observer::from_parallax`] – Builds an observer from `(ρ·cosφ, ρ·sinφ)`.
+    /// * `constants::EARTH_MAJOR_AXIS` / `constants::EARTH_MINOR_AXIS` – Ellipsoid radii used here.
+    pub fn geodetic_lat_height_wgs84(&self) -> (f64, f64) {
+        let a = EARTH_MAJOR_AXIS;
+        let b = EARTH_MINOR_AXIS;
+        let e2 = 1.0 - (b * b) / (a * a);
+        let ep2 = (a * a) / (b * b) - 1.0;
+
+        let p = self.rho_cos_phi.into_inner() * a; // distance in equatorial plane [m]
+        let z = self.rho_sin_phi.into_inner() * a; // z [m]
+
+        // Bowring’s formula:
+        let theta = (z * a).atan2(p * b);
+        let st = theta.sin();
+        let ct = theta.cos();
+        let phi = (z + ep2 * b * st.powi(3)).atan2(p - e2 * a * ct.powi(3));
+
+        let s = phi.sin();
+        let n = a / (1.0 - e2 * s * s).sqrt();
+        let h = p / phi.cos() - n;
+
+        (phi.to_degrees(), h)
+    }
+}
+
+impl fmt::Display for Observer {
+    /// Pretty-print an observer with optional verbose details using `{:#}` formatting.
+    ///
+    /// Default formatting (`{}`) prints a compact one-liner:
+    /// `Name (lon: XX.XXXXXX°, lat: YY.YYYYYY° geodetic, elev: Z.ZZ km)`.
+    ///
+    /// Alternate formatting (`{:#}`) prints a multi-line detailed block including:
+    /// - Parallax constants `(ρ·cosφ, ρ·sinφ)`,
+    /// - Geocentric latitude `φ_geo` and geocentric distance `ρ` (Earth radii),
+    /// - Astrometric 1-σ accuracies in arcseconds (if available).
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `self`: The observer to format.
+    ///
+    /// Return
+    /// ----------
+    /// * A human-readable representation suitable for logs and diagnostics.
+    ///
+    /// See also
+    /// ------------
+    /// * [`Observer::geodetic_lat_height_wgs84`] – Geodetic latitude (deg) and ellipsoidal height (m).
+    /// * [`geodetic_to_parallax`] – Forward conversion to `(ρ·cosφ, ρ·sinφ)`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Friendly name
+        let name = self.name.as_deref().unwrap_or("Unnamed");
+
+        // Geodetic latitude (deg) and height (m -> km)
+        let (lat_deg, h_m) = self.geodetic_lat_height_wgs84();
+
+        // Geodetic longitude in degrees
+        let lon_deg = self.longitude.into_inner();
+
+        // Geocentric latitude and ρ from parallax constants
+        let rc = self.rho_cos_phi.into_inner();
+        let rs = self.rho_sin_phi.into_inner();
+        let phi_geo_deg = rs.atan2(rc).to_degrees();
+        let rho_re = rc.hypot(rs);
+
+        // Astrometric accuracies (radians -> arcseconds)
+        const RAD2AS: f64 = 206_264.806_247_096_36;
+        let ra_sigma_as = self
+            .ra_accuracy
+            .map(|v| format!("{:.3}″", v.into_inner() * RAD2AS))
+            .unwrap_or_else(|| "—".to_string());
+        let dec_sigma_as = self
+            .dec_accuracy
+            .map(|v| format!("{:.3}″", v.into_inner() * RAD2AS))
+            .unwrap_or_else(|| "—".to_string());
+
+        if f.alternate() {
+            // Verbose, multi-line format (triggered by "{:#}")
+            writeln!(
+                f,
+                "{name} (lon: {lon_deg:.6}°, lat: {lat_deg:.6}° geodetic, elev: {h_m:.2} m)"
+            )?;
+            writeln!(
+                f,
+                "  parallax: ρ·cosφ={rc:.9}, ρ·sinφ={rs:+.9}  |  φ_geo={phi_geo_deg:+.6}°  ρ={rho_re:.6} RE"
+            )?;
+            write!(f, "  astrometric 1σ: RA={ra_sigma_as}, DEC={dec_sigma_as}")
+        } else {
+            // Compact, single-line format (triggered by "{}")
+            write!(
+                f,
+                "{name} (lon: {lon_deg:.6}°, lat: {lat_deg:.6}° geodetic, elev: {h_m:.2} m)"
+            )
+        }
+    }
 }
 
 /// Convert geodetic latitude and height into normalized parallax coordinates
@@ -493,7 +626,7 @@ impl Observer {
 /// Arguments
 /// ---------
 /// * `lat` - Geodetic latitude of the observer in **radians**.
-/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **meters**.
 ///
 /// Returns
 /// -------
@@ -506,8 +639,8 @@ impl Observer {
 /// Details
 /// -------
 /// The computation uses the reference ellipsoid defined by:
-/// * `EARTH_MAJOR_AXIS`: Equatorial radius (km),
-/// * `EARTH_MINOR_AXIS`: Polar radius (km).
+/// * `EARTH_MAJOR_AXIS`: Equatorial radius (m),
+/// * `EARTH_MINOR_AXIS`: Polar radius (m).
 ///
 /// The formula comes from standard geodetic to geocentric conversion:
 ///
@@ -541,7 +674,7 @@ pub fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
     (rho_cos_phi, rho_sin_phi)
 }
 
-/// Convert geodetic latitude (in degrees) and height (in kilometers)
+/// Convert geodetic latitude (in degrees) and height (in meters)
 /// into normalized parallax coordinates.
 ///
 /// This is a convenience wrapper around [`lat_alt_to_parallax`] that
@@ -551,7 +684,7 @@ pub fn lat_alt_to_parallax(lat: f64, height: f64) -> (f64, f64) {
 /// Arguments
 /// ---------
 /// * `lat` - Geodetic latitude of the observer in **degrees**.
-/// * `height` - Observer's altitude above the reference ellipsoid in **kilometers**.
+/// * `height` - Observer's altitude above the reference ellipsoid in **meters**.
 ///
 /// Returns
 /// -------
@@ -779,5 +912,229 @@ mod observer_test {
                 0.24333415479994636
             ]
         );
+    }
+
+    #[cfg(test)]
+    mod geodetic_inverse_tests {
+        use super::*;
+        use crate::constants::Degree;
+        use approx::assert_abs_diff_eq;
+
+        /// Round-trip a single site through (lon, lat, h) -> parallax -> inverse
+        /// and check that we recover the original geodetic latitude & height.
+        ///
+        /// Notes
+        /// -----
+        /// * `Observer::new` is given `h_m` in meters (as per current API usage).
+        /// * `geodetic_lat_height_wgs84()` returns height in **meters**; we convert to meters.
+        fn roundtrip_site(name: &str, lon_deg: Degree, lat_deg: Degree, h_m: f64) {
+            // Build observer (forward: geodetic -> parallax is done inside `Observer::new`)
+            let obs = Observer::new(lon_deg, lat_deg, h_m, Some(name.to_string()), None, None)
+                .expect("Failed to create observer");
+
+            // Inverse: parallax -> geodetic (WGS-84)
+            let (lat_rec_deg, h_rec_m) = obs.geodetic_lat_height_wgs84();
+
+            // Tolerances:
+            // - Latitude: 1e-6 deg (~3.6 mas) – tight but should pass for double precision Bowring + 0–1 Newton step
+            // - Height:   1e-2 m
+            let tol_lat_deg = 1e-6;
+            let tol_h_m = 1e-2;
+
+            assert_abs_diff_eq!(lat_rec_deg, lat_deg, epsilon = tol_lat_deg);
+            assert_abs_diff_eq!(h_rec_m, h_m, epsilon = tol_h_m);
+        }
+
+        /// See also
+        /// ------------
+        /// * [`Observer::new`] – Forward geodetic->parallax conversion under test by round-trip.
+        /// * [`Observer::from_parallax`] – Alternative constructor, if you want to inject ρ·cosφ/ρ·sinφ.
+        /// * `geodetic_to_parallax` – The forward routine used internally by `Observer::new`.
+
+        #[test]
+        fn geodetic_roundtrip_known_observatories_wgs84() {
+            // NOTE:
+            // The heights below are commonly quoted "above sea level" (orthometric).
+            // For pure algorithmic round-trip testing, that's acceptable because we feed
+            // the same height into forward and inverse. If you want strict ellipsoidal
+            // (h) values, substitute official WGS-84 heights here.
+            let sites: &[(&str, Degree, Degree, f64)] = &[
+                // name,                      lon_deg (E+), lat_deg (N+), height_m
+                ("Haleakala (PS1 I41)", -156.2575, 20.7075, 3055.0),
+                ("Mauna Kea (CFHT)", -155.4700, 19.8261, 4205.0),
+                ("ESO Paranal", -70.4025, -24.6252, 2635.0),
+                ("Cerro Pachon (Rubin)", -70.7366, -30.2407, 2663.0),
+                ("La Silla", -70.7346, -29.2613, 2400.0),
+                ("Kitt Peak", -111.5967, 31.9583, 2096.0),
+                ("Roque de los Muchachos", -17.8947, 28.7606, 2396.0),
+            ];
+
+            for (name, lon, lat, h_m) in sites.iter().copied() {
+                roundtrip_site(name, lon, lat, h_m);
+            }
+        }
+
+        #[test]
+        fn geodetic_roundtrip_extremes_equator_and_pole() {
+            // Equator, sea level
+            roundtrip_site("Equator (0°, 0 m)", 0.0, 0.0, 0.0);
+
+            // Near-North-Pole and Near-South-Pole with modest height
+            roundtrip_site("Near North Pole", 0.0, 89.999, 1000.0);
+            roundtrip_site("Near South Pole", 0.0, -89.999, 1000.0);
+        }
+
+        #[test]
+        fn geodetic_roundtrip_high_altitude_and_negative() {
+            // Very high site (simulate balloon/aircraft)
+            roundtrip_site("High Alt 10 m", 10.0, 45.0, 10_000.0);
+
+            // Negative height (below ellipsoid, synthetic but tests robustness)
+            roundtrip_site("Below ellipsoid -50 m", -30.0, -10.0, -50.0);
+        }
+    }
+
+    #[cfg(test)]
+    mod observer_display_tests {
+        use super::*;
+
+        /// Convert arcseconds to radians.
+        #[inline]
+        fn arcsec_to_rad(as_val: f64) -> f64 {
+            // 1 arcsec = π / (180 * 3600) rad
+            std::f64::consts::PI / (180.0 * 3600.0) * as_val
+        }
+
+        /// Helper to build an Observer with optional RA/DEC accuracies (in arcseconds).
+        fn make_observer_with_acc(
+            name: Option<&str>,
+            lon_deg: f64,
+            lat_deg: f64,
+            elev_m: f64,
+            ra_as: Option<f64>,
+            dec_as: Option<f64>,
+        ) -> Observer {
+            let ra_sigma = ra_as.map(arcsec_to_rad);
+            let dec_sigma = dec_as.map(arcsec_to_rad);
+
+            Observer::new(
+                lon_deg,
+                lat_deg,
+                elev_m, // elevation in meters
+                name.map(|s| s.to_string()),
+                ra_sigma,
+                dec_sigma,
+            )
+            .expect("Failed to create Observer")
+        }
+
+        /// Compact formatting must be a single line with name/lon/lat/elev.
+        #[test]
+        fn display_compact_single_line() {
+            let obs = make_observer_with_acc(Some("TestSite"), 10.0, 0.0, 0.0, None, None);
+
+            let s = format!("{obs}");
+            // Must not contain newlines in compact form
+            assert!(
+                !s.contains('\n'),
+                "Compact format should be single-line, got:\n{s}"
+            );
+
+            // Must contain expected fragments (predictable numbers)
+            assert!(
+                s.contains("TestSite (lon: 10.000000°"),
+                "Missing name/lon fragment. Got:\n{s}"
+            );
+            assert!(
+                s.contains("lat: 0.000000° geodetic"),
+                "Missing geodetic latitude fragment. Got:\n{s}"
+            );
+            assert!(
+                s.contains("elev: 0.00 m"),
+                "Missing elevation fragment (m). Got:\n{s}"
+            );
+        }
+
+        /// Alternate formatting must be multi-line and include parallax & uncertainties.
+        #[test]
+        fn display_verbose_multiline_with_sections() {
+            let obs = make_observer_with_acc(Some("VerboseSite"), -70.0, -30.0, 2400.0, None, None);
+
+            let s = format!("{obs:#}");
+
+            // Must contain multiple lines and the expected section headers/fragments
+            assert!(
+                s.contains('\n'),
+                "Verbose format should be multi-line. Got:\n{s}"
+            );
+            assert!(
+                s.starts_with("VerboseSite (lon: -70.000000°"),
+                "First line should start with site name and lon. Got:\n{s}"
+            );
+            assert!(
+                s.contains("\n  parallax: ρ·cosφ="),
+                "Missing 'parallax:' line. Got:\n{s}"
+            );
+            assert!(
+                s.contains("φ_geo=") && s.contains("ρ="),
+                "Missing φ_geo/ρ fragments. Got:\n{s}"
+            );
+            assert!(
+                s.contains("\n  astrometric 1σ: RA=—, DEC=—"),
+                "Missing astrometric 1σ line with em-dashes for None. Got:\n{s}"
+            );
+        }
+
+        /// When RA/DEC accuracies are provided, they must be printed in arcseconds with three decimals.
+        #[test]
+        fn display_verbose_shows_ra_dec_sigmas() {
+            // RA = 1.0″, DEC = 2.5″ (passed in arcseconds, converted to radians internally)
+            let obs = make_observer_with_acc(Some("AccSite"), 0.0, 0.0, 0.0, Some(1.0), Some(2.5));
+
+            let s = format!("{obs:#}");
+
+            assert!(
+                s.contains("astrometric 1σ: RA=1.000″, DEC=2.500″"),
+                "Expected RA/DEC sigma in arcseconds with 3 decimals. Got:\n{s}"
+            );
+        }
+
+        /// Name fallback should be "Unnamed" when not provided.
+        #[test]
+        fn display_uses_unnamed_when_missing() {
+            let obs = make_observer_with_acc(None, 5.0, 0.0, 0.0, None, None);
+            let s = format!("{obs}");
+            assert!(
+                s.starts_with("Unnamed (lon: 5.000000°"),
+                "Expected 'Unnamed' fallback. Got:\n{s}"
+            );
+        }
+
+        /// Basic numeric sanity: geodetic height is shown in kilometers in the display.
+        /// For a 3055 m elevation, we expect ~3.055 km (rounded to 2 decimals).
+        #[test]
+        fn display_elevation_shown_in_km() {
+            let obs = make_observer_with_acc(
+                Some("Haleakala-ish"),
+                -156.2575,
+                20.7075,
+                3055.0,
+                None,
+                None,
+            );
+
+            let s = format!("{obs}");
+            // Check the km conversion and rounding only; don't assert on latitude value here.
+            assert!(
+                s.contains("elev: 3055.00 m"),
+                "Expected elevation ~3055 m rounded to 2 decimals. Got:\n{s}"
+            );
+
+            // Optional: ensure lon is printed correctly
+            assert!(
+                s.contains("lon: -156.257500°"),
+                "Longitude formatting mismatch. Got:\n{s}"
+            );
+        }
     }
 }

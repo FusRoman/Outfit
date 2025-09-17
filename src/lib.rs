@@ -43,6 +43,9 @@
 //!   - RMS computation of normalized astrometric residuals, filtering utilities.
 //! - **Examples & benches**:
 //!   - End-to-end examples in `examples/`, Criterion benchmarks for IOD.
+//! - **Parallel IOD (feature `parallel`)**:
+//!   - Batched multi-core execution via **Rayon**,
+//!     optional global progress bar when combined with the `progress` feature.
 //!
 //! ### Planned extensions
 //!
@@ -63,7 +66,8 @@
 //! use camino::Utf8Path;
 //! use rand::{rngs::StdRng, SeedableRng};
 //! use outfit::{Outfit, ErrorModel, IODParams};
-//! use outfit::constants::{TrajectorySet, ObjectNumber};
+//! use outfit::constants::ObjectNumber;
+//! use outfit::TrajectorySet;
 //! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -106,6 +110,68 @@
 //!
 //! For more end-to-end flows, see the [`examples/`](https://github.com/FusRoman/Outfit/tree/main/examples) folder (e.g. `parquet_to_orbit.rs`).
 //!
+//! ## Example (Parallel batched IOD)
+//!
+//! This example requires the `parallel` feature (and optionally `progress` for a global progress bar).
+//!
+//! ```rust
+//! use camino::Utf8Path;
+//! use rand::{rngs::StdRng, SeedableRng};
+//! use outfit::{Outfit, ErrorModel, IODParams};
+//! use outfit::constants::ObjectNumber;
+//! use outfit::TrajectorySet;
+//! use outfit::TrajectoryFit;
+//! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
+//!
+//! # #[cfg(all(feature = "parallel", feature = "jpl-download"))]
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//!     
+//!     let test_data = "tests/data/test_from_fink.parquet";
+//!     let path_file = Utf8Path::new(test_data);
+//!     
+//!     let ztf_observer = env.get_observer_from_mpc_code(&"I41".into());
+//!     let mut traj_set = TrajectorySet::new_from_parquet(
+//!         &mut env,
+//!         path_file,
+//!         ztf_observer,
+//!         0.5,
+//!         0.5,
+//!         None
+//!     )?;
+//!
+//!     let params = IODParams::builder()
+//!         .max_obs_for_triplets(12)
+//!         .n_noise_realizations(10)
+//!         .build()?;
+//!
+//!     let mut rng = StdRng::seed_from_u64(42);
+//!     let batch_size = 256; // tune for locality & memory
+//!
+//!     let results = traj_set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, batch_size);
+//!
+//!     for (obj, res) in results {
+//!         match res {
+//!             Ok((gauss, rms)) => {
+//!                 println!("{} → RMS = {rms:.4}", obj);
+//!                 println!("{gauss}");
+//!             }
+//!             Err(e) => eprintln!("{} → error: {e}", obj),
+//!         }
+//!     }
+//!
+//!     Ok(())
+//! }
+//!
+//! # #[cfg(not(feature = "parallel"))]
+//! # fn main() {}
+//! ```
+//!
+//! **Notes**
+//! - Batches are processed **in parallel**; each batch is handled **sequentially** to preserve cache locality.
+//! - Per-object RNG seeds are **deterministically derived** from a single base seed.
+//! - Set `RAYON_NUM_THREADS=N` to cap threads if needed.
+//!
 //! ## Data Formats
 //!
 //! - **MPC 80-column** — standard fixed-width astrometry  
@@ -133,11 +199,20 @@
 //! - **`progress`** *(optional)*  
 //!   Enables lightweight progress bars (via `indicatif`) and loop timing utilities for long-running jobs.
 //!
+//! - **`parallel`** *(optional)*  
+//!   Enables **multi-core** IOD via **Rayon**, exposing
+//!   [`TrajectorySet::estimate_all_orbits_in_batches_parallel`](crate::trajectories::trajectory_fit::TrajectoryFit::estimate_all_orbits_in_batches_parallel).
+//!   Combine with `progress` for a thread-safe global progress bar.
+//!
 //! ```toml
 //! [dependencies]
 //! outfit = { version = "...", features = ["jpl-download"] }
-//! # or, with progress indicators
+//! # with progress indicators
 //! outfit = { version = "...", features = ["jpl-download", "progress"] }
+//! # with multi-core IOD
+//! outfit = { version = "...", features = ["parallel"] }
+//! # combine as needed
+//! outfit = { version = "...", features = ["jpl-download", "progress", "parallel"] }
 //! ```
 //!
 //! ## Error Handling
@@ -204,6 +279,9 @@ pub mod orbit_type;
 /// Observation handling (RA, DEC, times).
 pub mod observations;
 
+/// Trajectory management and file I/O.
+pub mod trajectories;
+
 /// Observers and observatory positions.
 pub mod observers;
 
@@ -230,7 +308,10 @@ pub mod time;
 pub use crate::outfit::Outfit;
 
 // Core data types & units
-pub use crate::constants::{ArcSec, Degree, ObjectNumber, TrajectorySet, MJD};
+pub use crate::constants::Observations;
+pub use crate::constants::{ArcSec, Degree, ObjectNumber, MJD};
+pub use crate::observers::Observer;
+pub use crate::trajectories::TrajectorySet;
 
 // Orbital element representations
 pub use crate::orbit_type::{
@@ -246,9 +327,11 @@ pub use crate::outfit_errors::OutfitError;
 pub use crate::initial_orbit_determination::gauss_result::GaussResult;
 pub use crate::initial_orbit_determination::IODParams;
 
-// Frequently-used extension traits (ergonomic entry points)
+// Frequently-used extension traits (ergonomic entry points) and key types
 pub use crate::observations::observations_ext::ObservationIOD;
-pub use crate::observations::trajectory_ext::TrajectoryExt;
+pub use crate::trajectories::trajectory_file::TrajectoryFile;
+pub use crate::trajectories::trajectory_fit::FullOrbitResult;
+pub use crate::trajectories::trajectory_fit::TrajectoryFit;
 
 // Selected constants that are widely useful
 pub use crate::constants::{
@@ -269,8 +352,9 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// ```
 pub mod prelude {
     pub use crate::{
-        ArcSec, Degree, ErrorModel, GaussResult, IODParams, JPLEphem, ObjectNumber, ObservationIOD,
-        Outfit, OutfitError, TrajectoryExt, TrajectorySet, MJD,
+        ArcSec, Degree, ErrorModel, FullOrbitResult, GaussResult, IODParams, JPLEphem,
+        ObjectNumber, ObservationIOD, Observer, Outfit, OutfitError, TrajectoryFile, TrajectorySet,
+        MJD,
     };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
@@ -284,11 +368,11 @@ pub(crate) mod unit_test_global {
     use camino::Utf8Path;
 
     use crate::{
-        constants::TrajectorySet,
         error_models::ErrorModel,
         jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
-        observations::trajectory_ext::TrajectoryExt,
         outfit::Outfit,
+        trajectories::trajectory_file::TrajectoryFile,
+        trajectories::TrajectorySet,
     };
 
     pub(crate) static OUTFIT_NAIF_TEST: LazyLock<Outfit> =

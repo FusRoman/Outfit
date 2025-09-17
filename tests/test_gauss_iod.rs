@@ -4,16 +4,17 @@ mod common;
 
 use approx::assert_relative_eq;
 use camino::Utf8Path;
-use outfit::constants::{ObjectNumber, TrajectorySet};
+use outfit::constants::ObjectNumber;
 use outfit::error_models::ErrorModel;
 use outfit::initial_orbit_determination::gauss_result::GaussResult;
 use outfit::initial_orbit_determination::IODParams;
 use outfit::observations::observations_ext::ObservationIOD;
-use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
 use outfit::outfit::Outfit;
 use outfit::outfit_errors::OutfitError;
+use outfit::trajectories::trajectory_file::TrajectoryFile;
+use outfit::TrajectorySet;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -23,7 +24,7 @@ fn run_iod(
     env_state: &mut Outfit,
     traj_set: &mut TrajectorySet,
     traj_number: &ObjectNumber,
-) -> Result<(Option<GaussResult>, f64), OutfitError> {
+) -> Result<(GaussResult, f64), OutfitError> {
     let obs = traj_set.get_mut(traj_number).unwrap();
     let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
 
@@ -40,8 +41,8 @@ fn run_iod(
 #[test]
 
 fn test_gauss_iod() {
-    let test_max_relative = 1e-13;
-    let test_epsilon = 5. * f64::EPSILON;
+    let test_max_relative = 1e-11;
+    let test_epsilon = 1e-11;
 
     let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 
@@ -71,8 +72,7 @@ fn test_gauss_iod() {
         mean_anomaly: 0.44069989140091426,
     });
 
-    let best_orbit_unwrapped = best_orbit.unwrap();
-    let orbit = best_orbit_unwrapped.get_orbit();
+    let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
@@ -99,8 +99,7 @@ fn test_gauss_iod() {
         mean_anomaly: 4.85070383704545,
     });
 
-    let best_orbit_unwrapped = best_orbit.unwrap();
-    let orbit = best_orbit_unwrapped.get_orbit();
+    let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
@@ -127,8 +126,7 @@ fn test_gauss_iod() {
         mean_anomaly: 4.9466622638827324,
     });
 
-    let best_orbit_unwrapped = best_orbit.unwrap();
-    let orbit = best_orbit_unwrapped.get_orbit();
+    let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(

@@ -17,6 +17,12 @@ jobs:
             features: ""
           - name: With jpl-download feature
             features: "--features jpl-download"
+          - name: With parallel feature
+            features: '--features "parallel"'
+            rayon_threads: "2"
+          - name: With parallel + progress
+            features: '--features "parallel progress"'
+            rayon_threads: "2"
 
     steps:
       - name: Checkout repository
@@ -35,6 +41,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests (${{ matrix.name }})
+        env:
+          # Cap Rayon threads only when provided in the matrix (no effect otherwise)
+          RAYON_NUM_THREADS: ${{ matrix.rayon_threads }}
         run: |
           echo "Running cargo test with features: '${{ matrix.features }}'"
           cargo test --locked --all-targets ${{ matrix.features }}
@@ -82,7 +91,7 @@ jobs:
         run: |
           rustc --version
           cargo clippy --version
-      - name: Run cargo clippy
+      - name: Run cargo clippy (all features)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   coverage:
@@ -113,7 +122,10 @@ jobs:
       - name: Clean coverage artifacts
         run: cargo llvm-cov clean --workspace
 
-      - name: Generate coverage (lcov)
+      - name: Generate coverage (lcov, all features incl. parallel)
+        env:
+          # Tame thread count for reproducible & stable coverage
+          RAYON_NUM_THREADS: 2
         run: |
           cargo llvm-cov \
             --workspace \
@@ -127,16 +139,21 @@ jobs:
           flags: rust
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
-  # Not yet on crate.io so disabled for now
-  # semver-pr:
-  #   name: SemVer (PR vs base)
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
 
-  #     - name: Check semver (baseline = PR base)
-  #       uses: obi1kenobi/cargo-semver-checks-action@v2
-  #       with:
-  #         feature-group: all-features
-  #         baseline-rev: ${{ github.event.pull_request.base.sha }}
+  semver-pr:
+    name: SemVer (PR vs base)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # IMPORTANT: full history so the base SHA exists locally
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check semver (baseline = PR base)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          feature-group: all-features
+          baseline-rev: ${{ github.event.pull_request.base.sha }}

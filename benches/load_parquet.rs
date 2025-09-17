@@ -1,10 +1,10 @@
 use camino::Utf8Path;
 use criterion::Throughput;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use outfit::constants::TrajectorySet;
 use outfit::error_models::ErrorModel;
-use outfit::observations::trajectory_ext::TrajectoryExt;
 use outfit::outfit::Outfit;
+use outfit::trajectories::trajectory_file::TrajectoryFile;
+use outfit::TrajectorySet;
 
 fn bench_load_parquet(c: &mut Criterion) {
     let mut outfit = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();

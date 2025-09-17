@@ -1,6 +1,7 @@
 #![cfg(feature = "jpl-download")]
 #![allow(non_snake_case)]
 use camino::Utf8Path;
+use outfit::trajectories::trajectory_fit::TrajectoryFit;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -181,7 +182,7 @@ struct IodBatchSummary {
 // ======================= summarizer =======================
 #[allow(clippy::type_complexity)]
 fn summarize_estimates<S>(
-    results: &HashMap<ObjectNumber, Result<(Option<GaussResult>, f64), OutfitError>, S>,
+    results: &HashMap<ObjectNumber, Result<(GaussResult, f64), OutfitError>, S>,
     k: usize,
 ) -> IodBatchSummary
 where
@@ -206,47 +207,29 @@ where
 
     for (obj, res) in results {
         match res {
-            Ok((maybe_orbit, rms)) => {
-                if let Some(orbit_res) = maybe_orbit {
-                    let corrected = matches!(orbit_res, GaussResult::CorrectedOrbit(_));
-                    if corrected {
-                        corrected_count += 1;
-                    } else {
-                        prelim_count += 1;
-                    }
-                    rms_values.push((obj.clone(), *rms, corrected));
-
-                    if let Some(kep) = kepler_of(orbit_res) {
-                        let a_au = kep.semi_major_axis;
-                        let e_ = kep.eccentricity;
-                        let i_rad = kep.inclination;
-                        let q_au = a_au * (1.0 - e_);
-                        let Q_au = a_au * (1.0 + e_);
-                        a.push(a_au);
-                        e.push(e_);
-                        i.push(i_rad);
-                        q.push(q_au);
-                        Q.push(Q_au);
-
-                        let cls = classify_orbit(a_au, e_, i_rad);
-                        *class_counts.entry(cls).or_default() += 1;
-                    }
+            Ok((orbit_res, rms)) => {
+                let corrected = matches!(orbit_res, GaussResult::CorrectedOrbit(_));
+                if corrected {
+                    corrected_count += 1;
                 } else {
-                    let entry =
-                        buckets
-                            .entry("Ok(None) unexpected")
-                            .or_insert_with(|| ErrorStats {
-                                count: 0,
-                                samples: Vec::new(),
-                                attempts_sum: 0,
-                                attempts_n: 0,
-                            });
-                    entry.count += 1;
-                    if entry.samples.len() < MAX_SAMPLES_PER_KIND {
-                        entry
-                            .samples
-                            .push("Ok(None) returned in success branch".to_string());
-                    }
+                    prelim_count += 1;
+                }
+                rms_values.push((obj.clone(), *rms, corrected));
+
+                if let Some(kep) = kepler_of(orbit_res) {
+                    let a_au = kep.semi_major_axis;
+                    let e_ = kep.eccentricity;
+                    let i_rad = kep.inclination;
+                    let q_au = a_au * (1.0 - e_);
+                    let Q_au = a_au * (1.0 + e_);
+                    a.push(a_au);
+                    e.push(e_);
+                    i.push(i_rad);
+                    q.push(q_au);
+                    Q.push(Q_au);
+
+                    let cls = classify_orbit(a_au, e_, i_rad);
+                    *class_counts.entry(cls).or_default() += 1;
                 }
             }
             Err(e) => {
@@ -533,37 +516,56 @@ fn flatten_error_for_bucket(e: &OutfitError) -> (&'static str, String, Option<us
             let (k, _, _) = flatten_error_for_bucket(cause);
             (k, format!("{e}"), Some(*attempts))
         }
+        NoFeasibleTriplets { .. } => ("NoFeasibleTriplets", format!("{e}"), None),
+
+        // Numerical / algebraic failures
         GaussNoRootsFound => ("GaussNoRootsFound", format!("{e}"), None),
         PolynomialRootFindingFailed => ("PolynomialRootFindingFailed", format!("{e}"), None),
         SpuriousRootDetected => ("SpuriousRootDetected", format!("{e}"), None),
         SingularDirectionMatrix => ("SingularDirectionMatrix", format!("{e}"), None),
         RmsComputationFailed(_) => ("RmsComputationFailed", format!("{e}"), None),
         GaussPrelimOrbitFailed(_) => ("GaussPrelimOrbitFailed", format!("{e}"), None),
+        RootFindingError(_) => ("RootFindingError", format!("{e}"), None),
+        InvalidFloatValue(_) => ("InvalidFloatValue", format!("{e}"), None),
+        NonFiniteScore(_) => ("NonFiniteScore", format!("{e}"), None),
+
+        // Orbit / reference frame
         InvalidOrbit(_) => ("InvalidOrbit", format!("{e}"), None),
         InvalidIODParameter(_) => ("InvalidIODParameter", format!("{e}"), None),
         InvalidConversion(_) => ("InvalidConversion", format!("{e}"), None),
-        RootFindingError(_) => ("RootFindingError", format!("{e}"), None),
-        NoiseInjectionError(_) => ("NoiseInjectionError", format!("{e}"), None),
         InvalidRefSystem(_) => ("InvalidRefSystem", format!("{e}"), None),
+        VelocityCorrectionError(_) => ("VelocityCorrectionError", format!("{e}"), None),
+
+        // Observation handling
         ObservationNotFound(_) => ("ObservationNotFound", format!("{e}"), None),
+
+        // Parsing / ingestion
+        NomParsingError(_) => ("NomParsingError", format!("{e}"), None),
+        Parsing80ColumnFileError(_) => ("Parsing80ColumnFileError", format!("{e}"), None),
         Parquet(_) => ("Parquet", format!("{e}"), None),
-        IoError(_) => ("IoError", format!("{e}"), None),
-        UreqHttpError(_) => ("UreqHttpError", format!("{e}"), None),
-        #[cfg(feature = "jpl-download")]
-        ReqwestError(_) => ("ReqwestError", format!("{e}"), None),
+
+        // Error model
+        InvalidErrorModel(_) => ("InvalidErrorModel", format!("{e}"), None),
+        InvalidErrorModelFilePath(_) => ("InvalidErrorModelFilePath", format!("{e}"), None),
+
+        // Ephemerides / SPK
         InvalidJPLStringFormat(_) => ("InvalidJPLStringFormat", format!("{e}"), None),
         InvalidJPLEphemFileSource(_) => ("InvalidJPLEphemFileSource", format!("{e}"), None),
         InvalidJPLEphemFileVersion(_) => ("InvalidJPLEphemFileVersion", format!("{e}"), None),
         JPLFileNotFound(_) => ("JPLFileNotFound", format!("{e}"), None),
+        InvalidSpkDataType(_) => ("InvalidSpkDataType", format!("{e}"), None),
+
+        // I/O
+        IoError(_) => ("IoError", format!("{e}"), None),
+        UreqHttpError(_) => ("UreqHttpError", format!("{e}"), None),
+        #[cfg(feature = "jpl-download")]
+        ReqwestError(_) => ("ReqwestError", format!("{e}"), None),
         Utf8PathError(_) => ("Utf8PathError", format!("{e}"), None),
         UnableToCreateBaseDir(_) => ("UnableToCreateBaseDir", format!("{e}"), None),
-        NomParsingError(_) => ("NomParsingError", format!("{e}"), None),
-        Parsing80ColumnFileError(_) => ("Parsing80ColumnFileError", format!("{e}"), None),
-        InvalidErrorModel(_) => ("InvalidErrorModel", format!("{e}"), None),
-        InvalidErrorModelFilePath(_) => ("InvalidErrorModelFilePath", format!("{e}"), None),
-        InvalidSpkDataType(_) => ("InvalidSpkDataType", format!("{e}"), None),
-        InvalidFloatValue(_) => ("InvalidFloatValue", format!("{e}"), None),
-        _ => ("Other", format!("{e}"), None),
+        InvalidUrl(_) => ("InvalidUrl", format!("{e}"), None),
+
+        // Stochastic
+        NoiseInjectionError(_) => ("NoiseInjectionError", format!("{e}"), None),
     }
 }
 
