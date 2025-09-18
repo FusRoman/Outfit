@@ -49,6 +49,9 @@ pub const RADEG: f64 = std::f64::consts::PI / 180.0;
 /// Arcseconds → radians
 pub const RADSEC: f64 = std::f64::consts::PI / 648000.0;
 
+/// Radians → arcseconds
+pub const RAD2ARC: f64 = 648000.0 / std::f64::consts::PI;
+
 /// Hours → radians
 pub const RADH: f64 = DPI / 24.0;
 

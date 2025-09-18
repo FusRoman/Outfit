@@ -95,7 +95,7 @@ pub mod triplets_generator;
 pub mod triplets_iod;
 
 use crate::{
-    constants::{Observations, Radian, DPI, MJD, VLIGHT_AU},
+    constants::{Observations, Radian, DPI, JDTOMJD, MJD, RAD2ARC, VLIGHT_AU},
     conversion::cartesian_to_radec,
     observers::Observer,
     orbit_type::equinoctial_element::EquinoctialElements,
@@ -104,7 +104,10 @@ use crate::{
 };
 use hifitime::Epoch;
 use nalgebra::Vector3;
-use std::f64::consts::PI;
+use std::{
+    f64::consts::{PI, TAU},
+    fmt,
+};
 
 /// Astrometric observation with site and precomputed observer positions.
 ///
@@ -499,6 +502,144 @@ pub fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64
     let norm_vector = xrel.norm();
     let dt = norm_vector / VLIGHT_AU;
     xrel - dt * vrel
+}
+
+/// Round seconds with carry to minutes/hours if needed.
+fn ra_hms_prec(rad: f64, prec: usize) -> (u32, u32, f64) {
+    // Normalize RA to [0, 2π)
+    let mut a = rad % TAU;
+    if a < 0.0 {
+        a += TAU;
+    }
+
+    // Total seconds in [0h, 24h)
+    let total_sec = a * 12.0 / std::f64::consts::PI * 3600.0;
+
+    let mut h = (total_sec / 3600.0).floor() as u32;
+    let rem = total_sec - (h as f64) * 3600.0;
+    let mut m = (rem / 60.0).floor() as u32;
+    let mut s = rem - (m as f64) * 60.0;
+
+    // Round seconds to precision
+    let pow = 10f64.powi(prec as i32);
+    s = (s * pow).round() / pow;
+
+    // Carry seconds -> minutes
+    if s >= 60.0 {
+        s -= 60.0;
+        m += 1;
+    }
+    // Carry minutes -> hours
+    if m >= 60 {
+        m = 0;
+        h = (h + 1) % 24;
+    }
+    (h, m, s)
+}
+
+fn dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64) {
+    let sign = if rad < 0.0 { '-' } else { '+' };
+    let deg_abs = rad.abs() * 180.0 / std::f64::consts::PI;
+
+    let mut d = deg_abs.floor() as u32;
+    let rem = deg_abs - d as f64;
+    let mut m = (rem * 60.0).floor() as u32;
+    let mut s = (rem * 3600.0) - (m as f64) * 60.0;
+
+    let pow = 10f64.powi(prec as i32);
+    s = (s * pow).round() / pow;
+
+    // Carry seconds -> minutes
+    if s >= 60.0 {
+        s -= 60.0;
+        m += 1;
+    }
+    // Carry minutes -> degrees (cap at 90 for safety)
+    if m >= 60 {
+        m = 0;
+        d += 1;
+    }
+    if d > 90 {
+        d = 90;
+        m = 0;
+        s = 0.0;
+    }
+    (sign, d, m, s)
+}
+
+/// Format seconds with forced two-digit integer part: "SS.sss"
+fn fmt_ss(seconds: f64, prec: usize) -> String {
+    let pow = 10u64.pow(prec as u32);
+    let total = (seconds * pow as f64).round() as u64;
+    let int = total / pow;
+    let frac = total % pow;
+    format!("{int:02}.{frac:0prec$}")
+}
+
+fn fmt_vec3_au(v: &Vector3<f64>, prec: usize) -> String {
+    format!(
+        "[ {x:.p$}, {y:.p$}, {z:.p$} ] AU",
+        x = v.x,
+        y = v.y,
+        z = v.z,
+        p = prec
+    )
+}
+
+impl fmt::Display for Observation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Extract inner numeric values (adapt if Radian/MJD are newtypes)
+        let ra_rad: f64 = self.ra;
+        let dec_rad: f64 = self.dec;
+        let sra_as: f64 = self.error_ra * RAD2ARC;
+        let sdec_as: f64 = self.error_dec * RAD2ARC;
+        let mjd_tt: f64 = self.time;
+        let jd_tt = mjd_tt + JDTOMJD;
+
+        // Formatting precisions
+        let sec_prec = 3;
+        let pos_prec = 6;
+
+        let (rh, rm, rs) = ra_hms_prec(ra_rad, sec_prec);
+        let (sgn, dd, dm, ds) = dec_sdms_prec(dec_rad, sec_prec);
+
+        // Pre-format second strings to enforce zero-padding in integer part
+        let rs_s = fmt_ss(rs, sec_prec);
+        let ds_s = fmt_ss(ds, sec_prec);
+
+        if f.alternate() {
+            // Pretty multi-line variant with {:#}
+            let site = self.observer;
+            let r_geo = fmt_vec3_au(&self.observer_earth_position, pos_prec);
+            let r_hel = fmt_vec3_au(&self.observer_helio_position, pos_prec);
+
+            writeln!(f, "Astrometric observation")?;
+            writeln!(f, "----------------------")?;
+            writeln!(f, "Site ID        : {site}")?;
+            writeln!(f, "Epoch (TT)     : MJD {mjd_tt:.6}, JD {jd_tt:.6}")?;
+            writeln!(
+                f,
+                "RA / σ         : {rh:02}h {rm:02}m {rs_s}s   (σ = {sra_as:.3}\" )"
+            )?;
+            writeln!(
+                f,
+                "DEC / σ        : {sgn}{dd:02}° {dm:02}' {ds_s}\"  (σ = {sdec_as:.3}\" )"
+            )?;
+            writeln!(f, "Observer (geo) : {r_geo}")?;
+            writeln!(f, "Observer (hel) : {r_hel}")
+        } else {
+            // Compact single-line
+            let site = self.observer;
+            let r_geo = fmt_vec3_au(&self.observer_earth_position, pos_prec);
+            let r_hel = fmt_vec3_au(&self.observer_helio_position, pos_prec);
+
+            write!(
+                f,
+                "Obs(site={site}, MJD={mjd_tt:.6} TT, RA={rh:02}h{rm:02}m{rs_s}s ± {sra_as:.3}\", \
+DEC={sgn}{dd:02}°{dm:02}'{ds_s}\" ± {sdec_as:.3}\", r_geo={r_geo}, r_hel={r_hel})"
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1165,6 +1306,270 @@ mod test_observations {
                     }
                 }
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod display_obs_tests {
+        use super::*;
+        use nalgebra::Vector3;
+
+        // --- Helpers -------------------------------------------------------------
+
+        /// Convert arcseconds to radians.
+        fn arcsec_to_rad(asx: f64) -> f64 {
+            asx / 206_264.806_247_096_37
+        }
+
+        /// Build an Observation with full control on fields.
+        /// This stays in the same module (pub(crate) fields are accessible here).
+        #[allow(clippy::too_many_arguments)]
+        fn make_obs(
+            site: u16,
+            ra_rad: f64,
+            dec_rad: f64,
+            sra_arcsec: f64,
+            sdec_arcsec: f64,
+            mjd_tt: f64,
+            geo: (f64, f64, f64),
+            hel: (f64, f64, f64),
+        ) -> Observation {
+            Observation {
+                observer: site,
+                ra: Radian::from(ra_rad),
+                error_ra: Radian::from(arcsec_to_rad(sra_arcsec)),
+                dec: Radian::from(dec_rad),
+                error_dec: Radian::from(arcsec_to_rad(sdec_arcsec)),
+                time: MJD::from(mjd_tt),
+                observer_earth_position: Vector3::new(geo.0, geo.1, geo.2),
+                observer_helio_position: Vector3::new(hel.0, hel.1, hel.2),
+            }
+        }
+
+        // --- Tests ---------------------------------------------------------------
+
+        #[test]
+        fn display_compact_basic() {
+            // Case: RA=0, DEC=0, uncertainties = 1.0 arcsec, simple positions.
+            let obs = make_obs(
+                809,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                60000.123456, // MJD (TT)
+                (0.123456789, -1.0, 0.000042),
+                (0.0, 1.234567, -0.5),
+            );
+
+            let s = format!("{obs}");
+
+            // Site and MJD
+            assert!(
+                s.contains("site=809"),
+                "site field not present/incorrect: {s}"
+            );
+            assert!(
+                s.contains("MJD=60000.123456"),
+                "MJD formatting to 6 decimals expected: {s}"
+            );
+
+            // RA/DEC with uncertainties in arcsec; 3 decimals on seconds and uncertainties.
+            // RA=0 -> 00h00m00.000s; DEC=+00°00'00.000"
+            assert!(
+                s.contains("RA=00h00m00.000s ± 1.000\""),
+                "RA sexagesimal or sigma not formatted as expected: {s}"
+            );
+            assert!(
+                s.contains("DEC=+00°00'00.000\" ± 1.000\""),
+                "DEC sexagesimal or sigma not formatted as expected: {s}"
+            );
+
+            // JD = MJD + 2400000.5 is only printed in pretty mode, so not checked here.
+
+            // Vectors formatted with 6 decimals and 'AU' tag
+            assert!(
+                s.contains("r_geo=[ 0.123457, -1.000000, 0.000042 ] AU"),
+                "Geocentric vector formatting/precision mismatch: {s}"
+            );
+            assert!(
+                s.contains("r_hel=[ 0.000000, 1.234567, -0.500000 ] AU"),
+                "Heliocentric vector formatting/precision mismatch: {s}"
+            );
+        }
+
+        #[test]
+        fn display_pretty_multiline() {
+            // Non-zero RA/DEC to exercise general formatting.
+            // RA = 2h 30m 15s -> in radians; DEC = +12° 34' 56"
+            let ra_hours = 2.0 + 30.0 / 60.0 + 15.0 / 3600.0;
+            let ra_rad = ra_hours * std::f64::consts::PI / 12.0;
+            let dec_deg: f64 = 12.0 + 34.0 / 60.0 + 56.0 / 3600.0;
+            let dec_rad = dec_deg.to_radians();
+
+            let obs = make_obs(
+                500,
+                ra_rad,
+                dec_rad,
+                0.321, // arcsec
+                0.789, // arcsec
+                60200.5,
+                (1.0, 2.0, 3.0),
+                (-0.1, 0.2, -0.3),
+            );
+
+            let s = format!("{obs:#}");
+
+            // Header and labels should be present (human-readable multi-line)
+            assert!(
+                s.starts_with("Astrometric observation"),
+                "Pretty header missing: {s}"
+            );
+            assert!(
+                s.contains("Site ID        : 500"),
+                "Pretty site line missing: {s}"
+            );
+
+            // Epoch line with MJD and JD
+            assert!(
+                s.contains("Epoch (TT)     : MJD 60200.500000, JD 2460201.000000"),
+                "Epoch line with JD=MJD+2400000.5 expected: {s}"
+            );
+
+            // RA/σ line (check fragments to avoid locale/spacing issues)
+            assert!(s.contains("RA / σ         : "), "RA line missing: {s}");
+            assert!(
+                s.contains("h") && s.contains("m") && s.contains("s"),
+                "RA HMS units missing: {s}"
+            );
+            assert!(
+                s.contains("(σ = 0.321"),
+                "RA sigma arcsec missing/incorrect: {s}"
+            );
+
+            // DEC/σ line with sign and DMS glyphs
+            assert!(s.contains("DEC / σ        : +"), "DEC sign missing: {s}");
+            assert!(
+                s.contains("°") && s.contains("'") && s.contains("\""),
+                "DEC units missing: {s}"
+            );
+            assert!(
+                s.contains("(σ = 0.789"),
+                "DEC sigma arcsec missing/incorrect: {s}"
+            );
+
+            // Vectors lines
+            assert!(
+                s.contains("Observer (geo) : [ 1.000000, 2.000000, 3.000000 ] AU"),
+                "Geo vector line mismatch: {s}"
+            );
+            assert!(
+                s.contains("Observer (hel) : [ -0.100000, 0.200000, -0.300000 ] AU"),
+                "Hel vector line mismatch: {s}"
+            );
+        }
+
+        #[test]
+        fn ra_wraps_into_24h() {
+            // RA slightly negative should wrap to near 24h in display.
+            let tiny = 1e-6;
+            let obs = make_obs(
+                1,
+                -tiny, // slightly negative angle
+                0.0,
+                0.1,
+                0.1,
+                59000.0,
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            );
+
+            let s = format!("{obs}");
+
+            // Expect "23h59m..." rather than negative hours
+            assert!(
+                s.contains("RA=23h59m") || s.contains("RA=24h00m"),
+                "RA should wrap to [0, 24h): {s}"
+            );
+            assert!(
+                !s.contains("-"),
+                "RA string must not contain a negative sign after wrapping: {s}"
+            );
+        }
+
+        #[test]
+        fn dec_negative_sign_is_preserved() {
+            // DEC = -10° 00' 00"
+            let dec_rad = (-10.0f64).to_radians();
+            let obs = make_obs(
+                2,
+                0.0,
+                dec_rad,
+                0.5,
+                0.5,
+                59000.0,
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            );
+
+            let s = format!("{obs}");
+
+            assert!(
+                s.contains("DEC=-10°00'00.000\""),
+                "Negative DEC sign or DMS formatting incorrect: {s}"
+            );
+        }
+
+        #[test]
+        fn uncertainties_are_in_arcseconds() {
+            // Store uncertainties in radians corresponding to 2.345 arcsec.
+            let asx = 2.345;
+            let obs = make_obs(
+                3,
+                0.0,
+                0.0,
+                asx, // provided in arcsec, helper converts to rad
+                asx,
+                60001.0,
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+            );
+
+            let s1 = format!("{obs}");
+            let s2 = format!("{obs:#}");
+
+            // Both compact and pretty should surface the same arcsec value to 3 decimals.
+            assert!(
+                s1.contains("± 2.345\"") && s2.contains("(σ = 2.345"),
+                "Arcsecond uncertainties not printed as expected.\nCompact: {s1}\nPretty:\n{s2}"
+            );
+        }
+
+        #[test]
+        fn vector_precision_and_units() {
+            // Ensure 6-decimal rounding and AU suffix are stable.
+            let obs = make_obs(
+                4,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                60010.0,
+                (0.9999996, -0.9999996, 0.12345649),
+                (1.23456749, -1.23456751, 2.00000049),
+            );
+
+            let s = format!("{obs}");
+
+            // Rounded at 6 decimals, with AU suffix.
+            assert!(
+                s.contains("r_geo=[ 1.000000, -1.000000, 0.123456 ] AU"),
+                "Geo rounding/units mismatch: {s}"
+            );
+            assert!(
+                s.contains("r_hel=[ 1.234567, -1.234568, 2.000000 ] AU"),
+                "Hel rounding/units mismatch: {s}"
+            );
         }
     }
 }
