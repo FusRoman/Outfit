@@ -1,73 +1,87 @@
 //! # Tabular display for astrometric observations
 //!
-//! This module provides zero-copy, table-style renderers for an
-//! [`Observations`] collection (a `SmallVec<[Observation; 6]>`).
+//! Pretty, zero-copy renderers to print an [`Observations`] collection
+//! (a `SmallVec<[Observation; 6]>`) as a **table**.
 //!
 //! ## Overview
 //!
-//! The main entry point is the **display adaptor** [`ObservationsDisplay`], which borrows
-//! the underlying observation slice and prints a formatted table via Rust’s
-//! formatting machinery (`{}`).
+//! The main entry point is the display adaptor [`ObservationsDisplay`]. It **borrows**
+//! your observations and renders a formatted table when used with Rust formatting
+//! (`{}` or `{:#}`), without cloning or moving data.
 //!
-//! Three **layouts** are supported:
+//! Three layouts are available:
 //!
-//! - **Default** (compact): `# | Site | MJD (TT) | RA[hms] ±σ["] | DEC[dms] ±σ["]`
-//! - **Wide** (diagnostic): adds `JD(TT) | RA[rad] | DEC[rad] | |r_geo| AU | |r_hel| AU`
-//! - **ISO** (timestamp-centric): `ISO (TT)` and `ISO (UTC)` replace the MJD/JD columns
+//! - **Default** (compact, fixed-width):  
+//!   `# | Site | MJD (TT) | RA[hms] ±σ["] | DEC[dms] ±σ["]`
+//! - **Wide** (diagnostic, uses `comfy-table`):  
+//!   adds `JD (TT) | RA [rad] | DEC [rad] | |r_geo| AU | |r_hel| AU`
+//! - **ISO** (timestamp-centric, uses `comfy-table`):  
+//!   replaces MJD/JD with `ISO (TT)` and `ISO (UTC)`
 //!
-//! Precision controls:
+//! ## Units & Conventions
 //!
-//! - `sec_prec` — fractional digits for sexagesimal seconds **and** ISO seconds
-//! - `dist_prec` — fixed-point digits for AU distances (wide mode)
+//! - **Time**: MJD/JD columns are on the **TT** scale. In ISO mode, both **TT** and **UTC**
+//!   timestamps are shown (UTC includes leap seconds via `hifitime`).
+//! - **Angles**: RA/DEC are formatted in sexagesimal (RA in **hours**, DEC in **degrees**).
+//! - **Uncertainties**: printed in **arcseconds**, converted from radians with [`RAD2ARC`].
+//! - **Positions**: vector norms (wide mode) are in **AU**, conventional **equatorial mean J2000**.
 //!
-//! **Sorting option**
-//! -----------------
-//! Use [`ObservationsDisplay::sorted`] to print rows **sorted by epoch** (MJD TT).
-//! The `#` column always shows the **original index** (pre-sort) for traceability.
+//! ## Precision & Sorting
 //!
-//! ## Units & conventions
+//! - `with_seconds_precision(p)` — controls fractional digits for sexagesimal and ISO seconds.
+//! - `with_distance_precision(p)` — controls fixed-point digits for AU distances (wide mode).
+//! - `sorted()` — prints rows **sorted by epoch** (MJD TT ascending). The first column `#`
+//!   always shows the **original index** (pre-sort) for traceability.
 //!
-//! - **Time**: MJD and JD columns are on the **TT** scale (ISO mode prints **TT** and **UTC**).
-//! - **Angles**: RA/DEC are rendered in sexagesimal (RA in **hours**, DEC in **degrees**).
-//! - **Uncertainties**: shown in **arcseconds**; converted from radians using [`RAD2ARC`].
-//! - **Positions**: vector norms are in **AU** (equatorial mean J2000 frame by convention).
+//! ## Observer names
+//!
+//! If you pass an [`Outfit`] with [`ObservationsDisplay::with_env`], site labels render
+//! as `"Name (#id)"` when available; otherwise the numeric **site id** is shown.
 //!
 //! ## Performance
 //!
-//! - The adaptor does **not** move or clone observations; it iterates indices and formats rows.
-//! - Per-row small `String`s (sexagesimal and ISO fields) are allocated transiently.
-//! - With `sorted(true)`, only a temporary **index vector** is sorted; the data order is preserved.
+//! - The adaptor never clones/moves `Observation`s. It sorts a **vector of indices** when
+//!   `sorted()` is used, and builds small transient strings per row (sexagesimal & ISO).
+//! - **Default** layout writes fixed-width lines directly.  
+//!   **Wide** and **ISO** layouts use [`comfy-table`] to build the table; this is still fast
+//!   but implies allocating the table representation before printing.
 //!
-//! ## Examples
+//! ## Quick examples
 //!
 //! ```rust,ignore
 //! use outfit::observations::display::ObservationsDisplayExt;
 //!
-//! // Compact table, sorted by epoch
-//! println!("{}", observations.show().sorted(true));
+//! // 1) Compact table (fixed-width), sorted by epoch
+//! println!("{}", observations.show().sorted());
 //!
-////! // Wide table (adds JD, radians, |r| in AU), sorted
-//! println!("{}", observations.table_wide().sorted(true));
+//! // 2) Wide table (adds JD, radians, |r| in AU), with custom precisions
+//! println!("{}", observations
+//!     .table_wide()
+//!     .with_seconds_precision(4)
+//!     .with_distance_precision(8)
+//!     .sorted());
 //!
-//! // ISO table (ISO TT + ISO UTC), custom seconds precision, sorted
-//! println!("{}", observations.table_iso().with_seconds_precision(4).sorted(true));
+//! // 3) ISO table (ISO TT + ISO UTC), resolve site names via Outfit
+//! println!("{}", observations
+//!     .table_iso()
+//!     .with_env(&env)
+//!     .with_seconds_precision(4)
+//!     .sorted());
 //!
-//! // Get an owned string (compact, unsorted)
+//! // 4) Owned string (compact, unsorted)
 //! let s = observations.show_string();
 //! ```
 //!
 //! ## See also
 //!
-//! - [`Observation`] — single-observation pretty-printer and helpers
-//! - [`crate::conversion::ra_hms_prec`] / [`crate::conversion::dec_sdms_prec`] — sexagesimal decomposition with carry
-//! - [`crate::time::fmt_ss`] — seconds string `"SS.sss"` with 2-digit integer part
-//! - [`crate::time::iso_tt_from_epoch`] / [`crate::time::iso_utc_from_epoch`] — ISO renderers via `hifitime`
+//! - [`Observation`] — single-observation pretty-printer and helpers.
+//! - [`crate::conversion::ra_hms_prec`] / [`crate::conversion::dec_sdms_prec`]
+//!   — sexagesimal decomposition with carry.
+//! - [`crate::time::fmt_ss`] — seconds string `"SS.sss"` with 2-digit integer part.
+//! - [`crate::time::iso_tt_from_epoch`] / [`crate::time::iso_utc_from_epoch`]
+//!   — ISO renderers via `hifitime`.
 //!
-//! ## Notes
-//!
-//! - Header widths are chosen for readability; they are not intended to be parsed.
-//! - ISO rendering relies on `hifitime`’s leap-second tables for UTC.
-
+//! [`comfy-table`]: https://crates.io/crates/comfy-table
 use std::fmt;
 
 use hifitime::{Epoch, TimeScale};
@@ -76,7 +90,9 @@ use crate::constants::{JDTOMJD, RAD2ARC};
 use crate::conversion::{dec_sdms_prec, ra_hms_prec};
 use crate::observations::Observation;
 use crate::time::{fmt_ss, iso_tt_from_epoch, iso_utc_from_epoch};
-use crate::Observations;
+use crate::{Observations, Outfit};
+
+use comfy_table::{presets::UTF8_FULL, Cell, CellAlignment, ContentArrangement, Row, Table};
 
 /// Internal layout selector for the table renderer.
 ///
@@ -124,6 +140,8 @@ enum TableMode {
 pub struct ObservationsDisplay<'a> {
     /// Borrowed collection to render. No allocation or copying occurs.
     obs: &'a Observations,
+    /// Optional Outfit environment to resolve observer names.
+    env: Option<&'a Outfit>,
     /// Column layout selector (default / wide / iso).
     mode: TableMode,
     /// Fractional digits for sexagesimal and ISO seconds (default = 3).
@@ -142,7 +160,7 @@ pub struct ObservationsDisplay<'a> {
 /// * Optional fields are only populated in the relevant mode (e.g., `jd_tt` in **Wide**).
 struct RowFields {
     i: usize,
-    site: u16,
+    site_label: String,
     // Base time & angles
     mjd_tt: f64,
     ra_rad: f64,
@@ -176,6 +194,7 @@ impl<'a> ObservationsDisplay<'a> {
     pub fn new(obs: &'a Observations) -> Self {
         Self {
             obs,
+            env: None,
             mode: TableMode::Default,
             sec_prec: 3,
             dist_prec: 6,
@@ -184,6 +203,11 @@ impl<'a> ObservationsDisplay<'a> {
     }
 
     /// Switch to **wide** mode (adds JD, radians, vector norms).
+    ///
+    /// Adds the following columns:
+    ///     - `JD (TT)`
+    ///     - `RA [rad]`, `DEC [rad]`
+    ///     - `|r_geo| AU`, `|r_hel| AU`
     ///
     /// Arguments
     /// -----------------
@@ -207,6 +231,10 @@ impl<'a> ObservationsDisplay<'a> {
 
     /// Switch to **ISO** mode (replace MJD/JD with ISO TT and ISO UTC columns).
     ///
+    /// Replaces the time columns with:
+    ///     - `ISO (TT)` — Gregorian breakdown on TT,
+    ///     - `ISO (UTC)` — TT converted to UTC (leap seconds handled by `hifitime`).
+    ///
     /// Return
     /// ----------
     /// * `Self` (builder style), allowing chained configuration.
@@ -214,6 +242,7 @@ impl<'a> ObservationsDisplay<'a> {
     /// Notes
     /// ----------
     /// * ISO strings are produced via `hifitime`, using leap-second tables for UTC.
+    /// * This mode uses [`comfy-table`](https://docs.rs/comfy-table/latest/comfy_table/).
     ///
     /// See also
     /// ------------
@@ -269,9 +298,53 @@ impl<'a> ObservationsDisplay<'a> {
     /// ----------
     /// * Sorting uses a **stable** index order (no reordering or cloning of observations).
     /// * The `#` column prints the **original index** (pre-sort).
-    pub fn sorted(mut self, yes: bool) -> Self {
-        self.sorted = yes;
+    pub fn sorted(mut self) -> Self {
+        self.sorted = true;
         self
+    }
+
+    /// Attach an [`Outfit`] to resolve **observer names** in the `Site` column.
+    ///
+    /// If a name is available, rows show `"Name (#id)"`. Otherwise the numeric
+    /// site id is displayed.
+    ///
+    /// Example
+    /// -------
+    /// ```rust,no_run
+    /// println!("{}", observations.table_iso().with_env(&env).sorted());
+    /// ```
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `env` – The [`Outfit`] environment to use for resolving observer names.
+    pub fn with_env(mut self, env: &'a Outfit) -> Self {
+        self.env = Some(env);
+        self
+    }
+
+    /// Generate the label for the observer site of a given observation.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `i` – Original index of the observation (pre-sort).
+    ///
+    /// Return
+    /// -----------------
+    /// * A string label for the site, either `"Name (#id)"` or `"#id"`.
+    fn site_label(&self, i: usize) -> String {
+        if let Some(env) = self.env {
+            let site_id = self.obs[i].observer;
+            let site = env.get_observer_from_uint16(site_id);
+            if let Some(name) = site.name.as_deref() {
+                if !name.is_empty() {
+                    return format!("{name} (#{site_id})");
+                }
+            }
+            format!("Site ID #{site_id}")
+        } else {
+            // No environment: keep a compact ID for compatibility
+            format!("{}", self.obs[i].observer)
+        }
     }
 
     /// Write the table header according to the selected mode.
@@ -287,7 +360,7 @@ impl<'a> ObservationsDisplay<'a> {
             TableMode::Wide => {
                 writeln!(
                     f,
-                    "{:>3}  {:>5}  {:>14}  {:>14}  {:>20}  {:>11}  {:>20}  {:>11}  {:>12}  {:>12}",
+                    "{:>3}  {:>5}  {:>14}  {:>14}  {:>26}  {:>11}  {:>26}  {:>11}  {:>12}  {:>12}",
                     "#",
                     "Site",
                     "MJD (TT)",
@@ -303,7 +376,7 @@ impl<'a> ObservationsDisplay<'a> {
             TableMode::Iso => {
                 writeln!(
                     f,
-                    "{:>3}  {:>5}  {:>26}  {:>26}  {:>20}  {:>20}",
+                    "{:>3}  {:>5}  {:>26}  {:>26}  {:>26}  {:>26}",
                     "#", "Site", "ISO (TT)", "ISO (UTC)", "RA ±σ[arcsec]", "DEC ±σ[arcsec]"
                 )
             }
@@ -390,7 +463,7 @@ impl<'a> ObservationsDisplay<'a> {
 
         RowFields {
             i,
-            site: o.observer,
+            site_label: self.site_label(i),
             mjd_tt,
             ra_rad,
             dec_rad,
@@ -402,6 +475,85 @@ impl<'a> ObservationsDisplay<'a> {
             iso_tt,
             iso_utc,
         }
+    }
+
+    /// Render the WIDE table using comfy-table.
+    fn render_wide_comfy(&self) -> String {
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+
+        // Header
+        table.set_header(vec![
+            Cell::new("#"),
+            Cell::new("Site"),
+            Cell::new("MJD (TT)"),
+            Cell::new("JD (TT)"),
+            Cell::new("RA ±σ[arcsec]"),
+            Cell::new("RA [rad]"),
+            Cell::new("DEC ±σ[arcsec]"),
+            Cell::new("DEC [rad]"),
+            Cell::new("|r_geo| AU"),
+            Cell::new("|r_hel| AU"),
+        ]);
+
+        // Rows
+        for (i, o) in self.row_iter() {
+            let r = self.format_row_fields(i, o);
+            let dp = self.dist_prec;
+
+            table.add_row(Row::from(vec![
+                Cell::new(r.i).set_alignment(CellAlignment::Right),
+                Cell::new(r.site_label).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.6}", r.mjd_tt)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.6}", r.jd_tt.unwrap_or_default()))
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(r.ra_str.clone()).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.7}", r.ra_rad)).set_alignment(CellAlignment::Right),
+                Cell::new(r.dec_str.clone()).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.7}", r.dec_rad)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.*}", dp, r.r_geo.unwrap_or_default()))
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.*}", dp, r.r_hel.unwrap_or_default()))
+                    .set_alignment(CellAlignment::Right),
+            ]));
+        }
+
+        table.to_string()
+    }
+
+    /// Render the ISO table using comfy-table.
+    fn render_iso_comfy(&self) -> String {
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic);
+
+        // Header
+        table.set_header(vec![
+            Cell::new("#"),
+            Cell::new("Site"),
+            Cell::new("ISO (TT)"),
+            Cell::new("ISO (UTC)"),
+            Cell::new("RA ±σ[arcsec]"),
+            Cell::new("DEC ±σ[arcsec]"),
+        ]);
+
+        // Rows
+        for (i, o) in self.row_iter() {
+            let r = self.format_row_fields(i, o);
+            table.add_row(Row::from(vec![
+                Cell::new(r.i).set_alignment(CellAlignment::Right),
+                Cell::new(r.site_label).set_alignment(CellAlignment::Right),
+                Cell::new(r.iso_tt.as_deref().unwrap_or("")).set_alignment(CellAlignment::Right),
+                Cell::new(r.iso_utc.as_deref().unwrap_or("")).set_alignment(CellAlignment::Right),
+                Cell::new(r.ra_str.clone()).set_alignment(CellAlignment::Right),
+                Cell::new(r.dec_str.clone()).set_alignment(CellAlignment::Right),
+            ]));
+        }
+
+        table.to_string()
     }
 
     /// Write a single table row using pre-computed [`RowFields`].
@@ -417,7 +569,7 @@ impl<'a> ObservationsDisplay<'a> {
                     f,
                     "{i:>3}  {site:>5}  {mjd:>14.6}  {ra:>20}  {dec:>20}",
                     i = r.i,
-                    site = r.site,
+                    site = r.site_label,
                     mjd = r.mjd_tt,
                     ra = r.ra_str,
                     dec = r.dec_str
@@ -429,7 +581,7 @@ impl<'a> ObservationsDisplay<'a> {
                     f,
                     "{i:>3}  {site:>5}  {mjd:>14.6}  {jd:>14.6}  {ra:>20}  {ra_rad:>11.7}  {dec:>20}  {dec_rad:>11.7}  {rgeo:>12.dp$}  {rhel:>12.dp$}",
                     i = r.i,
-                    site = r.site,
+                    site = r.site_label,
                     mjd = r.mjd_tt,
                     jd = r.jd_tt.unwrap_or_default(),
                     ra = r.ra_str,
@@ -446,7 +598,7 @@ impl<'a> ObservationsDisplay<'a> {
                     f,
                     "{i:>3}  {site:>5}  {iso_tt:>26}  {iso_utc:>26}  {ra:>20}  {dec:>20}",
                     i = r.i,
-                    site = r.site,
+                    site = r.site_label,
                     iso_tt = r.iso_tt.as_deref().unwrap_or(""),
                     iso_utc = r.iso_utc.as_deref().unwrap_or(""),
                     ra = r.ra_str,
@@ -536,12 +688,225 @@ impl fmt::Display for ObservationsDisplay<'_> {
         let n = self.obs.len();
         writeln!(f, "Observations (n={n})")?;
         writeln!(f, "-------------------")?;
-        self.write_header(f)?;
 
-        for (i, o) in self.row_iter() {
-            let row = self.format_row_fields(i, o);
-            self.write_row(f, &row)?;
+        match self.mode {
+            TableMode::Wide => {
+                // comfy-table rendering
+                let out = self.render_wide_comfy();
+                f.write_str(&out)?;
+            }
+            TableMode::Iso => {
+                // comfy-table rendering
+                let out = self.render_iso_comfy();
+                f.write_str(&out)?;
+            }
+            TableMode::Default => {
+                // Legacy compact mode: keep your existing fixed-width rendering
+                self.write_header(f)?;
+                for (i, o) in self.row_iter() {
+                    let row = self.format_row_fields(i, o);
+                    self.write_row(f, &row)?;
+                }
+            }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod observation_display_tests {
+    use super::*;
+    use crate::observations::display::ObservationsDisplayExt;
+    use crate::Observations;
+    use nalgebra::Vector3;
+
+    /// Build a minimal Observation for tests.
+    /// Angles are provided in degrees; uncertainties in arcseconds; time is MJD (TT).
+    fn make_obs(
+        site: u16,
+        ra_deg: f64,
+        dec_deg: f64,
+        err_arcsec: f64,
+        mjd_tt: f64,
+        rgeo: (f64, f64, f64),
+        rhel: (f64, f64, f64),
+    ) -> Observation {
+        // Convert helpers
+        let ra_rad = ra_deg.to_radians();
+        let dec_rad = dec_deg.to_radians();
+        let err_rad = (err_arcsec / 3600.0).to_radians();
+
+        Observation {
+            observer: site,
+            ra: ra_rad,         // Radian from f64
+            error_ra: err_rad,  // Radian from f64
+            dec: dec_rad,       // Radian from f64
+            error_dec: err_rad, // Radian from f64
+            time: mjd_tt,       // MJD from f64
+            observer_earth_position: Vector3::new(rgeo.0, rgeo.1, rgeo.2),
+            observer_helio_position: Vector3::new(rhel.0, rhel.1, rhel.2),
+        }
+    }
+
+    /// Build a small, heterogeneous set of observations for table tests.
+    fn sample_observations() -> Observations {
+        let mut obs: Observations = Observations::default();
+        // idx = 0 (later than #1), zero vectors to simplify wide-mode distance checks
+        obs.push(make_obs(
+            809,
+            0.0,
+            0.0,
+            1.0,
+            60000.123456,
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+        ));
+        // idx = 1 (earliest), negative DEC to verify sign & DMS formatting
+        obs.push(make_obs(
+            2,
+            0.0,
+            -10.0,
+            0.5,
+            59000.0,
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0),
+        ));
+        // idx = 2 (latest), non-zero vectors to exercise wide-mode distances (1 and 2 AU)
+        obs.push(make_obs(
+            500,
+            180.0,
+            20.0,
+            1.2,
+            60001.0,
+            (1.0, 0.0, 0.0),
+            (0.0, 2.0, 0.0),
+        ));
+        obs
+    }
+
+    #[test]
+    fn default_headers_and_basic_format() {
+        let obs = sample_observations();
+        let s = format!("{}", obs.show()); // Default, unsorted
+
+        // Headers present
+        assert!(s.contains("MJD (TT)"));
+        assert!(s.contains("RA ±σ[arcsec]"));
+        assert!(s.contains("DEC ±σ[arcsec]"));
+
+        // RA/DEC sexagesimal + uncertainties for idx 0 (RA=0h, DEC=+0°)
+        // Cells do not include 'RA=' / 'DEC=' prefixes in the table.
+        assert!(s.contains("00h00m00.000s ± 1.000\""));
+        assert!(s.contains("+00°00'00.000\" ± 1.000\""));
+    }
+
+    #[test]
+    fn dec_negative_sign_is_preserved_in_table() {
+        let obs = sample_observations();
+        let s = format!("{}", obs.show()); // Default, unsorted
+                                           // idx 1 has DEC = -10° (no 'DEC=' prefix in table cells)
+        assert!(
+            s.contains("-10°00'00.000\""),
+            "Negative DEC sign or DMS formatting incorrect: {s}"
+        );
+        // And its sigma is 0.500"
+        assert!(s.contains("± 0.500\""));
+    }
+
+    #[test]
+    fn sorted_orders_by_time_and_keeps_original_index() {
+        let obs = sample_observations();
+        let s = format!("{}", obs.show().sorted());
+
+        // Split lines: title, underline, header, then data rows...
+        let mut lines = s.lines();
+        let _title = lines.next().unwrap_or_default();
+        let _rule = lines.next().unwrap_or_default();
+        let _hdr = lines.next().unwrap_or_default();
+
+        // First data row should correspond to the earliest epoch (idx = 1)
+        let first_row = lines.next().unwrap_or_default();
+        assert!(
+            first_row.trim_start().starts_with("1"),
+            "Expected first printed row to be original index 1, got: {first_row}"
+        );
+        // A later row should include index 0 (natural order changed by sort)
+        let rest = lines.collect::<Vec<_>>().join("\n");
+        assert!(
+            rest.contains("\n  0") || rest.starts_with("  0"),
+            "Index 0 should also appear."
+        );
+    }
+
+    #[test]
+    fn wide_mode_headers_and_radians_and_distances() {
+        let obs = sample_observations();
+        let s = format!("{}", obs.table_wide()); // Wide, unsorted
+
+        // Headers present
+        assert!(s.contains("JD (TT)"));
+        assert!(s.contains("RA [rad]"));
+        assert!(s.contains("DEC [rad]"));
+        assert!(s.contains("|r_geo| AU"));
+        assert!(s.contains("|r_hel| AU"));
+
+        // idx 1 has DEC = -10° => about -0.1745329 rad (7 decimals printed)
+        assert!(
+            s.contains("-0.1745329"),
+            "Expected DEC in radians around -0.1745329 rad in wide mode: {s}"
+        );
+
+        // idx 0 vectors are zeros => distances should include 0.000000
+        assert!(
+            s.contains("  0.000000"),
+            "Expected at least one zero distance in wide mode for idx 0: {s}"
+        );
+
+        // idx 2 vectors norms are 1 AU and 2 AU
+        assert!(
+            s.contains("  1.000000") && s.contains("  2.000000"),
+            "Expected distances 1.000000 and 2.000000 AU for idx 2: {s}"
+        );
+    }
+
+    #[test]
+    fn iso_mode_headers_and_suffixes() {
+        let obs = sample_observations();
+        let s = format!("{}", obs.table_iso()); // ISO, unsorted
+
+        // Headers present
+        assert!(s.contains("ISO (TT)"));
+        assert!(s.contains("ISO (UTC)"));
+
+        // Body should contain ' TT' and 'Z' suffixes (at least once)
+        assert!(s.contains(" TT"), "TT suffix missing in ISO TT column: {s}");
+        assert!(s.contains('Z'), "Z suffix missing in ISO UTC column: {s}");
+    }
+
+    #[test]
+    fn seconds_and_distance_precision_knobs() {
+        let obs = sample_observations();
+
+        // Seconds precision = 4: "00.0000" for RA seconds at 0h (no 'RA=' prefix in table cells)
+        let s_iso = format!("{}", obs.table_iso().with_seconds_precision(4));
+        assert!(
+            s_iso.contains("00h00m00.0000s"),
+            "Seconds precision not applied: {s_iso}"
+        );
+
+        // Distance precision = 4: look for "  0.0000" in wide mode (idx 0 has zero vectors)
+        let s_wide = format!("{}", obs.table_wide().with_distance_precision(4));
+        assert!(
+            s_wide.contains("  0.0000"),
+            "Distance precision not applied (expected 4 decimals): {s_wide}"
+        );
+    }
+
+    #[test]
+    fn show_string_matches_display_default() {
+        let obs = sample_observations();
+        let s1 = obs.show_string();
+        let s2 = format!("{}", obs.show());
+        assert_eq!(s1, s2, "show_string() must match Display in default mode");
     }
 }
