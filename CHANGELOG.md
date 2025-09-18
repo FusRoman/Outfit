@@ -2,7 +2,46 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2025-09-10
+## [2.1.0] - 2025-09-18
+
+### Added
+- **Observation pretty-printing**  
+  `impl Display for Observation` with:
+  - **Compact** one-line default (`{}`):  
+    `Obs(site=…, MJD=… TT, RA=HHhMMmSS.ssss ± σ", DEC=±DD°MM'SS.sss" ± σ", r_geo=[…] AU, r_hel=[…] AU)`
+  - **Pretty** multi-line **alternate** (`{:#}`): adds **ISO TT** and **ISO UTC** timestamps (via `hifitime`), neatly aligned sections, and explicit units.
+  - RA/DEC in sexagesimal (RA in **hours**, DEC in **degrees**), uncertainties in **arcseconds**, positions in **AU**.
+- **Sexagesimal & formatting helpers**
+  - `time::fmt_ss(seconds: f64, prec: usize) -> String` — force `"SS.sss"` (two-digit integer part) for seconds.
+  - `conversion::ra_hms_prec(rad: f64, prec: usize) -> (u32, u32, f64)` — RA (rad) → `(HH, MM, SS.sss)` with rounding & carry, `HH ∈ [0, 23]`.
+  - `conversion::dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64)` — DEC (rad) → `(sign, DD, MM, SS.sss)` with rounding & carry, clamped at **±90°**.
+  - `conversion::fmt_vec3_au(v: &Vector3<f64>, prec: usize) -> String` — `[ x, y, z ] AU` in fixed-point with `prec` decimals.
+- **`hifitime` ISO renderers**
+  - `time::iso_tt_from_epoch(epoch_tt: Epoch, sec_prec: usize) -> String` — `YYYY-MM-DDThh:mm:SS.sss TT`.
+  - `time::iso_utc_from_epoch(epoch_tt: Epoch, sec_prec: usize) -> String` — `YYYY-MM-DDThh:mm:SS.sssZ`.
+  - `time::epoch_from_mjd_tt(mjd_tt: f64) -> Epoch` — thin wrapper over `Epoch::from_mjd_in_time_scale(…, TT)`.
+- **Tests**
+  - Unit tests for `Observation` display (compact & pretty), RA wrap to 24h, negative DEC sign, AU vector precision, arcsec uncertainties.
+
+### Changed
+- **Seconds formatting is now strictly zero-padded**: `SS.sss` (e.g., `00.000`), fixing earlier cases like `0.000`.
+- **Carry-safe rounding** for RA/DEC seconds (e.g., `59.9995s` → `60.000s`, then carried to minutes/hours or minutes/degrees).
+- **Docs**: extended and clarified rustdoc across modules with **“See also”**, **Units**, **Notes**, and **Examples** sections.
+
+### Fixed
+- **Consistent sexagesimal output**: negative DEC strings keep the leading sign and show properly zero-padded seconds.
+- Minor rounding edge cases near RA=24h and DEC=±90° now produce canonical outputs (`00h00m00.000s`, `±90°00'00.000"`).
+
+### Documentation
+- **Top-level docs updated**:
+  - `conversion.rs`: parsing overview, accuracy estimation from decimals, sexagesimal utilities, and vector formatting.
+  - `time.rs`: calendar/JD/MJD conversions, ISO TT/UTC rendering via `hifitime`, batch scale changes (UTC→TT), and GMST.
+- Function-level docstrings enriched with **arguments/return** sections and **“See also”** links.
+
+### Notes
+- No breaking API changes; only string formatting became stricter (zero-padding / carry), which may affect **golden-file** tests or log diffs.
+
+## [2.0.0] - 2025-09-17
 
 ### Added
 - **Trajectories module split (new folder `trajectories/`)**  

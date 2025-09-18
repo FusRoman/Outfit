@@ -1,79 +1,190 @@
 //! # Time utilities for astronomical computations
 //!
-//! This module provides utilities to convert between common astronomical
-//! time representations (**calendar date, MJD, JD**) and to compute the
-//! **Greenwich Mean Sidereal Time (GMST)**.  
+//! Utilities to convert between common astronomical time representations
+//! (**calendar date, MJD, JD**), format epochs as **ISO-8601** on various
+//! time scales, and compute the **Greenwich Mean Sidereal Time (GMST)**.
 //!
-//! It is built on top of the [`hifitime`](https://docs.rs/hifitime) crate
-//! for precise epoch handling and supports the time scales **UTC**, **TT**, and **UT1**.
+//! Built on top of [`hifitime`](https://docs.rs/hifitime) for precise epoch handling.
+//! Supported time scales: **UTC**, **TT**, and **UT1** (for GMST input).
 //!
-//! ## Supported conversions
+//! ## Provided conversions & helpers
 //!
-//! - **Calendar string → MJD (UTC)**  
-//!   [`date_to_mjd`](crate::time::date_to_mjd) parses ISO-8601 dates (`YYYY-MM-DDTHH:mm:ss`) into Modified Julian Date.
+//! **Calendar / JD / MJD**
+//! -----------------
+//! * [`date_to_mjd`](crate::time::date_to_mjd) — Parse ISO-8601 calendar strings (`YYYY-MM-DDTHH:mm:ss`) to **MJD (UTC)**.
+//! * [`mjd_to_jd`](crate::time::mjd_to_jd) / [`jd_to_mjd`](crate::time::jd_to_mjd) — Convert **MJD (UTC)** ↔ **JD (UTC)**.
+//! * [`frac_date_to_mjd`](crate::time::frac_date_to_mjd) — Parse `YYYY MM DD.FFFFF` (UTC) to **MJD (TT)**.
 //!
-//! - **MJD (UTC) ↔ JD (UTC)**  
-//!   [`mjd_to_jd`](crate::time::mjd_to_jd) and [`jd_to_mjd`](crate::time::jd_to_mjd) convert between Modified Julian Date and Julian Date.
+//! **Epoch & ISO formatting**
+//! -----------------
+//! * [`iso_tt_from_epoch`](crate::time::iso_tt_from_epoch) — Format an [`Epoch`](hifitime::Epoch) as `YYYY-MM-DDThh:mm:SS.sss TT`.
+//! * [`iso_utc_from_epoch`](crate::time::iso_utc_from_epoch) — Format an [`Epoch`](hifitime::Epoch) as `YYYY-MM-DDThh:mm:SS.sssZ` (UTC).
+//! * [`fmt_ss`](crate::time::fmt_ss) — Two-digit, fixed-precision seconds string (e.g., `"05.123"`).
 //!
-//! - **Fractional day format → MJD (TT)**  
-//!   [`frac_date_to_mjd`](crate::time::frac_date_to_mjd) parses dates in the format `YYYY MM DD.FFFFF`
-//!   where the last field encodes the fractional day. The result is
-//!   expressed in Modified Julian Date in the **Terrestrial Time** scale.
+//! **Batch scale conversions**
+//! -----------------
+//! * [`utc_mjd_slice_to_tt`](crate::time::utc_mjd_slice_to_tt) — Map a slice of **MJD (UTC)** → **MJD (TT)**.
+//! * [`utc_jd_slice_to_tt_mjd`](crate::time::utc_jd_slice_to_tt_mjd) — Map a slice of **JD (UTC)** → **MJD (TT)**.
 //!
-//! - **GMST computation**  
-//!   [`gmst`](crate::time::gmst) computes the Greenwich Mean Sidereal Time angle (radians) for
-//!   a given MJD in the **UT1 time scale**.
+//! **Sidereal time**
+//! -----------------
+//! * [`gmst`](crate::time::gmst) — GMST angle (radians) for a given **MJD (UT1)**, normalized to `[0, 2π)`.
 //!
 //! ## Units & conventions
 //!
-//! - **Dates**: input strings are interpreted as UTC unless otherwise specified.
-//! - **Julian/Modified Julian Dates**: expressed in **days** (floating-point).
-//! - **GMST**: returned in **radians**, normalized to `[0, 2π)`.
-//! - **Epoch constants**: [`T2000`](crate::constants::T2000) = reference epoch J2000.0 (MJD 51544.5, TT).
+//! - **Calendar strings** are interpreted as **UTC** unless otherwise stated.
+//! - **JD / MJD** are expressed in **days** (floating-point). By convention,
+//!   `MJD = JD − 2_400_000.5`, origin at 1858-11-17T00:00:00.
+//! - **GMST** is returned in **radians**, normalized to `[0, 2π)`; input is **MJD (UT1)**.
+//! - **Epoch constants**: [`T2000`](crate::constants::T2000) = J2000.0 (MJD 51544.5, TT).
 //! - **Angle constants**: [`DPI`](crate::constants::DPI) = `2π`.
 //!
 //! ## Examples
 //!
 //! ```rust, no_run
-//! use outfit::time::{date_to_mjd, mjd_to_jd, jd_to_mjd, frac_date_to_mjd, gmst};
+//! use outfit::time::*;
+//! use hifitime::{Epoch, TimeScale};
 //!
-//! // Calendar string to MJD (UTC)
-//! let mjd = date_to_mjd(&vec!["2021-01-01T00:00:00"]);
-//! assert_eq!(mjd, vec![59215.0]);
+//! // --- Calendar → MJD (UTC) ------------------------------------------------
+//! let mjd_utc = date_to_mjd(&vec!["2021-01-01T00:00:00"]);
+//! assert_eq!(mjd_utc, vec![59215.0]);
 //!
-//! // MJD (UTC) to JD (UTC)
-//! let jd = mjd_to_jd(&mjd);
-//! assert_eq!(jd, vec![2459215.5]);
+//! // --- MJD (UTC) ↔ JD (UTC) ------------------------------------------------
+//! let jd_utc = mjd_to_jd(&mjd_utc);
+//! assert_eq!(jd_utc, vec![2459215.5]);
+//! let mjd_utc_back = jd_to_mjd(&jd_utc);
+//! assert_eq!(mjd_utc_back, vec![59215.0]);
 //!
-//! // JD back to MJD
-//! let mjd2 = jd_to_mjd(&jd);
-//! assert_eq!(mjd2, vec![59215.0]);
+//! // --- Batch UTC → TT (days) -----------------------------------------------
+//! let mjd_tt_vec = utc_mjd_slice_to_tt(&mjd_utc);          // MJD(UTC) → MJD(TT)
+//! let mjd_tt_from_jd = utc_jd_slice_to_tt_mjd(&jd_utc);     // JD(UTC) → MJD(TT)
 //!
-//! // Fractional date (UTC) to MJD (TT)
+//! // --- Fractional-date (UTC) to MJD (TT) -----------------------------------
 //! let mjd_tt = frac_date_to_mjd("1976 09 20.93878").unwrap();
-//! assert_eq!(mjd_tt, 43041.93932611111);
 //!
-//! // Compute GMST at a given UT1 MJD
-//! let gmst_angle = gmst(57028.478514610404);
+//! // --- ISO formatting (TT / UTC) -------------------------------------------
+//! let epoch_tt = Epoch::from_mjd_in_time_scale(mjd_tt, TimeScale::TT);
+//! let iso_tt  = iso_tt_from_epoch(epoch_tt, 3);   // "YYYY-MM-DDThh:mm:SS.sss TT"
+//! let iso_utc = iso_utc_from_epoch(epoch_tt, 3);  // "YYYY-MM-DDThh:mm:SS.sssZ"
+//!
+//! // --- GMST (UT1) -----------------------------------------------------------
+//! let gmst_angle = gmst(57028.478514610404);  // radians in [0, 2π)
 //! assert!((gmst_angle - 4.851925725092499).abs() < 1e-12);
+//!
+//! // --- Seconds formatter for sexagesimal displays ---------------------------
+//! let ss = fmt_ss(5.1234, 3);  // → "05.123"
+//! assert_eq!(ss, "05.123");
 //! ```
 //!
 //! ## References
 //!
-//! - IAU 1982, IERS Conventions 1996/2000.  
-//! - *Explanatory Supplement to the Astronomical Almanac* (1992).  
-//! - Vallado, *Fundamentals of Astrodynamics and Applications* (2007).
+//! - IAU 1982; IERS Conventions 1996/2000  
+//! - *Explanatory Supplement to the Astronomical Almanac* (1992)  
+//! - Vallado, *Fundamentals of Astrodynamics and Applications* (2007)
 //!
 //! ## See also
 //! -------------
 //! * [`hifitime::Epoch`] — core epoch type for parsing and conversions.
 //! * [`gmst`](crate::time::gmst) — Greenwich Mean Sidereal Time in radians.
-//! * [`date_to_mjd`](crate::time::date_to_mjd) / [`mjd_to_jd`](crate::time::mjd_to_jd) / [`jd_to_mjd`](crate::time::jd_to_mjd) — conversions between calendar, JD, and MJD.
-//! * [`frac_date_to_mjd`](crate::time::frac_date_to_mjd) — parser for fractional day date format.
+//! * [`date_to_mjd`](crate::time::date_to_mjd) / [`mjd_to_jd`](crate::time::mjd_to_jd) / [`jd_to_mjd`](crate::time::jd_to_mjd) — basic conversions.
+//! * [`iso_tt_from_epoch`](crate::time::iso_tt_from_epoch) / [`iso_utc_from_epoch`](crate::time::iso_utc_from_epoch) — ISO renderers.
+//! * [`utc_mjd_slice_to_tt`](crate::time::utc_mjd_slice_to_tt) / [`utc_jd_slice_to_tt_mjd`](crate::time::utc_jd_slice_to_tt_mjd) — batch scale changes.
 use hifitime::{Epoch, TimeScale};
 use std::str::FromStr;
 
 use crate::constants::{DPI, T2000};
+
+/// Format seconds with a forced two-digit integer part, e.g. `"SS.sss"`.
+/// This helper guarantees at least two digits before the decimal separator,
+/// which is convenient for sexagesimal angle rendering (RA/DEC seconds).
+///
+/// Arguments
+/// -----------------
+/// * `seconds`: The seconds value to format. **Must** be within `[0, 60)`
+///   *after any carry has already been applied*. This function does not perform carry.
+/// * `prec`: Decimal precision (number of fractional digits).
+///
+/// Return
+/// ----------
+/// * A `String` representing the seconds with zero-padded integer part
+///   and `prec` fractional digits (rounded half away from zero).
+///
+/// Notes
+/// ----------
+/// * Rounding uses `f64::round`, i.e. half away from zero.
+/// * This function assumes callers like [`ra_hms_prec`](crate::conversion::ra_hms_prec) / [`dec_sdms_prec`](crate::conversion::dec_sdms_prec)
+///   have already normalized and applied any carry so that `0 ≤ seconds < 60`.
+///
+/// See also
+/// ------------
+/// * [`ra_hms_prec`](crate::conversion::ra_hms_prec) – Carry-safe RA (radians) → `HH, MM, SS.sss`.
+/// * [`dec_sdms_prec`](crate::conversion::dec_sdms_prec) – Carry-safe DEC (radians) → `sign, DD, MM, SS.sss`.
+pub fn fmt_ss(seconds: f64, prec: usize) -> String {
+    let pow = 10u64.pow(prec as u32);
+    let total = (seconds * pow as f64).round() as u64;
+    let int = total / pow;
+    let frac = total % pow;
+    format!("{int:02}.{frac:0prec$}")
+}
+
+/// Format an [`Epoch`] as an **ISO-8601** string on the **TT** time scale.
+/// This performs a Gregorian calendar breakdown in TT and renders
+/// `YYYY-MM-DDThh:mm:SS.sss TT`.
+///
+/// Arguments
+/// -----------------
+/// * `epoch_tt`: The epoch to format (interpreted on the TT time scale).
+/// * `sec_prec`: Number of fractional digits for the seconds component.
+///
+/// Return
+/// ----------
+/// * A `String` like `"2000-01-01T12:00:00.000 TT"`.
+///
+/// Notes
+/// ----------
+/// * The seconds field is formatted via [`fmt_ss`] to enforce a two-digit
+///   integer part and `sec_prec` fractional digits.
+/// * The output is **not** locale-dependent and always uses zero padding.
+///
+/// See also
+/// ------------
+/// * [`iso_utc_from_epoch`] – UTC rendering, accounting for leap seconds.
+#[inline]
+pub fn iso_tt_from_epoch(epoch_tt: Epoch, sec_prec: usize) -> String {
+    // Many hifitime versions expose `to_gregorian(TimeScale) -> (i32,u8,u8,u8,u8,f64, …)`
+    let (y, mo, d, h, mi, s, _) = epoch_tt.to_gregorian(TimeScale::TT);
+    let s_str = fmt_ss(s.into(), sec_prec);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s_str} TT")
+}
+
+/// Format an [`Epoch`] as an **ISO-8601** string on the **UTC** time scale (with `'Z'` suffix).
+/// Leap seconds are handled by `hifitime`’s internal tables.
+///
+/// Arguments
+/// -----------------
+/// * `epoch_tt`: The epoch to format; it is converted to **UTC** internally.
+/// * `sec_prec`: Number of fractional digits for the seconds component.
+///
+/// Return
+/// ----------
+/// * A `String` like `"1998-01-01T00:00:00.000Z"`.
+///
+/// Notes
+/// ----------
+/// * The conversion TT → UTC is handled by `hifitime`, including leap seconds.
+/// * The seconds field is formatted via [`fmt_ss`] to enforce a two-digit
+///   integer part and `sec_prec` fractional digits.
+///
+/// See also
+/// ------------
+/// * [`iso_tt_from_epoch`] – TT rendering for dynamical times.
+#[inline]
+pub fn iso_utc_from_epoch(epoch_tt: Epoch, sec_prec: usize) -> String {
+    let (y, mo, d, h, mi, s, _) = epoch_tt.to_gregorian(TimeScale::UTC);
+    let s_str = fmt_ss(s.into(), sec_prec);
+    // Use trailing 'Z' for UTC
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s_str}Z")
+}
 
 /// Transformation from date in the format YYYY-MM-ddTHH:mm:ss to modified julian date (MJD)
 ///

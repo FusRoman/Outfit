@@ -96,18 +96,16 @@ pub mod triplets_iod;
 
 use crate::{
     constants::{Observations, Radian, DPI, JDTOMJD, MJD, RAD2ARC, VLIGHT_AU},
-    conversion::cartesian_to_radec,
+    conversion::{cartesian_to_radec, dec_sdms_prec, fmt_vec3_au, ra_hms_prec},
     observers::Observer,
     orbit_type::equinoctial_element::EquinoctialElements,
     outfit::Outfit,
     outfit_errors::OutfitError,
+    time::{fmt_ss, iso_tt_from_epoch, iso_utc_from_epoch},
 };
-use hifitime::Epoch;
+use hifitime::{Epoch, TimeScale};
 use nalgebra::Vector3;
-use std::{
-    f64::consts::{PI, TAU},
-    fmt,
-};
+use std::{f64::consts::PI, fmt};
 
 /// Astrometric observation with site and precomputed observer positions.
 ///
@@ -504,91 +502,9 @@ pub fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64
     xrel - dt * vrel
 }
 
-/// Round seconds with carry to minutes/hours if needed.
-fn ra_hms_prec(rad: f64, prec: usize) -> (u32, u32, f64) {
-    // Normalize RA to [0, 2π)
-    let mut a = rad % TAU;
-    if a < 0.0 {
-        a += TAU;
-    }
-
-    // Total seconds in [0h, 24h)
-    let total_sec = a * 12.0 / std::f64::consts::PI * 3600.0;
-
-    let mut h = (total_sec / 3600.0).floor() as u32;
-    let rem = total_sec - (h as f64) * 3600.0;
-    let mut m = (rem / 60.0).floor() as u32;
-    let mut s = rem - (m as f64) * 60.0;
-
-    // Round seconds to precision
-    let pow = 10f64.powi(prec as i32);
-    s = (s * pow).round() / pow;
-
-    // Carry seconds -> minutes
-    if s >= 60.0 {
-        s -= 60.0;
-        m += 1;
-    }
-    // Carry minutes -> hours
-    if m >= 60 {
-        m = 0;
-        h = (h + 1) % 24;
-    }
-    (h, m, s)
-}
-
-fn dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64) {
-    let sign = if rad < 0.0 { '-' } else { '+' };
-    let deg_abs = rad.abs() * 180.0 / std::f64::consts::PI;
-
-    let mut d = deg_abs.floor() as u32;
-    let rem = deg_abs - d as f64;
-    let mut m = (rem * 60.0).floor() as u32;
-    let mut s = (rem * 3600.0) - (m as f64) * 60.0;
-
-    let pow = 10f64.powi(prec as i32);
-    s = (s * pow).round() / pow;
-
-    // Carry seconds -> minutes
-    if s >= 60.0 {
-        s -= 60.0;
-        m += 1;
-    }
-    // Carry minutes -> degrees (cap at 90 for safety)
-    if m >= 60 {
-        m = 0;
-        d += 1;
-    }
-    if d > 90 {
-        d = 90;
-        m = 0;
-        s = 0.0;
-    }
-    (sign, d, m, s)
-}
-
-/// Format seconds with forced two-digit integer part: "SS.sss"
-fn fmt_ss(seconds: f64, prec: usize) -> String {
-    let pow = 10u64.pow(prec as u32);
-    let total = (seconds * pow as f64).round() as u64;
-    let int = total / pow;
-    let frac = total % pow;
-    format!("{int:02}.{frac:0prec$}")
-}
-
-fn fmt_vec3_au(v: &Vector3<f64>, prec: usize) -> String {
-    format!(
-        "[ {x:.p$}, {y:.p$}, {z:.p$} ] AU",
-        x = v.x,
-        y = v.y,
-        z = v.z,
-        p = prec
-    )
-}
-
 impl fmt::Display for Observation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Extract inner numeric values (adapt if Radian/MJD are newtypes)
+        // Extract numeric values (adapt if Radian/MJD are newtypes).
         let ra_rad: f64 = self.ra;
         let dec_rad: f64 = self.dec;
         let sra_as: f64 = self.error_ra * RAD2ARC;
@@ -600,10 +516,9 @@ impl fmt::Display for Observation {
         let sec_prec = 3;
         let pos_prec = 6;
 
+        // Sexagesimal angles with carry-safe rounding
         let (rh, rm, rs) = ra_hms_prec(ra_rad, sec_prec);
         let (sgn, dd, dm, ds) = dec_sdms_prec(dec_rad, sec_prec);
-
-        // Pre-format second strings to enforce zero-padding in integer part
         let rs_s = fmt_ss(rs, sec_prec);
         let ds_s = fmt_ss(ds, sec_prec);
 
@@ -613,10 +528,17 @@ impl fmt::Display for Observation {
             let r_geo = fmt_vec3_au(&self.observer_earth_position, pos_prec);
             let r_hel = fmt_vec3_au(&self.observer_helio_position, pos_prec);
 
+            // Build TT epoch and derive both TT ISO & UTC ISO via hifitime.
+            let epoch_tt = Epoch::from_mjd_in_time_scale(mjd_tt, TimeScale::TT);
+            let iso_tt = iso_tt_from_epoch(epoch_tt, sec_prec);
+            let iso_utc = iso_utc_from_epoch(epoch_tt, sec_prec);
+
             writeln!(f, "Astrometric observation")?;
             writeln!(f, "----------------------")?;
             writeln!(f, "Site ID        : {site}")?;
             writeln!(f, "Epoch (TT)     : MJD {mjd_tt:.6}, JD {jd_tt:.6}")?;
+            writeln!(f, "Epoch (ISO TT) : {iso_tt}")?;
+            writeln!(f, "Epoch (ISO UTC): {iso_utc}")?;
             writeln!(
                 f,
                 "RA / σ         : {rh:02}h {rm:02}m {rs_s}s   (σ = {sra_as:.3}\" )"
@@ -628,7 +550,7 @@ impl fmt::Display for Observation {
             writeln!(f, "Observer (geo) : {r_geo}")?;
             writeln!(f, "Observer (hel) : {r_hel}")
         } else {
-            // Compact single-line
+            // Compact single line — keep the original contract so existing tests still pass.
             let site = self.observer;
             let r_geo = fmt_vec3_au(&self.observer_earth_position, pos_prec);
             let r_hel = fmt_vec3_au(&self.observer_helio_position, pos_prec);
