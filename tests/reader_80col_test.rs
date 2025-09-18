@@ -3,7 +3,7 @@ use outfit::constants::ObjectNumber;
 use outfit::error_models::ErrorModel;
 use outfit::outfit::Outfit;
 use outfit::trajectories::trajectory_file::TrajectoryFile;
-use outfit::TrajectorySet;
+use outfit::{ObservationsDisplayExt, TrajectorySet};
 
 #[test]
 fn test_80col_reader() {
@@ -53,5 +53,15 @@ fn test_80col_reader() {
     assert_eq!(
         obs_k25[19].get_observer(&env_state).name,
         Some("Steward Observatory, Kitt Peak-Spacewatch".to_string())
+    );
+
+    println!(
+        "{}",
+        traj_set
+            .get(&"K25D50B".into())
+            .unwrap()
+            .table_iso()
+            .sorted()
+            .with_env(&env_state)
     );
 }

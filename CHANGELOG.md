@@ -2,7 +2,80 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2025-09-10
+## [2.1.0] - 2025-09-18
+
+### Added
+- **Observations tabular display (`observations::display`)**
+  - New **display adaptor** `ObservationsDisplay` with ergonomic builders:
+    - `observations.show()` – compact, fixed-width table,
+    - `observations.table_wide()` – diagnostic table,
+    - `observations.table_iso()` – timestamp-centric table.
+  - **Sorting:** `.sorted()` prints rows **sorted by epoch** (MJD TT asc.); the `#` column always shows the **original index**.
+  - **Precision knobs:** `.with_seconds_precision(p)` (sexagesimal + ISO seconds) and `.with_distance_precision(p)` (AU columns in wide mode).
+  - **Site labels:** `.with_env(&Outfit)` resolves observer **names**; renders `"Name (#id)"` when available, or falls back to the numeric site id.
+  - **Wide/ISO layouts** now use **`comfy-table`** for neat borders and alignment; compact layout keeps a lightweight fixed-width formatter.
+  - Convenience: `observations.show_string()` returns an owned string in compact mode.
+
+- **Observation pretty-printing**
+  - `impl Display for Observation`:
+    - **Compact** one-liner (`{}`):  
+      `Obs(site=…, MJD=… TT, RA=HHhMMmSS.sss ± σ", DEC=±DD°MM’SS.sss" ± σ", r_geo=[…] AU, r_hel=[…] AU)`
+    - **Pretty** multi-line **alternate** (`{:#}`): adds **ISO TT** and **ISO UTC** timestamps (via `hifitime`), aligned sections, explicit units.
+
+- **Sexagesimal & formatting helpers**
+  - `time::fmt_ss(seconds, prec) -> String` — force `"SS.sss"` with a **two-digit** integer part.
+  - `conversion::ra_hms_prec(rad, prec) -> (u32, u32, f64)` — RA (rad) → `(HH, MM, SS.sss)` with rounding & carry.
+  - `conversion::dec_sdms_prec(rad, prec) -> (char, u32, u32, f64)` — DEC (rad) → `(sign, DD, MM, SS.sss)` with rounding & carry, clamped at **±90°**.
+  - `conversion::fmt_vec3_au(&Vector3, prec) -> String` — `[ x, y, z ] AU` in fixed-point with `prec` decimals.
+
+- **`hifitime` ISO renderers**
+  - `time::iso_tt_from_epoch(epoch_tt, sec_prec) -> String` — `YYYY-MM-DDThh:mm:SS.sss TT`.
+  - `time::iso_utc_from_epoch(epoch_tt, sec_prec) -> String` — `YYYY-MM-DDThh:mm:SS.sssZ`.
+
+- **ObjectNumber conversions (ergonomics)**
+  - `From<u8/u16/u32>`, `From<&u32>`, `From<String>`, `From<&String>`, `From<&str>`, `From<Cow<'_, str>>`,
+  - `TryFrom<i64/i32/i16/i8>` fallible integer conversions.
+  - `Display` renders either the integer or the stored string form.
+
+- **Tests**
+  - Added unit tests for **Observations** display:
+    - default headers & fixed-width formatting,
+    - ISO mode headers and `Z` suffix,
+    - wide mode headers, radians & AU distances,
+    - `sorted()` ordering while preserving original index in `#`,
+    - seconds & distance precision knobs,
+    - negative DEC sign preservation.
+  - Extended tests for `Observation` display (compact & pretty), RA wrap to 24h, DEC sign, AU vector precision, arcsec uncertainties.
+
+### Changed
+- **Wide/ISO rendering** now uses **`comfy-table`** (keeps compact/default mode as fixed-width). This removes manual spacing bugs and improves readability.
+- **Sorting builder API:** `ObservationsDisplay::sorted(true)` ➜ **`ObservationsDisplay::sorted()`**.  
+  *Migration:* replace `.sorted(true)` with `.sorted()`; remove `.sorted(false)` (default is unsorted).
+- **Seconds formatting** is strictly zero-padded: `SS.sss` (e.g., `00.000`).
+- **Carry-safe rounding** for RA/DEC seconds (e.g., `59.9995s` → `60.000s` then carried to min/hr or min/deg).
+- **Docs** across modules expanded with **Units**, **See also**, **Notes**, and runnable **Examples**.
+
+### Fixed
+- **Table alignment**: wide tables had header/data misalignment; `comfy-table` fixes this and ensures right-aligned numerics.
+- **Consistent sexagesimal output**: negative DEC strings keep the leading sign and zero-padded seconds.
+- Edge cases near RA=24h and DEC=±90° now produce canonical outputs (`00h00m00.000s`, `±90°00'00.000"`).
+
+### Documentation
+- **Top-level docs updated**:
+  - `observations::display`: overview, layouts (Default/Wide/ISO), sorting, precision, `with_env`, performance notes, and multiple examples.
+  - `conversion.rs`: parsing overview, accuracy estimation from decimals, sexagesimal utilities, vector formatting.
+  - `time.rs`: calendar/JD/MJD conversions, ISO TT/UTC rendering via `hifitime`, batch scale changes (UTC→TT), and GMST.
+- Function-level docstrings enriched with explicit **Arguments/Returns** and **See also** links.
+
+### Dependencies
+- New runtime dependency: **`comfy-table`** (actively maintained; used for Wide/ISO layouts).
+
+### Notes
+- No behavior-breaking changes in numeric results; **string formatting** is stricter (zero-padding & carry), which may affect golden-file tests and logs.
+
+---
+
+## [2.0.0] - 2025-09-17
 
 ### Added
 - **Trajectories module split (new folder `trajectories/`)**  

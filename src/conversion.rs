@@ -1,61 +1,87 @@
-//! # Parsing and conversion of astronomical coordinates
+//! # Parsing, conversion, and formatting of astronomical coordinates
 //!
-//! This module provides utility functions for:
+//! This module provides robust utilities to:
 //!
-//! - **Parsing textual Right Ascension (RA) and Declination (DEC)** from sexagesimal strings
-//!   (formats like `HH MM SS.SS` or `±DD MM SS.SS`),
-//! - **Estimating the positional accuracy** based on the number of decimals
-//!   provided in the input strings,
-//! - **Converting 3D Cartesian position vectors to equatorial coordinates (RA, DEC)**.
+//! - **Parse** textual Right Ascension (RA) and Declination (DEC) from common sexagesimal strings,
+//! - **Estimate** per-measurement accuracy from the number of decimals in the input,
+//! - **Convert** 3D Cartesian vectors to equatorial angles (RA, DEC),
+//! - **Format** angles and vectors for human-friendly displays (sexagesimal H/M/S and D/M/S, AU vectors).
 //!
 //! ## Overview
 //!
-//! These functions are used to transform raw observational data (often stored
-//! in MPC-style text files) into numerical coordinates that can be consumed
-//! by orbit determination algorithms.
+//! These helpers are typically used when ingesting MPC-style astrometric observations and
+//! converting them into numerical values usable by orbit determination routines.
 //!
 //! ### Provided features
 //!
-//! * [`parse_ra_to_deg`](crate::conversion::parse_ra_to_deg) – Parse a sexagesimal RA string into degrees and accuracy in arcseconds.
-//! * [`parse_dec_to_deg`](crate::conversion::parse_dec_to_deg) – Parse a sexagesimal DEC string into degrees and accuracy in arcseconds.
-//! * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Convert a 3D Cartesian position vector to right ascension and declination (in radians).
+//! **Parsing & accuracy**
+//! -----------------
+//! * [`parse_ra_to_deg`](crate::conversion::parse_ra_to_deg) — Parse a sexagesimal RA string (`"HH MM SS.SS"`) into **degrees** and **accuracy** (arcsec).
+//! * [`parse_dec_to_deg`](crate::conversion::parse_dec_to_deg) — Parse a sexagesimal DEC string (`"±DD MM SS.SS"`) into **degrees** and **accuracy** (arcsec).
+//! * [`arcsec_to_rad`](crate::conversion::arcsec_to_rad) — Convert **arcseconds** to **radians** (utility used by callers).
 //!
-//! ### Accuracy estimation
+//! **Angle & vector formatting**
+//! -----------------
+//! * [`ra_hms_prec`](crate::conversion::ra_hms_prec) — Convert RA (radians) to canonical `(HH, MM, SS.sss)` with rounding and carry, hours wrapped to `[0, 24)`.
+//! * [`dec_sdms_prec`](crate::conversion::dec_sdms_prec) — Convert DEC (radians) to `(sign, DD, MM, SS.sss)` with rounding, carry, and clamping at `±90°`.
+//! * [`fmt_vec3_au`](crate::conversion::fmt_vec3_au) — Format a `nalgebra::Vector3<f64>` as `[ x, y, z ] AU` with fixed decimal precision.
 //!
-//! Both parsing functions compute a **measurement accuracy** in arcseconds
-//! directly from the number of digits present after the decimal point in
-//! the seconds field. This is useful when weighting observations in the
-//! orbit determination process.
+//! **Cartesian → Equatorial**
+//! -----------------
+//! * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) — Convert a 3D Cartesian position vector to `(α, δ, ρ)` where `α, δ` are in **radians**,
+//!   and `ρ` is the input norm (same units as the input vector).
 //!
 //! ### Units
 //!
-//! - RA is returned in **degrees** (0° ≤ RA < 360°).
-//! - DEC is returned in **degrees** (−90° ≤ DEC ≤ +90°).
-//! - Accuracy is returned in **arcseconds**.
-//! - Cartesian inputs for [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) can be in any length unit,
-//!   but the result angles are in **radians** and the norm is returned
-//!   in the same unit as the input.
+//! - **RA** returned by [`parse_ra_to_deg`](crate::conversion::parse_ra_to_deg) is in **degrees** (`0° ≤ RA < 360°`).
+//! - **DEC** returned by [`parse_dec_to_deg`](crate::conversion::parse_dec_to_deg) is in **degrees** (`−90° ≤ DEC ≤ +90°`).
+//! - **Accuracy** estimates are in **arcseconds** (derived from the decimal precision of the input seconds).
+//! - [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) returns angles in **radians** and `ρ` in the **same unit** as the input vector.
+//! - [`ra_hms_prec`](crate::conversion::ra_hms_prec) returns `(HH, MM, SS)` with `HH ∈ [0, 23]`, `MM ∈ [0, 59]`, `SS ∈ [0.0, 60.0)` after carry.
+//! - [`dec_sdms_prec`](crate::conversion::dec_sdms_prec) returns `(sign, DD, MM, SS)` with `sign ∈ {'+','-'}`, `DD ∈ [0, 90]`, `MM ∈ [0, 59]`,
+//!   `SS ∈ [0.0, 60.0)` after carry, and clamps to `90°00′00″` at the pole.
+//! - [`fmt_vec3_au`](crate::conversion::fmt_vec3_au) prints components in **fixed-point** with exactly `prec` decimals, suffixed with `" AU"`.
 //!
-//! ## Example
+//! ### Accuracy estimation
 //!
-//! ```rust,ignore
-//! use outfit::conversion::{parse_ra_to_deg, parse_dec_to_deg, cartesian_to_radec};
+//! Both parsers compute an **accuracy hint** directly from the number of digits after the decimal point
+//! in the *seconds* field. For instance, `"12 34 56.7"` implies `0.1″`, whereas `"12 34 56"` implies `1″`.
+//! This is convenient when deriving per-observation weights for orbit determination.
+//!
+//! ## Examples
+//!
+//! ```rust,no_run
+//! use outfit::conversion::{parse_ra_to_deg, parse_dec_to_deg, cartesian_to_radec,
+//!                          ra_hms_prec, dec_sdms_prec, fmt_vec3_au};
 //! use nalgebra::Vector3;
 //!
-//! // Parse RA and DEC strings
-//! let (ra_deg, ra_acc) = parse_ra_to_deg("10 12 33.44").unwrap();
-//! let (dec_deg, dec_acc) = parse_dec_to_deg("-20 33 10.5").unwrap();
-//! println!("RA = {ra_deg} deg ± {ra_acc} arcsec");
-//! println!("DEC = {dec_deg} deg ± {dec_acc} arcsec");
+//! // --- Parsing with accuracy ------------------------------------------------
+//! let (ra_deg, ra_acc)   = parse_ra_to_deg("10 12 33.44").unwrap();   // deg, arcsec
+//! let (dec_deg, dec_acc) = parse_dec_to_deg("-20 33 10.5").unwrap();  // deg, arcsec
+//! println!("RA = {ra_deg:.6}° ± {ra_acc:.3}\"");
+//! println!("DEC = {dec_deg:.6}° ± {dec_acc:.3}\"");
 //!
-//! // Convert Cartesian vector to RA/DEC (radians)
+//! // --- Cartesian → Equatorial (radians) ------------------------------------
 //! let pos = Vector3::new(1.0, 1.0, 0.5);
 //! let (alpha, delta, rho) = cartesian_to_radec(pos);
-//! println!("α = {alpha} rad, δ = {delta} rad, distance = {rho}");
+//! println!("α = {alpha} rad, δ = {delta} rad, ρ = {rho}");
+//!
+//! // --- Sexagesimal formatting helpers --------------------------------------
+//! let (hh, mm, ss) = ra_hms_prec(alpha, 3);        // RA → (HH, MM, SS.sss)
+//! let (sgn, d, m, s) = dec_sdms_prec(delta, 3);    // DEC → (sign, DD, MM, SS.sss)
+//! println!("RA ≈ {hh:02}h{mm:02}m{ss:.3}s,  DEC ≈ {sgn}{d:02}°{m:02}'{s:.3}\"");
+//!
+//! // --- Vector formatting (AU) ----------------------------------------------
+//! let r_geo = Vector3::new(0.1234567, -1.0, 2.0);
+//! println!("{}", fmt_vec3_au(&r_geo, 6)); // → "[ 0.123457, -1.000000, 2.000000 ] AU"
 //! ```
 //!
-//! These functions are typically called when reading observations from
-//! MPC 80-column formatted files or other astrometric data sources.
+//! ## See also
+//!
+//! - Sexagesimal string rendering of seconds: `fmt_ss` (in the observations display helpers).
+//! - Reference frame conversions and aberration: `ref_system` and `observations` modules.
+//! - MPC/ADES ingestion modules where these utilities are typically used.
+use std::f64::consts::TAU;
 
 use nalgebra::Vector3;
 
@@ -189,6 +215,190 @@ pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
     let dec_deg = sign * (d + m / 60.0 + s / 3600.0);
     let acc_arcsec = compute_accuracy(s_raw, 1. / 3600.)?;
     Some((dec_deg, acc_arcsec))
+}
+
+/// Format a 3D vector (AU) with a configurable fixed decimal precision.
+/// The output is rendered as:
+/// `[ {x:.prec}, {y:.prec}, {z:.prec} ] AU`
+///
+/// Arguments
+/// -----------------
+/// * `v`: The position vector in **astronomical units (AU)**, expressed in the
+///   **equatorial mean J2000** frame if you follow the crate’s convention.
+/// * `prec`: Number of fractional digits for each component (fixed‐point).
+///
+/// Return
+/// ----------
+/// * A `String` like `"[ 0.123457, -1.000000, 0.000042 ] AU"` when `prec = 6`.
+///
+/// Notes
+/// ----------
+/// * Rounding uses Rust’s default `Display` formatting for `f64` (round half
+///   away from zero).
+/// * No thousands separator or scientific notation is used: components are
+///   printed in **fixed‐point** with exactly `prec` decimals.
+/// * The function does **not** sanitize non-finite values: `NaN`, `inf`, and
+///   `-inf` will be forwarded as is.
+/// * Units are **not converted**: call this function only if your vector is
+///   already in AU. For other units (e.g. km), provide a separate formatter.
+///
+/// Examples
+/// ----------
+/// ```rust, ignore
+/// use nalgebra::Vector3;
+///
+/// let v = Vector3::new(0.1234567, -1.0, 2.0);
+/// assert_eq!(fmt_vec3_au(&v, 3), "[ 0.123, -1.000, 2.000 ] AU");
+/// assert_eq!(fmt_vec3_au(&v, 6), "[ 0.123457, -1.000000, 2.000000 ] AU");
+/// ```
+///
+/// See also
+/// ------------
+/// * [`fmt_ss`](crate::time::fmt_ss) – Zero-padded seconds string for sexagesimal outputs.
+/// * [`ra_hms_prec`] – RA (radians) → `(HH, MM, SS.sss)` with carry.
+/// * [`dec_sdms_prec`] – DEC (radians) → `(sign, DD, MM, SS.sss)` with carry.
+pub fn fmt_vec3_au(v: &Vector3<f64>, prec: usize) -> String {
+    let x = v.x;
+    let y = v.y;
+    let z = v.z;
+    let p = prec; // capture for dynamic precision
+    format!("[ {x:.p$}, {y:.p$}, {z:.p$} ] AU")
+}
+
+// --- Angle formatting --------------------------------------------------------
+
+/// Convert a right ascension (radians) to sexagesimal **hours–minutes–seconds**
+/// with rounding and carry handling.
+///
+/// The input angle is normalized to `[0, 2π)` (i.e., modulo one full turn),
+/// then converted to **total seconds** in `[0h, 24h)`. Seconds are rounded to
+/// `prec` fractional digits; potential overflows are carried into minutes, and
+/// minutes into hours (hours wrap modulo 24).
+///
+/// Arguments
+/// -----------------
+/// * `rad`: Right ascension in **radians**. Any finite value is accepted;
+///   negatives and values ≥ 2π are normalized to `[0, 2π)`.
+/// * `prec`: Number of fractional digits for the **seconds** component.
+///
+/// Return
+/// ----------
+/// * A tuple `(HH, MM, SS)` where:
+///   - `HH ∈ [0, 23]`,
+///   - `MM ∈ [0, 59]`,
+///   - `SS ∈ [0.0, 60.0)` after rounding and carry,
+///     guaranteeing canonical sexagesimal components ready for display.
+///
+/// Notes
+/// ----------
+/// * Rounding uses `f64::round` (half away from zero), then carry is applied:
+///   `59.9995s` at `prec = 3` becomes `60.000s → +1 min`.
+/// * Final hours are wrapped modulo 24; e.g. a value very close to `2π` can
+///   round to `24h00m00s` which is reported as `00h00m00s`.
+/// * This function **does not** format strings. For zero-padded seconds like
+///   `"SS.sss"`, combine with [`fmt_ss`](crate::time::fmt_ss).
+///
+/// See also
+/// ------------
+/// * [`fmt_ss`](crate::time::fmt_ss) – Enforce zero-padded second strings (`"SS.sss"`).
+/// * [`dec_sdms_prec`] – Declination to `sign, DD, MM, SS.sss`.
+pub fn ra_hms_prec(rad: f64, prec: usize) -> (u32, u32, f64) {
+    // Normalize RA to [0, 2π)
+    let mut a = rad % TAU;
+    if a < 0.0 {
+        a += TAU;
+    }
+
+    // Total seconds in [0h, 24h)
+    let total_sec = a * 12.0 / std::f64::consts::PI * 3600.0;
+
+    let mut h = (total_sec / 3600.0).floor() as u32;
+    let rem = total_sec - (h as f64) * 3600.0;
+    let mut m = (rem / 60.0).floor() as u32;
+    let mut s = rem - (m as f64) * 60.0;
+
+    // Round seconds to precision
+    let pow = 10f64.powi(prec as i32);
+    s = (s * pow).round() / pow;
+
+    // Carry seconds -> minutes
+    if s >= 60.0 {
+        s -= 60.0;
+        m += 1;
+    }
+    // Carry minutes -> hours
+    if m >= 60 {
+        m = 0;
+        h = (h + 1) % 24;
+    }
+    (h, m, s)
+}
+
+/// Convert a declination (radians) to **signed** sexagesimal
+/// **degrees–minutes–seconds** with rounding, carry, and polar clamping.
+///
+/// The sign is taken from the input (`'+'` for `rad ≥ 0`, `'-'` otherwise).
+/// The absolute value is converted to **total arcseconds**, seconds are rounded
+/// to `prec` fractional digits, and carry is applied seconds→minutes→degrees.
+/// Final values are clamped to the physical pole at **±90°00′00″**.
+///
+/// Arguments
+/// -----------------
+/// * `rad`: Declination in **radians**. Typical physical range is
+///   `[-π/2, +π/2]`, but any finite value is accepted; the absolute value is
+///   used for the `DD/MM/SS` decomposition.
+/// * `prec`: Number of fractional digits for the **seconds** component.
+///
+/// Return
+/// ----------
+/// * A tuple `(sign, DD, MM, SS)` where:
+///   - `sign ∈ {'+', '-'}` reflects the input sign,
+///   - `DD ∈ [0, 90]`, `MM ∈ [0, 59]`,
+///   - `SS ∈ [0.0, 60.0)` after rounding and carry,
+///     with a **final clamp** at the pole: if rounding would exceed `90°`,
+///     the function returns `(sign, 90, 0, 0.0)`.
+///
+/// Notes
+/// ----------
+/// * Rounding uses `f64::round` (half away from zero), then carry is applied:
+///   e.g. `59.9995″` at `prec = 3` becomes `60.000″ → +1′`.
+/// * If carrying minutes produces `60′`, it becomes `+1°`.
+/// * At the upper bound, values that round past `90°` are clamped to
+///   `90°00′00.000″` to maintain a valid declination.
+///
+/// See also
+/// ------------
+/// * [`ra_hms_prec`] – Right ascension to `HH, MM, SS.sss`.
+/// * [`fmt_ss`](crate::time::fmt_ss) – Zero-padded second string formatting for display.
+pub fn dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64) {
+    let sign = if rad < 0.0 { '-' } else { '+' };
+    let deg_abs = rad.abs() * 180.0 / std::f64::consts::PI;
+
+    let mut d = deg_abs.floor() as u32;
+    let rem = deg_abs - d as f64;
+    let mut m = (rem * 60.0).floor() as u32;
+    let mut s = (rem * 3600.0) - (m as f64) * 60.0;
+
+    let pow = 10f64.powi(prec as i32);
+    s = (s * pow).round() / pow;
+
+    // Carry seconds -> minutes
+    if s >= 60.0 {
+        s -= 60.0;
+        m += 1;
+    }
+    // Carry minutes -> degrees
+    if m >= 60 {
+        m = 0;
+        d += 1;
+    }
+    // Safety clamp near the pole
+    if d > 90 {
+        d = 90;
+        m = 0;
+        s = 0.0;
+    }
+    (sign, d, m, s)
 }
 
 /// Convert a 3D Cartesian position vector to right ascension and declination.

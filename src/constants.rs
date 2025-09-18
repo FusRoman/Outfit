@@ -18,7 +18,9 @@
 use crate::observations::Observation;
 use crate::observers::Observer;
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 // -------------------------------------------------------------------------------------------------
@@ -48,6 +50,9 @@ pub const RADEG: f64 = std::f64::consts::PI / 180.0;
 
 /// Arcseconds → radians
 pub const RADSEC: f64 = std::f64::consts::PI / 648000.0;
+
+/// Radians → arcseconds
+pub const RAD2ARC: f64 = 648000.0 / std::f64::consts::PI;
 
 /// Hours → radians
 pub const RADH: f64 = DPI / 24.0;
@@ -123,35 +128,130 @@ impl std::fmt::Display for ObjectNumber {
     }
 }
 
+// --- Infallible conversions (enable `.into()` directly) ----------------------
+
 impl From<u32> for ObjectNumber {
+    #[inline]
     fn from(n: u32) -> Self {
         ObjectNumber::Int(n)
     }
 }
 
+impl From<u16> for ObjectNumber {
+    #[inline]
+    fn from(n: u16) -> Self {
+        ObjectNumber::Int(n as u32)
+    }
+}
+
+impl From<u8> for ObjectNumber {
+    #[inline]
+    fn from(n: u8) -> Self {
+        ObjectNumber::Int(n as u32)
+    }
+}
+
+impl From<&u32> for ObjectNumber {
+    /// Convenience to allow `(&n).into()` without dereferencing at call sites.
+    #[inline]
+    fn from(n: &u32) -> Self {
+        ObjectNumber::Int(*n)
+    }
+}
+
 impl From<String> for ObjectNumber {
+    #[inline]
     fn from(s: String) -> Self {
         ObjectNumber::String(s)
     }
 }
 
+impl From<&String> for ObjectNumber {
+    /// Clones the string to build a `String`-backed identifier.
+    #[inline]
+    fn from(s: &String) -> Self {
+        ObjectNumber::String(s.clone())
+    }
+}
+
 impl From<&str> for ObjectNumber {
+    /// Note: this **does not** parse numeric strings into `Int`. Use `FromStr` if you want
+    /// `"1234"` to become `ObjectNumber::Int(1234)`.
+    #[inline]
     fn from(s: &str) -> Self {
         ObjectNumber::String(s.to_string())
     }
 }
 
+impl<'a> From<Cow<'a, str>> for ObjectNumber {
+    /// Accept both borrowed and owned `Cow<str>`.
+    #[inline]
+    fn from(c: Cow<'a, str>) -> Self {
+        match c {
+            Cow::Borrowed(s) => ObjectNumber::String(s.to_string()),
+            Cow::Owned(s) => ObjectNumber::String(s),
+        }
+    }
+}
+
+// --- Fallible conversions (use `.try_into()` to be overflow-safe) ------------
+
+impl TryFrom<usize> for ObjectNumber {
+    type Error = std::num::TryFromIntError;
+
+    /// Convert a `usize` into `Int(u32)` if it fits.
+    #[inline]
+    fn try_from(n: usize) -> Result<Self, Self::Error> {
+        Ok(ObjectNumber::Int(u32::try_from(n)?))
+    }
+}
+
+impl TryFrom<u64> for ObjectNumber {
+    type Error = std::num::TryFromIntError;
+
+    /// Convert a `u64` into `Int(u32)` if it fits.
+    #[inline]
+    fn try_from(n: u64) -> Result<Self, Self::Error> {
+        Ok(ObjectNumber::Int(u32::try_from(n)?))
+    }
+}
+
+impl TryFrom<i64> for ObjectNumber {
+    type Error = &'static str;
+
+    /// Convert a non-negative `i64` into `Int(u32)` if it fits.
+    #[inline]
+    fn try_from(n: i64) -> Result<Self, Self::Error> {
+        if n < 0 {
+            return Err("negative value is not a valid ObjectNumber::Int");
+        }
+        let n = u64::try_from(n).map_err(|_| "conversion failed")?;
+        let n = u32::try_from(n).map_err(|_| "value exceeds u32 range")?;
+        Ok(ObjectNumber::Int(n))
+    }
+}
+
+// --- Smart parsing from &str via `FromStr` (optional) ------------------------
+
 impl std::str::FromStr for ObjectNumber {
     type Err = std::num::ParseIntError;
 
     /// Try to parse an `ObjectNumber` from a string.
-    /// - Pure digits → `Int(u32)`
-    /// - Otherwise  → `String(String)`
+    ///
+    /// Rules
+    /// -----
+    /// - Pure digits that fit in `u32` → `Int(u32)`.
+    /// - Otherwise                         → `String(String)`.
+    ///
+    /// Note
+    /// ----
+    /// If the string is *only* digits but **does not** fit in `u32`, this returns the
+    /// original `ParseIntError`. If you prefer to always fallback to `String` on
+    /// overflow, we can change the policy (but it’s usually better to fail loudly).
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.parse::<u32>() {
             Ok(n) => Ok(ObjectNumber::Int(n)),
             Err(e) => {
-                // If parse as int failed but it's a legit designation, fallback to String
                 if s.chars().any(|c| !c.is_ascii_digit()) {
                     Ok(ObjectNumber::String(s.to_string()))
                 } else {
