@@ -90,6 +90,7 @@
 //! - [`observers`] — site database, Earth-fixed coordinates, and transformations.
 //! - [`orbit_type::equinoctial_element::EquinoctialElements`] — propagation utilities used here.
 //! - [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) and [`correct_aberration`](crate::observations::correct_aberration) — sky-projection helpers.
+pub mod display;
 pub mod observations_ext;
 pub mod triplets_generator;
 pub mod triplets_iod;

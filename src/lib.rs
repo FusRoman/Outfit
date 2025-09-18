@@ -328,6 +328,7 @@ pub use crate::initial_orbit_determination::gauss_result::GaussResult;
 pub use crate::initial_orbit_determination::IODParams;
 
 // Frequently-used extension traits (ergonomic entry points) and key types
+pub use crate::observations::display::ObservationsDisplayExt;
 pub use crate::observations::observations_ext::ObservationIOD;
 pub use crate::trajectories::trajectory_file::TrajectoryFile;
 pub use crate::trajectories::trajectory_fit::FullOrbitResult;
