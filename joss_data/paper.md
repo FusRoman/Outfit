@@ -8,7 +8,7 @@ tags:
   - ephemerides
 authors:
   - name: Roman Le Montagner
-    orcid: 0000-0002-7390-0919
+    orcid: 0000-0002-6099-8939
     affiliation: "1"
 affiliations:
   - index: 1
@@ -19,7 +19,9 @@ bibliography: paper.bib
 
 # Summary
 
-Outfit is a Rust library for reading astrometric observations and computing preliminary orbits of small bodies using a robust implementation of the Gauss method. It provides high-throughput ingestion of common formats (Minor Planet Center 80-column, ADES XML, and Parquet), explicit observer management (MPC codes, topocentric geometry), and accurate state propagation via JPL planetary ephemerides (e.g., DE440). The library emphasizes speed, memory safety, reproducibility, and modular design: observation parsing and trajectory batching are decoupled from initial orbit determination (IOD) logic, and all public APIs are documented and tested. Outfit re-implements classic OrbFit IOD behavior in a modern, production-grade codebase, suitable for survey-scale pipelines (e.g., LSST/ZTF-like workloads).
+Upcoming wide-field surveys—most notably the Vera C. Rubin Observatory’s LSST—are expected to increase the number of known minor planets by an order of magnitude. Processing these data streams requires software that can parse heterogeneous astrometric formats, manage topocentric geometry, and compute preliminary orbits quickly and reproducibly.
+
+Outfit is a modern Rust library providing fast and memory-safe astrometric ingestion and preliminary orbit determination (POD) based on a re-implementation of the classical Gauss method. It supports high-throughput parsing of MPC 80-column, ADES XML, and Arrow/Parquet formats, explicit observer modelling, and accurate state propagation using JPL ephemerides (DE440 and others). The library emphasizes performance, reproducibility, and modularity, separating observation ingestion, geometry handling, and POD logic. Its design closely mirrors the trusted behavior of OrbFit while offering a fully documented, testable, production-grade API suitable for LSST/ZTF-scale workloads.
 
 # Statement of need
 
@@ -29,7 +31,9 @@ Astrometric pipelines for near-Earth and small-body surveys must ingest heteroge
 - Unified I/O across MPC 80-column [@MPC80col] and ADES XML [@ADES] with a columnar option (Parquet/Arrow [@Arrow; @Parquet]) for large batches.
 - Explicit observer handling with MPC codes and topocentric geometry.
 - Deterministic Gauss IOD with controlled numerical behavior and explicit error types.
-- Clean integration with JPL ephemerides (DE series) [@DE440; @NAIF] for accurate state propagation.
+- Clean integration with JPL ephemerides (DE series) [@DE440; @NAIF] for accurate state propagation
+- Accurate time-scale handling via `hifitime` [@hifitime].
+- Optional parallel computation for Gauss IOD (`--features parallel`) to scale across large batches.
 
 This combination enables reproducible, scalable preliminary orbit determination and downstream evaluation (RMS of normalized residuals) within modern data processing stacks. Outfit is intended for researchers building survey pipelines, teaching orbit determination, or benchmarking algorithmic variants on large datasets.
 
@@ -52,11 +56,13 @@ The crate is organized into modules reflecting responsibilities: `observations` 
 
 ## Quality, documentation, and testing
 
-Outfit includes unit tests and integration tests covering parsing (MPC/ADES/Parquet), observer handling, Gauss IOD numerical behavior, and trajectory batching (see `tests/`). Examples in `examples/` demonstrate end-to-end workflows (e.g., reading Parquet and running Gauss IOD). The repository follows semantic versioning and maintains a comprehensive changelog [@SemVer; @KeepAChangelog]. The crate documentation is published on docs.rs and the README provides installation, quick-start, feature flags, and performance notes.
+Outfit includes unit tests and integration tests covering parsing (MPC/ADES/Parquet), observer handling, Gauss IOD numerical behavior, and trajectory batching (see `tests/`). In addition, we use property‑based testing (via `proptest`) to stress numerical invariants and edge cases over wide parameter ranges, improving robustness beyond hand‑crafted cases. For accuracy, we run regression tests on real observation datasets and compare against OrbFit outputs [@OrbFit]: notably the objects 2015AB, 8467, and 33803 are validated with MPC 80‑column inputs (see `tests/data/` and `orbfit_tests/`).
+
+Software quality is enforced through continuous integration (CI): we run automatic tests on each change, track code coverage, and perform semantic‑versioning checks (e.g., `semver` compatibility) to ensure API stability across releases. Version history is maintained via git with a clear changelog and tagged releases; this structured release process is not available in OrbFit’s upstream distribution. Examples in `examples/` demonstrate end‑to‑end workflows (e.g., reading Parquet and running Gauss IOD). The repository follows semantic versioning and maintains a comprehensive changelog [@SemVer; @KeepAChangelog]. The crate documentation is published on docs.rs and the README provides installation, quick‑start, feature flags (including `parallel`), and performance notes.
 
 ## Performance and reproducibility
 
-Rust enables predictable performance and memory safety. For survey-scale workloads, Outfit offers Parquet ingestion and optional parallel Gauss IOD (`--features parallel`) with adaptive batch sizing. Numeric stability is enforced via explicit acceptability checks and non-finite score detection. Determinism is promoted through clear random seeding paths and ordered iteration for reporting.
+ Rust enables predictable performance and memory safety. For survey-scale workloads, Outfit offers Parquet ingestion and optional parallel Gauss IOD (`--features parallel`) with a configurable batch size set via `IODParams.batch_size`. Numeric stability is enforced via explicit acceptability checks and non-finite score detection. Determinism is promoted through clear random seeding paths and ordered iteration for reporting.
 
 # Demonstration
 
