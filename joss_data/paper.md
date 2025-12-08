@@ -56,17 +56,12 @@ The crate is organized into focused modules with clear responsibilities:
 
 ![Outfit crate architecture overview.\label{fig:architecture}](outfit_architecture.png){ width=80% }
 
-- observations — parsing MPC/ADES/Parquet, data validation, time-scale normalization.
-
-- observers — MPC observatory codes, geodetic conversion, topocentric geometry.
-
-- initial_orbit_determination — Gauss method, Lagrange coefficient iteration, acceptability filters, error reporting.
-
-- trajectories — batching, grouping, and utilities for large candidate sets.
-
-- jpl_ephem — DE ephemeris access (local kernels or automatic download).
-
-- orbit_type — Keplerian, equinoctial, and cometary elements with conversions.
+- observations — parsing MPC/ADES/Parquet, data validation, time-scale normalization. It provides robust parsers for common formats, normalizes times to consistent scales, and validates fields and units to ensure inputs are well-formed before IOD.
+- observers — MPC observatory codes, geodetic conversion, topocentric geometry. This module resolves MPC codes to observer locations, handles Earth models and coordinate conversions, and computes observer-centric vectors used in line-of-sight calculations.
+- initial_orbit_determination — Gauss method, Lagrange coefficient iteration, acceptability filters, error reporting. It implements the Gauss triplet solver, refines f–g (Lagrange) coefficients iteratively, and applies numerical and geometric filters; all failures surface explicit, typed errors.
+- trajectories — batching, grouping, and utilities for large candidate sets. It assembles observation triplets into candidate trajectories, supports adaptive batching for large datasets, and exposes helpers to evaluate and sort solutions.
+- jpl_ephem — DE ephemeris access (local kernels or automatic download). Provides planetary states from JPL DE kernels with caching and optional automated download, ensuring accurate Sun/planet positions for IOD and propagation.
+- orbit_type — Keplerian, equinoctial, and cometary elements with conversions. Offers element representations and conversions between common orbital parameterizations, plus formatting utilities for reporting and downstream analysis.
 
 The public API favors explicit types, immutable inputs where possible, and strongly typed time and angle units. Performance-critical routines rely on nalgebra, while parallelism is opt-in via a crate feature. Columnar ingestion uses Arrow/Parquet to support HPC and distributed workflows.
 
@@ -94,7 +89,7 @@ The crate ships runnable examples demonstrating observation ingestion and Gauss 
 cargo run --release --example parquet_to_orbit --features "jpl-download"
 ```
 
-Illustrative outputs include orbital elements and RMS of normalized residuals, and optional progress reporting (`--features progress`). Examples are documented in the README and serve as minimal, reproducible entry points for reviewers to validate functionality locally as per JOSS guidelines.
+Illustrative outputs include orbital elements and RMS of normalized residuals, and optional progress reporting (`--features progress`). Examples are documented in the README and serve as minimal, reproducible entry points to validate functionality locally.
 
 # Limitation and futur work
 
