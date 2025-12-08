@@ -54,6 +54,8 @@ Outfit provides:
 
 The crate is organized into focused modules with clear responsibilities:
 
+![Outfit crate architecture overview.\label{fig:architecture}](outfit_architecture.png){ width=80% }
+
 - observations — parsing MPC/ADES/Parquet, data validation, time-scale normalization.
 
 - observers — MPC observatory codes, geodetic conversion, topocentric geometry.
