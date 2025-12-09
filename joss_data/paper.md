@@ -12,7 +12,7 @@ authors:
     affiliation: "1"
 affiliations:
   - index: 1
-    name: IJCLab (CNRS/IN2P3), Université Paris-Saclay, France
+    name: Université Paris-Saclay, CNRS/IN2P3, IJCLab, 91405 Orsay, France
 date: 5 December 2025
 bibliography: paper.bib
 ---
