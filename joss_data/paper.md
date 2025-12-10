@@ -19,23 +19,17 @@ bibliography: paper.bib
 
 # Summary
 
-Upcoming wide-field surveys—most notably the Vera C. Rubin Observatory's Legacy Survey of Space and Time (LSST)—are expected to increase the number of known small Solar System bodies by an order of magnitude. This scale requires efficient and robust algorithms that can derive preliminary orbits quickly and reproducibly from large, heterogeneous datasets. 
+The Vera C. Rubin Observatory will conduct the Legacy Survey of Space and Time (LSST), which will produce an unprecedented optical alert stream exceeding ten million alerts per night. A substantial fraction of these alerts will correspond to moving Solar System objects. LSST is expected to increase the number of known asteroids by at least an order of magnitude—from roughly 1.3 million today to several million new discoveries over the survey lifetime. Handling this volume requires fast and reliable tools to read astrometric observations and estimate preliminary orbits automatically.
 
-**Outfit** is a Rust library for reading astrometric observations and computing preliminary orbits of small bodies using an implementation of the Gauss method. It provides high-throughput ingestion of standard formats (Minor Planet Center 80-column, ADES XML, and Parquet), explicit observer management (MPC codes, topocentric geometry), and accurate state propagation via JPL planetary ephemerides (e.g., DE440). The library emphasises speed, memory safety, reproducibility, and modular design. Observation parsing and trajectory batching are decoupled from the initial orbit determination (IOD) logic, and all public APIs are documented and thoroughly tested. Outfit re-implements classic OrbFit IOD behaviour in a modern, production-grade codebase, suitable for survey-scale pipelines (e.g., LSST/ZTF-like workloads).
+Alert brokers such as Fink receive the LSST alert stream ahead of all other users and classify alerts in real time. Their position at the earliest stage of data dissemination places them on the front line for recognising and flagging previously unknown asteroids. Early identification of such objects improves alert classification, enables rapid computation of ephemerides for follow-up, and supports linking future detections to newly derived orbits. It also allows brokers to filter out moving objects when searching for fast optical transients, an important capability for multi-messenger astronomy.
 
 # Statement of need
 
-Astrometric pipelines for near-Earth and small-body surveys must ingest heterogeneous observation formats, manage observers, and determine preliminary orbits efficiently and reproducibly. Existing tools (e.g., OrbFit [@OrbFit]) are widely used and trusted, but often expose monolithic interfaces and legacy implementations that are more difficult to integrate into data-intensive workflows. Outfit fills this gap by offering:
+Preliminary orbit determination is a foundational step in Solar System science. Researchers, survey teams, alert brokers, and even advanced amateur observers rely on software that can ingest astrometric measurements and rapidly estimate orbits for newly detected objects. Within the astronomical community, tools such as OrbFit have long played an essential role by providing scientifically trusted implementations of classical orbit-determination algorithms. They remain widely used in observatories and research groups around the world.
 
-- A memory-safe, high-performance core implemented in Rust.
-- Unified I/O across MPC 80-column [@MPC80col] and ADES XML [@ADES] with a columnar option (Parquet/Arrow [@Arrow; @Parquet]) for large batches.
-- Explicit observer handling with MPC codes and topocentric geometry.
-- Deterministic Gauss IOD with controlled numerical behaviour and explicit error types.
-- Clean integration with JPL ephemerides (DE series) [@DE440; @NAIF] for accurate state propagation
-- Accurate time-scale handling via `hifitime` [@hifitime].
-- Optional parallel computation for Gauss IOD (`--features parallel`) to scale across large batches.
+However, the software landscape in which these tools operate is changing. Modern surveys, real-time alert brokers, and large-scale data-processing systems require libraries that can be integrated directly into automated workflows, support programmatic access, and operate reliably at scale. Developers building next-generation pipelines need open-source components that are composable, reproducible, and easy to embed within larger scientific software stacks—whether for nightly survey operations, real-time alert classification, or educational and citizen-science applications.
 
-This combination enables reproducible, scalable preliminary orbit determination and downstream evaluation (RMS of normalised residuals) within modern data processing stacks. Outfit is intended for researchers building survey pipelines, teaching orbit determination, or benchmarking algorithmic variants on large datasets.
+**Outfit** was created to meet this need. It provides a modern, open-source library for preliminary orbit determination that can be called directly from within automated pipelines, allowing users to process observations in memory and estimate orbits without relying on external executables. By offering a clear and well-tested programming interface, Outfit enables the community to integrate classical orbit-determination techniques into contemporary survey pipelines and alert-broker infrastructures, ensuring that these methods remain accessible and usable as astronomical data volumes continue to grow.
 
 # Software description
 
