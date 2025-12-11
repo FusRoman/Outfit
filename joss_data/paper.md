@@ -10,6 +10,9 @@ authors:
   - name: Roman Le Montagner
     orcid: 0000-0002-6099-8939
     affiliation: "1"
+  - name: Hadrien Grasland
+    orcid: 0000-0003-3379-7100
+    affiliation: "1"
 affiliations:
   - index: 1
     name: Université Paris-Saclay, CNRS/IN2P3, IJCLab, 91405 Orsay, France
