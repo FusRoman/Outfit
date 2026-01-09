@@ -18,7 +18,29 @@ mod benches_impl {
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
-    /// Run Gauss IOD on a single trajectory and return the best orbit + RMS.
+    /// Run Gauss Initial Orbit Determination on a single trajectory.
+    ///
+    /// This function:
+    /// - retrieves the mutable observation list for the given trajectory,
+    /// - builds a set of IOD parameters (noise realizations, triplet limits, …),
+    /// - calls [`ObservationIOD::estimate_best_orbit`] and returns the result.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `env_state` - Mutable Outfit environment (DE ephemerides, settings, etc.).
+    /// * `traj_set` - Global trajectory set containing the observations.
+    /// * `traj_number` - ID of the trajectory to solve.
+    ///
+    /// Return
+    /// ----------
+    /// * A `Result` containing `(GaussResult, rms)` if a valid orbit is found,
+    ///   or an [`OutfitError`] if the IOD fails.
+    ///
+    /// See also
+    /// ------------
+    /// * [`prepare_env`] - Helper to initialize the environment and trajectories.
+    /// * [`bench_gauss_iod_e2e`] - End-to-end benchmark on three trajectories.
+    /// * [`bench_gauss_iod_batch_scaling`] - Batch-scaling benchmark on the same set.
     fn run_iod(
         env_state: &mut Outfit,
         traj_set: &mut TrajectorySet,
@@ -37,7 +59,34 @@ mod benches_impl {
         obs.estimate_best_orbit(env_state, &ErrorModel::FCCT14, &mut rng, &params)
     }
 
-    /// Prepare environment with DE440 and 3 trajectories.
+    /// Prepare the Outfit environment (DE440) and a small set of test trajectories.
+    ///
+    /// This helper:
+    /// - instantiates an [`Outfit`] environment using the DE440 ephemeris,
+    /// - loads three 80-column observation files into a [`TrajectorySet`],
+    /// - returns the environment, the trajectory set, and the three IDs.
+    ///
+    /// The three objects are:
+    /// - `K09R05F` (corresponding to `2015AB.obs`),
+    /// - `8467`,
+    /// - `33803`.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * None.
+    ///
+    /// Return
+    /// ----------
+    /// * A tuple `(env, set, ids)` where:
+    ///   - `env` is the initialized [`Outfit`] environment,
+    ///   - `set` is the [`TrajectorySet`] populated with the three objects,
+    ///   - `ids` is the fixed array of [`ObjectNumber`] identifiers.
+    ///
+    /// See also
+    /// ------------
+    /// * [`run_iod`] - Core IOD routine using this prepared environment.
+    /// * [`bench_gauss_iod_core`] - Reuses `env` but reloads trajectories each iteration.
+    /// * [`bench_gauss_iod_batch_scaling`] - Uses these same objects in round-robin.
     fn prepare_env() -> (Outfit, TrajectorySet, [ObjectNumber; 3]) {
         let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).expect("Outfit init");
 
@@ -55,7 +104,19 @@ mod benches_impl {
         (env, set, ids)
     }
 
-    /// End-to-end benchmark.
+    /// End-to-end benchmark on three real trajectories (full pipeline).
+    ///
+    /// This benchmark measures the cost of running Gauss IOD on all three
+    /// trajectories, including environment and trajectory set initialization.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `c` - Criterion handle used to register the benchmark.
+    ///
+    /// See also
+    /// ------------
+    /// * [`bench_gauss_iod_core`] - Reuses the environment and reloads data per iteration.
+    /// * [`bench_gauss_iod_batch_scaling`] - Scales the number of orbit fits per batch.
     pub fn bench_gauss_iod_e2e(c: &mut Criterion) {
         c.bench_function("gauss_iod_e2e_all", |b| {
             b.iter_batched(
@@ -71,7 +132,25 @@ mod benches_impl {
         });
     }
 
-    /// Core benchmark.
+    /// Core Gauss IOD benchmark: reuse environment, reload one trajectory per iteration.
+    ///
+    /// This benchmark keeps the [`Outfit`] environment in a shared [`RefCell`],
+    /// and repeatedly:
+    /// - rebuilds a `TrajectorySet` from `2015AB.obs`,
+    /// - runs Gauss IOD only on `K09R05F`.
+    ///
+    /// This isolates the cost of:
+    /// - loading a single trajectory from 80-column format,
+    /// - performing one orbit determination for this trajectory.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `c` - Criterion handle used to register the benchmark.
+    ///
+    /// See also
+    /// ------------
+    /// * [`bench_gauss_iod_e2e`] - End-to-end benchmark over three trajectories.
+    /// * [`bench_gauss_iod_batch_scaling`] - Varies the number of fits per batch.
     pub fn bench_gauss_iod_core(c: &mut Criterion) {
         let (env0, _set_once, _ids) = prepare_env();
         let env = RefCell::new(env0);
@@ -93,6 +172,42 @@ mod benches_impl {
             )
         });
     }
+
+    /// Batch-scaling benchmark: N orbit fits per batch using the same 3 trajectories.
+    ///
+    /// This benchmark is useful to build "time per orbit-fit vs batch size"
+    /// plots. It reuses the three real objects (K09R05F, 8467, 33803) and
+    /// cycles through them in round-robin fashion for each batch.
+    ///
+    /// Arguments
+    /// -----------------
+    /// * `c` - Criterion handle used to register the benchmark.
+    ///
+    /// See also
+    /// ------------
+    /// * [`bench_gauss_iod_e2e`] - Baseline for full end-to-end performance.
+    /// * [`bench_gauss_iod_core`] - Focuses on a single trajectory reload + fit.
+    pub fn bench_gauss_iod_batch_scaling(c: &mut Criterion) {
+        // Test several batch sizes: reuse the same three objects in round-robin.
+        let batch_sizes = [1_usize, 2, 3, 6, 12, 24, 48, 96];
+
+        for &batch in &batch_sizes {
+            let name = format!("gauss_iod_batch_{batch}");
+            c.bench_function(&name, |b| {
+                b.iter_batched(
+                    prepare_env,
+                    |(mut env, mut set, ids)| {
+                        for i in 0..batch {
+                            let id = &ids[i % ids.len()];
+                            let res = run_iod(&mut env, &mut set, id).expect("IOD");
+                            black_box(res);
+                        }
+                    },
+                    BatchSize::SmallInput,
+                )
+            });
+        }
+    }
 }
 
 #[cfg(feature = "jpl-download")]
@@ -106,13 +221,15 @@ criterion_group!(
         .warm_up_time(std::time::Duration::from_secs(5))
         .measurement_time(std::time::Duration::from_secs(25))
         .with_plots();
-    targets = benches_impl::bench_gauss_iod_e2e, benches_impl::bench_gauss_iod_core
+    targets =
+        benches_impl::bench_gauss_iod_e2e,
+        benches_impl::bench_gauss_iod_core,
+        benches_impl::bench_gauss_iod_batch_scaling
 );
 
 #[cfg(feature = "jpl-download")]
 criterion_main!(benches);
 
-// Fallback quand la feature est absente : fournit une main au crate.
 #[cfg(not(feature = "jpl-download"))]
 fn main() {
     eprintln!(

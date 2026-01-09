@@ -65,7 +65,7 @@ These examples provide small, reproducible entry points for validating behaviour
 
 ## Python bindings (pyOutfit)
 
-Outfit is also exposed to Python via **pyOutfit[^pyoutfit]**, a binding built with PyO3 and distributed with maturin. It provides a thin, idiomatic Python interface to the Rust core, enabling integration in notebooks and Python pipelines. The binding is available on PyPI and ships precompiled Rust manylinux wheels for Python 3.10, 3.11, and 3.12.
+Outfit is also exposed to Python via **pyOutfit[^pyoutfit]**, a binding built with PyO3 [@pyo3] and distributed with maturin [@maturin]. It provides a thin, idiomatic Python interface to the Rust core, enabling integration in notebooks and Python pipelines. The binding is available on PyPI and ships precompiled Rust manylinux wheels for Python 3.10, 3.11, and 3.12 at the time of writing.
 
 [^pyoutfit]: <https://github.com/FusRoman/pyOutfit>
 
@@ -75,7 +75,7 @@ Project documentation is published on GitHub Pages using MkDocs Material, and th
 
 Outfit currently focuses on optical astrometry and provides initial orbit determination through the classical Gauss method. It does not yet support radar or radio observables, hyperbolic orbit fitting, or full least-squares refinement, and therefore cannot produce formal covariances or robust uncertainty estimates. In addition, while planetary ephemerides are fully integrated, the library does not yet expose a high-level API for generating predicted ephemerides from estimated orbits.
 
-Future development will extend the IOD capabilities beyond Gauss, notably through the addition of a Väisälä solver and a full differential-corrections pipeline with covariance output. Support for hyperbolic trajectories will enable the analysis of interstellar candidates, and a unified API for orbit-based ephemeris prediction will facilitate downstream residual analysis. Longer-term plans include incorporating radar and Doppler measurements to complement optical data and broaden Outfit’s applicability across Solar System studies.
+Future development will extend the IOD capabilities beyond Gauss, notably through the addition of a Väisälä solver [@Williams1997] and a full differential-corrections pipeline with covariance output. Support for hyperbolic trajectories will enable the analysis of interstellar candidates, and a unified API for orbit-based ephemeris prediction will facilitate downstream residual analysis. Longer-term plans include incorporating radar and Doppler measurements to complement optical data and broaden Outfit’s applicability across Solar System studies.
 
 # Acknowledgements
 
