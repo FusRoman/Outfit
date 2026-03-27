@@ -22,7 +22,7 @@ bibliography: paper.bib
 
 # Summary
 
-The NSF-DOE Vera C. Rubin Observatory [@LSST_from_science_to_design] will conduct the Legacy Survey of Space and Time (LSST), which will produce an unprecedented optical alert stream exceeding ten million alerts per night. A substantial fraction of these alerts will correspond to moving Solar System objects. LSST is expected to increase the number of known asteroids by at least an order of magnitude—from roughly 1.3 million today to several million new discoveries over the survey lifetime [@rubinobservatorylsstsolarsystemsciencecollaboration2020scientificimpactverac]. Handling this volume requires fast and reliable tools to read astrometric observations and estimate preliminary orbits automatically.
+The NSF-DOE Vera C. Rubin Observatory [@LSST_from_science_to_design] conducts the Legacy Survey of Space and Time (LSST), which produces an unprecedented optical alert stream exceeding ten million alerts per night. A substantial fraction of these alerts corresponds to moving Solar System objects. LSST is expected to increase the number of known asteroids by at least an order of magnitude—from roughly 1.3 million today to several million new discoveries over the survey lifetime [@rubinobservatorylsstsolarsystemsciencecollaboration2020scientificimpactverac]. Handling this volume requires fast and reliable tools to read astrometric observations and estimate preliminary orbits automatically.
 
 Alert brokers such as Fink [@Fink_2020] receive the LSST alert stream ahead of all other users and classify alerts in real time. Their position at the earliest stage of data dissemination places them on the front line for recognising and flagging previously unknown asteroids. Early identification of such objects improves alert classification, enables rapid computation of ephemerides for follow-up, and supports linking future detections to newly derived orbits. It also allows brokers to filter out moving objects when searching for fast optical transients, an important capability for multi-messenger astronomy.
 
@@ -41,7 +41,7 @@ However, the software landscape in which these tools operate is changing. Modern
 
 ## Functionality
 
-Outfit transforms raw astrometric observations into preliminary orbital solutions for small Solar System bodies and propagates these solutions to other epochs. It combines robust input handling, explicit modelling of observatories and reference frames, and classical initial-orbit-determination algorithms in a form suited to automated, high-throughput pipelines.
+Outfit transforms raw astrometric observations into preliminary orbital solutions for small Solar System bodies and propagates these solutions to other epochs. It combines robust input handling, explicit modelling of observatories and reference frames, and classical initial orbit determination (IOD) algorithms in a form suited to automated, high-throughput pipelines.
 
 Designed primarily as an embeddable library, Outfit accepts observations directly as in-memory batches generated upstream, enabling programmatic orbit fitting without external executables or temporary files. For interoperability with existing workflows, it also ingests standard formats—including MPC 80-column [@MPC80col], ADES XML [@ADES], and columnar layouts such as Parquet/Arrow [@Arrow; @Parquet]—with validation and time-scale normalisation performed on load.
 
@@ -79,7 +79,6 @@ Future development will extend the IOD capabilities beyond Gauss, notably throug
 
 # Acknowledgements
 
-We acknowledge the maintainers of OrbFit for foundational work in preliminary orbit determination, the JPL Horizons/NAIF teams for ephemerides and kernels, and contributors and users who provided feedback on API ergonomics and tests. Development benefited from the Rust ecosystem and libraries cited.
+We acknowledge the maintainers of OrbFit for foundational work in preliminary orbit determination, the JPL Horizons/NAIF teams for ephemerides and kernels, and contributors. Development benefited from the Rust ecosystem and libraries cited.
 
 # References
-
