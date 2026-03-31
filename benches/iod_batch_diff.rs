@@ -3,8 +3,8 @@
 //!
 //! # Overview
 //!
-//! This benchmark loads `tests/data/test_from_fink.parquet`, builds a
-//! `TrajectorySet`, and evaluates the performance of Gauss IOD across
+//! This benchmark loads a Parquet dataset, builds a `TrajectorySet`, and
+//! evaluates the performance of Gauss IOD across
 //! increasing batch sizes of *distinct* trajectories (survey-like scenario).
 //!
 //! The goal is to estimate the average cost per orbit-fit when processing
@@ -91,7 +91,9 @@ fn prepare_env_parquet() -> (Outfit, TrajectorySet, Vec<ObjectNumber>) {
     let mut env_state =
         Outfit::new("horizon:DE440", ErrorModel::FCCT14).expect("Outfit init (DE440)");
 
-    let path_file = Utf8Path::new("tests/data/mega_test.parquet");
+    let path_file = std::env::var("OUTFIT_IOD_BATCH_DIFF_PARQUET")
+        .unwrap_or_else(|_| "tests/data/test_from_fink.parquet".to_string());
+    let path_file = Utf8Path::new(&path_file);
 
     // Using the Palomar/ZTF observer (MPC code I41).
     let ztf_observer = env_state.get_observer_from_mpc_code(&"I41".into());
