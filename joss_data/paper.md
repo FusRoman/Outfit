@@ -45,7 +45,7 @@ Outfit addresses this need by providing a modern library interface for prelimina
 
 Within the astronomical community, tools such as OrbFit [@OrbFit] and Find_Orb [@FindOrb] have long played an essential role by providing scientifically trusted implementations of classical orbit-determination algorithms. OrbFit, developed in Fortran, is a mature and rigorously validated tool that has been widely adopted in observatories and research institutions. Find_Orb, implemented in C, is similarly well established and provides comparable functionality. Both tools are distributed as standalone executables that read input files and write output files, a design pattern that has served the community well for decades. Recent validation efforts such as Orb_It [@Berres_2022] provide end-to-end testing frameworks for these tools, confirming their internal consistency and accuracy.
 
-However, these tools were not designed for programmatic integration into automated pipelines. Invoking them from within a larger application requires launching external processes, writing temporary input files, parsing textual output, and managing inter-process communication—all sources of friction that become significant bottlenecks at the scales required by modern surveys. Furthermore, neither tool exposes a library API that would allow direct in-memory processing.
+However, these tools were not designed for programmatic integration into automated pipelines. Invoking them from within a larger application requires launching external processes, writing temporary input files, parsing textual output, and managing inter-process communication—all sources of complexity and runtime overhead that become significant bottlenecks at the scales required by modern surveys. Furthermore, neither tool exposes a library API that would allow direct in-memory processing.
 
 While OrbFit and Find_Orb remain the gold standard for scientific accuracy and validation, their executable-based design makes them ill-suited for the use cases Outfit targets. Rather than contribute additional features to these existing tools, we chose to build a new library from the ground up with a different architectural philosophy: an embeddable, memory-safe library with a clear API designed for automated workflows. This design choice represents a meaningful scholarly contribution, as it enables classical orbit-determination methods to be integrated into modern data-processing systems that would otherwise struggle to adopt executable-based tools.
 
@@ -73,11 +73,15 @@ Outfit has demonstrated realized impact through integration into operational res
 
 The research need that motivated Outfit's development is documented in [@Le_Montagner_2023], which used OrbFit to fit tens of thousands of trajectory hypotheses by invoking the Fortran executable through Apache Spark across multiple compute nodes—a workflow that required dozens of CPU cores and took several minutes to complete. With Outfit's library interface, the same analysis runs in seconds on a single multi-core machine, demonstrating the performance gains enabled by in-memory processing and eliminating the overhead of inter-process communication and file I/O.
 
-To ensure numerical reliability, Outfit includes regression tests on real astrometric datasets (2015AB, 8467, 33803) that validate orbit-fitting accuracy against known solutions returned by OrbFit. These tests run automatically in continuous integration and serve as a reproducible benchmark for the library's correctness. The library is distributed on crates.io (the Rust package registry) and PyPI (the Python Package Index), with precompiled binaries for multiple platforms, lowering the barrier to adoption. Documentation is available on docs.rs and GitHub Pages, and the repository includes runnable examples demonstrating end-to-end usage:
+To ensure numerical reliability, Outfit includes regression tests on real astrometric datasets (2015AB[^2015AB], 8467[^8467], 33803[^33803]) that validate orbit-fitting accuracy against known solutions returned by OrbFit. These tests run automatically in continuous integration and serve as a reproducible benchmark for the library's correctness. The library is distributed on crates.io (the Rust package registry) and PyPI (the Python Package Index), with precompiled binaries for multiple platforms, lowering the barrier to adoption. Documentation is available on docs.rs and GitHub Pages, and the repository includes runnable examples demonstrating end-to-end usage:
 
 ```bash
 cargo run --release --example parquet_to_orbit --features "jpl-download"
 ```
+
+[^2015AB]: <https://minorplanetcenter.net/db_search/show_object?utf8=%E2%9C%93&object_id=K09R05F>
+[^8467]: <https://minorplanetcenter.net/db_search/show_object?utf8=%E2%9C%93&object_id=8467>
+[^33803]: <https://minorplanetcenter.net/db_search/show_object?utf8=%E2%9C%93&object_id=33803>
 
 # AI usage disclosure
 
