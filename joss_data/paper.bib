@@ -63,6 +63,21 @@ archivePrefix = {ascl},
   year         = {2000}
 }
 
+@article{Berres_2022,
+doi = {10.3847/2515-5172/ac8e08},
+url = {https://doi.org/10.3847/2515-5172/ac8e08},
+year = {2022},
+month = {sep},
+publisher = {The American Astronomical Society},
+volume = {6},
+number = {9},
+pages = {174},
+author = {Berres, Aidan and Greenstreet, Sarah and Moeyens, Joachim and Jurić, Mario and Lu, Edward},
+title = {Orb_It: A Validation Package for Orbit Integrators},
+journal = {Research Notes of the AAS},
+abstract = {We present a testing platform and package that can validate the accuracy of an orbit integrator. Orb_It is written in Python and is capable of validating the most heavily used orbital integrators such as Find_Orb, OpenOrb, and OrbFit. Orb_It performs an “end-to-end” test of each integrator to check for internal consistency of the integrators functions. For a given objects state vector and epoch, Orb_It uses a user-specified integrator to generate the objects ephemeris for a specified time range and observer, uses those ephemerides as observations to fit an orbit, and then compares that fitted orbit to the original input state vector propagated to the fitted orbits epoch. This allows users to understand the internal accuracy of each integrator. This testing suite and package can be found on GitHub with a demo on Binder (https://github.com/B612-Asteroid-Institute/orb_it).}
+}
+
 
 @misc{MPC80col,
   title        = {Minor Planet Center Optical Observations: 80-column format},
@@ -126,6 +141,17 @@ archivePrefix = {ascl},
   howpublished = {Official website},
   url          = {https://www.rust-lang.org/},
   note         = {Accessed: 2025-12-05}
+}
+
+@book{rust_book,
+  author       = {Klabnik, Steve and Nichols, Carol},
+  title        = {The Rust Programming Language},
+  year         = {2018},
+  publisher    = {No Starch Press},
+  isbn         = {978-1-59327-828-1},
+  howpublished = {Online book},
+  url          = {https://doc.rust-lang.org/book/},
+  note         = {Accessed: 2026-04-01}
 }
 
 @misc{nalgebra,
