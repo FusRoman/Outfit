@@ -1,0 +1,33 @@
+name: JOSS Draft PDF
+
+on:
+  push:
+    paths:
+      - joss_data/**
+      - .github/workflows/joss_pdf.yml
+  pull_request:
+    paths:
+      - joss_data/**
+      - .github/workflows/joss_pdf.yml
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    name: Build JOSS paper PDF
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build draft PDF
+        uses: openjournals/openjournals-draft-action@master
+        with:
+          journal: joss
+          # Path to the paper within the repo
+          paper-path: joss_data/paper.md
+
+      - name: Upload compiled PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: joss-paper
+          # Output path where Pandoc writes the compiled PDF
+          path: joss_data/paper.pdf
