@@ -79,6 +79,7 @@ use std::fmt;
 
 pub mod gauss;
 pub mod gauss_result;
+pub mod triplet_generation;
 
 /// Configuration parameters controlling the behavior of
 /// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
@@ -633,6 +634,11 @@ impl IODParamsBuilder {
         }
 
         Ok(self.params)
+    }
+
+    /// Create an [`IODParams`] directly from the builder's internal parameters without validation.
+    pub fn from_params(params: IODParams) -> Self {
+        Self { params }
     }
 }
 

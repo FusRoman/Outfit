@@ -258,12 +258,6 @@ pub mod conversion;
 /// Earth orientation parameters and related corrections (nutation, precession).
 pub mod earth_orientation;
 
-/// Environment state: ephemerides, dynamical models, configuration.
-pub mod env_state;
-
-/// Error models used for weighting astrometric residuals.
-pub mod error_models;
-
 /// Initial Orbit Determination algorithms (Gauss method).
 pub mod initial_orbit_determination;
 
@@ -276,20 +270,8 @@ pub mod kepler;
 /// Orbital types and conversions between them.
 pub mod orbit_type;
 
-/// Observation handling (RA, DEC, times).
-pub mod observations;
-
-/// Trajectory management and file I/O.
-pub mod trajectories;
-
-/// Observers and observatory positions.
-pub mod observers;
-
 /// Orbital elements utilities (conversion, normalization).
 pub mod orb_elem;
-
-/// Main Outfit struct: central orchestrator for orbit determination.
-pub mod outfit;
 
 /// Errors returned by Outfit operations.
 pub mod outfit_errors;
@@ -300,18 +282,15 @@ pub mod ref_system;
 /// Time management and conversions (UTC, TDB, TT).
 pub mod time;
 
+pub mod cache;
+pub mod obs_dataset;
+pub mod observation_ephemeris;
+pub mod observer_extension;
+pub mod trajectory;
+
 // === Public API FACADE =====================================================
 // Re-export carefully curated symbols for a simple, stable top-level API.
 // Users can import from `outfit::...` without diving into deep module paths.
-
-// Core orchestrator
-pub use crate::outfit::Outfit;
-
-// Core data types & units
-pub use crate::constants::Observations;
-pub use crate::constants::{ArcSec, Degree, ObjectNumber, MJD};
-pub use crate::observers::Observer;
-pub use crate::trajectories::TrajectorySet;
 
 // Orbital element representations
 pub use crate::orbit_type::{
@@ -319,20 +298,11 @@ pub use crate::orbit_type::{
     keplerian_element::KeplerianElements, OrbitalElements,
 };
 
-// Error handling and models
-pub use crate::error_models::ErrorModel;
 pub use crate::outfit_errors::OutfitError;
 
 // IOD (Gauss) key types
 pub use crate::initial_orbit_determination::gauss_result::GaussResult;
 pub use crate::initial_orbit_determination::IODParams;
-
-// Frequently-used extension traits (ergonomic entry points) and key types
-pub use crate::observations::display::ObservationsDisplayExt;
-pub use crate::observations::observations_ext::ObservationIOD;
-pub use crate::trajectories::trajectory_file::TrajectoryFile;
-pub use crate::trajectories::trajectory_fit::FullOrbitResult;
-pub use crate::trajectories::trajectory_fit::TrajectoryFit;
 
 // Selected constants that are widely useful
 pub use crate::constants::{
@@ -352,55 +322,45 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// use outfit::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::{
-        ArcSec, Degree, ErrorModel, FullOrbitResult, GaussResult, IODParams, JPLEphem,
-        ObjectNumber, ObservationIOD, Observer, Outfit, OutfitError, TrajectoryFile, TrajectorySet,
-        MJD,
-    };
+    pub use crate::{GaussResult, IODParams, JPLEphem, OutfitError};
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
 }
 
 // === Tests support ==========================================================
-#[cfg(all(test, feature = "jpl-download"))]
-pub(crate) mod unit_test_global {
+#[cfg(test)]
+pub(crate) mod test_fixture {
     use std::sync::LazyLock;
 
-    use camino::Utf8Path;
+    use hifitime::ut1::Ut1Provider;
+    use photom::observation_dataset::ObsDataset;
 
-    use crate::{
-        error_models::ErrorModel,
-        jpl_ephem::{horizon::horizon_data::HorizonData, naif::naif_data::NaifData},
-        outfit::Outfit,
-        trajectories::trajectory_file::TrajectoryFile,
-        trajectories::TrajectorySet,
-    };
+    use crate::{jpl_ephem::download_jpl_file::EphemFileSource, JPLEphem};
 
-    pub(crate) static OUTFIT_NAIF_TEST: LazyLock<Outfit> =
-        LazyLock::new(|| Outfit::new("naif:DE440", ErrorModel::FCCT14).unwrap());
-
-    pub(crate) static OUTFIT_HORIZON_TEST: LazyLock<(Outfit, TrajectorySet)> =
-        LazyLock::new(|| {
-            let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
-
-            let path_file = Utf8Path::new("tests/data/2015AB.obs");
-            let traj_set = TrajectorySet::new_from_80col(&mut env, path_file);
-            (env, traj_set)
-        });
-
-    pub(crate) static JPL_EPHEM_HORIZON: LazyLock<&HorizonData> = LazyLock::new(|| {
-        let jpl_ephem = OUTFIT_HORIZON_TEST.0.get_jpl_ephem().unwrap();
-        match jpl_ephem {
-            crate::jpl_ephem::JPLEphem::HorizonFile(horizon_data) => horizon_data,
-            _ => panic!("JPL ephemeris is not a Horizon file"),
-        }
+    pub(crate) static UT1_PROVIDER: LazyLock<Ut1Provider> = LazyLock::new(|| {
+        Ut1Provider::download_from_jpl("latest_eop2.long")
+            .expect("Download of the JPL short time scale UT1 data failed")
     });
 
-    pub(crate) static JPL_EPHEM_NAIF: LazyLock<&NaifData> = LazyLock::new(|| {
-        let jpl_ephem = OUTFIT_NAIF_TEST.get_jpl_ephem().unwrap();
-        match jpl_ephem {
-            crate::jpl_ephem::JPLEphem::NaifFile(naif_data) => naif_data,
-            _ => panic!("JPL ephemeris is not a Naif file"),
-        }
+    pub(crate) static JPL_EPHEM_HORIZON: LazyLock<JPLEphem> = LazyLock::new(|| {
+        let jpl_file: EphemFileSource = "horizon:DE440"
+            .try_into()
+            .expect("Failed to parse JPL ephemeris source");
+        let jpl_ephem =
+            JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
+        jpl_ephem
+    });
+
+    pub(crate) static JPL_EPHEM_NAIF: LazyLock<JPLEphem> = LazyLock::new(|| {
+        let jpl_file: EphemFileSource = "naif:DE440"
+            .try_into()
+            .expect("Failed to parse JPL ephemeris source");
+        let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif");
+        jpl_ephem
+    });
+
+    pub(crate) static DATASET_2015AB: LazyLock<ObsDataset> = LazyLock::new(|| {
+        ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")
+            .expect("Failed to load test dataset 2015AB")
     });
 }

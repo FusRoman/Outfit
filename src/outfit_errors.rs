@@ -135,8 +135,10 @@
 //! * [`ParseObsError`](crate::trajectories::mpc_80col_reader::ParseObsError) – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
-
-use crate::trajectories::mpc_80col_reader::ParseObsError;
+use photom::{
+    observation_dataset::{ObsDatasetError, ObsId},
+    TrajId,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -159,7 +161,6 @@ pub enum OutfitError {
     #[error("Filesystem I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[cfg(feature = "jpl-download")]
     #[error("HTTP request failed (reqwest): {0}")]
     ReqwestError(#[from] reqwest::Error),
 
@@ -186,9 +187,6 @@ pub enum OutfitError {
 
     #[error("Parsing error (nom): {0}")]
     NomParsingError(String),
-
-    #[error("Parsing error in 80-column observation file: {0}")]
-    Parsing80ColumnFileError(ParseObsError),
 
     #[error("Gaussian noise generation failed: {0:?}")]
     NoiseInjectionError(rand_distr::NormalError),
@@ -253,6 +251,24 @@ pub enum OutfitError {
 
     #[error("Non-finite score encountered: {0}")]
     NonFiniteScore(f64),
+
+    #[error("The provided observation {0} has no associated observer (ObserverId is None)")]
+    ObserverIdIsNone(ObsId),
+
+    #[error(transparent)]
+    ObsDatasetError(#[from] ObsDatasetError),
+
+    #[error("Observer dataset error: {0}")]
+    ObsDatasetErrorRef(String),
+
+    #[error("Trajectory ID not found in dataset: {0}")]
+    TrajectoryIdNotFound(TrajId),
+}
+
+impl From<&ObsDatasetError> for OutfitError {
+    fn from(e: &ObsDatasetError) -> Self {
+        OutfitError::ObsDatasetErrorRef(e.to_string())
+    }
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -279,7 +295,6 @@ impl PartialEq for OutfitError {
             // Opaque external error kinds compare equal by variant only
             (UreqHttpError(_), UreqHttpError(_)) => true,
             (IoError(_), IoError(_)) => true,
-            #[cfg(feature = "jpl-download")]
             (ReqwestError(_), ReqwestError(_)) => true,
             (Parquet(_), Parquet(_)) => true,
 
@@ -291,7 +306,6 @@ impl PartialEq for OutfitError {
             (InvalidErrorModel(a), InvalidErrorModel(b)) => a == b,
             (InvalidErrorModelFilePath(a), InvalidErrorModelFilePath(b)) => a == b,
             (NomParsingError(a), NomParsingError(b)) => a == b,
-            (Parsing80ColumnFileError(a), Parsing80ColumnFileError(b)) => a == b,
             (NoiseInjectionError(a), NoiseInjectionError(b)) => a == b,
             (InvalidSpkDataType(a), InvalidSpkDataType(b)) => a == b,
             (InvalidIODParameter(a), InvalidIODParameter(b)) => a == b,

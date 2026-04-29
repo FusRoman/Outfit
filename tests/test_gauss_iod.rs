@@ -1,42 +1,18 @@
-#![cfg(feature = "jpl-download")]
-
 mod common;
 
 use approx::assert_relative_eq;
-use camino::Utf8Path;
-use outfit::constants::ObjectNumber;
-use outfit::error_models::ErrorModel;
-use outfit::initial_orbit_determination::gauss_result::GaussResult;
+use hifitime::ut1::Ut1Provider;
 use outfit::initial_orbit_determination::IODParams;
-use outfit::observations::observations_ext::ObservationIOD;
+use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
+use outfit::obs_dataset::FitIOD;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
-use outfit::outfit::Outfit;
-use outfit::outfit_errors::OutfitError;
-use outfit::trajectories::trajectory_file::TrajectoryFile;
-use outfit::TrajectorySet;
+use outfit::JPLEphem;
+use photom::observation_dataset::ObsDataset;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 use crate::common::approx_equal;
-
-fn run_iod(
-    env_state: &mut Outfit,
-    traj_set: &mut TrajectorySet,
-    traj_number: &ObjectNumber,
-) -> Result<(GaussResult, f64), OutfitError> {
-    let obs = traj_set.get_mut(traj_number).unwrap();
-    let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
-
-    let default = IODParams::builder()
-        .n_noise_realizations(10)
-        .noise_scale(1.1)
-        .max_obs_for_triplets(obs.len())
-        .max_triplets(30)
-        .build()?;
-
-    obs.estimate_best_orbit(env_state, &ErrorModel::FCCT14, &mut rng, &default)
-}
 
 #[test]
 
@@ -44,23 +20,43 @@ fn test_gauss_iod() {
     let test_max_relative = 1e-11;
     let test_epsilon = 1e-11;
 
-    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+    let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
+        .expect("Download of the JPL short time scale UT1 data failed");
 
-    let path_file = Utf8Path::new("tests/data/2015AB.obs");
-    let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, path_file);
+    let jpl_file: EphemFileSource = "naif:DE440"
+        .try_into()
+        .expect("Failed to parse JPL ephemeris source");
+    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif");
 
-    let path_file = Utf8Path::new("tests/data/8467.obs");
-    traj_set.add_from_80col(&mut env_state, path_file);
+    let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
+        "tests/data/2015AB.obs",
+        "tests/data/8467.obs",
+        "tests/data/33803.obs",
+    ]);
 
-    let path_file = Utf8Path::new("tests/data/33803.obs");
-    traj_set.add_from_80col(&mut env_state, path_file);
+    if !errors.is_empty() {
+        panic!("Failed to load observation datasets: {:?}", errors);
+    }
 
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("K09R05F".into()),
-    )
-    .unwrap();
+    let default = IODParams::builder()
+        .n_noise_realizations(10)
+        .noise_scale(1.1)
+        .max_obs_for_triplets(130) // number of observation for the largest trajectory in the dataset
+        .max_triplets(30)
+        .build()
+        .unwrap();
+
+    let mut full_orbit = obs_dataset
+        .fit_full_iod(
+            &jpl_ephem,
+            &ut1_provider,
+            &default,
+            &mut StdRng::seed_from_u64(42),
+        )
+        .unwrap();
+
+    let (best_orbit, best_rms) = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
+    let orbit = best_orbit.get_orbit();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 57049.22904452732,
@@ -72,8 +68,6 @@ fn test_gauss_iod() {
         mean_anomaly: 0.44069989140091426,
     });
 
-    let orbit = best_orbit.get_orbit();
-
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
@@ -81,13 +75,6 @@ fn test_gauss_iod() {
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
-
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("8467".into()),
-    )
-    .unwrap();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60672.24113100201,
@@ -99,6 +86,7 @@ fn test_gauss_iod() {
         mean_anomaly: 4.85070383704545,
     });
 
+    let (best_orbit, best_rms) = full_orbit.remove(&"8467".into()).unwrap().unwrap();
     let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
@@ -108,13 +96,6 @@ fn test_gauss_iod() {
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
-
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("33803".into()),
-    )
-    .unwrap();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60465.26778016307,
@@ -126,6 +107,7 @@ fn test_gauss_iod() {
         mean_anomaly: 4.9466622638827324,
     });
 
+    let (best_orbit, best_rms) = full_orbit.remove(&"33803".into()).unwrap().unwrap();
     let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));

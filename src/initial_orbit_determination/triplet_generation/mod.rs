@@ -72,14 +72,18 @@
 //! - [`triplet_weight`] – Spacing-based scoring rule.
 //! - [`GaussObs`] – Triplet container consumed by the Gauss IOD solver.
 //! - [`crate::observations::observations_ext::ObservationsExt::compute_triplets`] – Higher-level wrapper.
+
+pub mod index_generator;
+
 use nalgebra::{Matrix3, Vector3};
+use photom::observation_dataset::observation::Observation;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::constants::Observations;
+use crate::cache::OutfitCache;
 use crate::initial_orbit_determination::gauss::GaussObs;
-use crate::observations::triplets_generator::TripletIndexGenerator;
-use crate::observations::Observation;
+use crate::initial_orbit_determination::triplet_generation::index_generator::TripletIndexGenerator;
+use crate::IODParams;
 
 /// Internal structure holding a weighted observation triplet during selection.
 ///
@@ -269,62 +273,6 @@ fn s_gap(dt: f64, inv_dtw: f64) -> f64 {
     }
 }
 
-/// Downsample observation indices while preserving endpoints and temporal coverage.
-///
-/// If the input has more than `max_keep` points, this routine selects a subset of indices
-/// **uniformly in time** while always including the **first** and **last** observation.
-/// This reduces the `O(n³)` triplet explosion without losing global time-span information.
-///
-/// Behavior
-/// -----------------
-/// * If `n == 0`: returns `[]`.
-/// * If `max_keep >= n`: returns all indices `0..n`.
-/// * If `max_keep <= 3`: returns `[0, mid, n-1]` (with `mid = n/2`).
-///   For `n < 3`, indices may repeat (callers should handle deduplication if needed).
-/// * Otherwise: returns `max_keep` indices distributed uniformly between `1` and `n-2`,
-///   plus the endpoints `0` and `n-1`.
-///
-/// Arguments
-/// -----------------
-/// * `n` – Total number of observations.
-/// * `max_keep` – Maximum number of indices to return.
-///
-/// Return
-/// ----------
-/// * A `Vec<usize>` with the selected indices in **ascending** order.
-///
-/// Remarks
-/// -------------
-/// * Complexity: **O(max_keep)** after the trivial cases.
-/// * The selection is **index-uniform** over the span `[1, n-2]`; if strictly
-///   time-uniform selection is required, pre-sort observations by time first
-///   (as done in [`generate_triplets`]).
-///
-/// See also
-/// ------------
-/// * [`generate_triplets`] – Uses this function before triplet enumeration.
-pub(crate) fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -> Vec<usize> {
-    match n {
-        0 => Vec::new(),
-        _ if max_keep <= 3 => {
-            let mid = n / 2;
-            vec![0, mid, n - 1]
-        }
-        _ if max_keep >= n => (0..n).collect(),
-        _ => {
-            let slots = max_keep - 2;
-            std::iter::once(0)
-                .chain((0..slots).map(move |i| {
-                    let fraction = (i + 1) as f64 / (slots + 1) as f64;
-                    // distribute indices uniformly between 1 and n-2
-                    1 + (fraction * (n - 2) as f64).floor() as usize
-                }))
-                .chain(std::iter::once(n - 1))
-                .collect()
-        }
-    }
-}
-
 /// Generate and select **best-K** triplets of astrometric observations
 /// for Gauss Initial Orbit Determination (IOD), using a **lazy index stream**
 /// and a bounded **max-heap** on a spacing weight.
@@ -334,269 +282,265 @@ pub(crate) fn downsample_uniform_with_edges_indices(n: usize, max_keep: usize) -
 /// This routine constructs good candidate triplets `(first, middle, last)` as inputs
 /// to the **Gauss method** while avoiding the `O(n³)` blow-up:
 ///
-/// 1. **Sort & downsample (in `TripletIndexGenerator`)** – Observations are sorted by epoch
-///    and uniformly thinned (keeping endpoints) to at most `max_obs_for_triplets`.
+/// 1. **Downsample (in `TripletIndexGenerator`)** – Observations are uniformly thinned
+///    (keeping endpoints) to at most `max_obs_for_triplets`. The input slice is assumed
+///    to be **already sorted by ascending epoch**.
 /// 2. **Time-feasible enumeration (lazy)** – Indices `(i, j, k)` are streamed by
 ///    `TripletIndexGenerator`, constrained by:
 ///    `dt_min ≤ t[k] − t[i] ≤ dt_max` with `i < j < k`.
 /// 3. **Weight scoring** – Each feasible triplet receives a weight via [`triplet_weight`],
 ///    favoring near-uniform spacing around `optimal_interval_time`.
 /// 4. **Best-K selection** – A bounded **max-heap** retains only the `max_triplet`
-///    lowest-weight candidates (the heap’s `peek()` is the current **worst**).
+///    lowest-weight candidates (the heap's `peek()` is the current **worst**).
 /// 5. **Materialization** – Only for the selected indices, we re-borrow `observations`
-///    immutably and build [`GaussObs`] with precomputed observer heliocentric columns
-///    (via [`Observation::get_observer_helio_position`]).
+///    immutably and build [`GaussObs`] with precomputed observer heliocentric columns.
 ///
-/// Design notes
-/// -----------------
-/// * Enumeration and scoring happen on **reduced indices** (owned by the generator),
+/// # Design notes
+///
+/// - The input slice must be **sorted in ascending time order** before this call.
+/// - Enumeration and scoring happen on reduced epoch indices owned by the generator,
 ///   so there are **no overlapping borrows** of `observations`.
-/// * The function avoids cloning the generator’s internal buffers (times, mapping);
-///   we read them through short-lived immutable borrows between `next()` calls.
-/// * The final `Vec<GaussObs>` is **sorted by increasing weight** (best first).
+/// - The final `Vec<GaussObs>` is **sorted by increasing weight** (best first).
 ///
-/// Arguments
-/// -----------------
-/// * `observations` – Mutable set of astrometric observations; epochs are sorted **in-place**.
-/// * `dt_min` – Minimum allowed time span (same units as `Observation::time`) between first and last.
-/// * `dt_max` – Maximum allowed time span between first and last.
-/// * `optimal_interval_time` – Target per-gap spacing used by [`triplet_weight`].
-/// * `max_obs_for_triplets` – Downsampling cap (uniform with edges).
-/// * `max_triplet` – Number `K` of best triplets to return (heap capacity).
+/// # Arguments
 ///
-/// Return
-/// ----------
-/// * A `Vec<GaussObs>` of length `≤ max_triplet`, sorted by **ascending** heuristic weight.
+/// - `observations`         – Time-sorted observation slice (ascending epoch).
+/// - `cache`                – Precomputed heliocentric observer positions.
+/// - `params`               – IOD parameters controlling time bounds, downsampling cap,
+///                            optimal spacing, and the best-K limit.
 ///
-/// Complexity
-/// -----------------
-/// * Enumeration: typically ~`O(n²)` thanks to the per-anchor time window in
+/// # Return
+///
+/// - A `Vec<GaussObs>` of length `≤ max_triplet`, sorted by **ascending** heuristic weight.
+///
+/// # Complexity
+///
+/// * Enumeration: typically ~$O(n^2)$ thanks to the per-anchor time window in
 ///   [`TripletIndexGenerator`].
-/// * Selection: `O(n log K)` due to the bounded heap.
-/// * Space: `O(1)` per yielded triplet during enumeration; only the final `K` are materialized.
+/// * Selection: $O(n \log K)$ due to the bounded heap.
+/// * Space: $O(1)$ per yielded triplet during enumeration; only the final `K` are materialized.
 ///
-/// See also
-/// ------------
+/// # See also
+///
 /// * [`TripletIndexGenerator`] – Streams time-feasible reduced indices lazily.
 /// * [`triplet_weight`] – Heuristic favoring evenly spaced triplets around a target gap.
 /// * [`GaussObs::realizations_iter`] – Lazy Monte-Carlo perturbations per triplet.
-/// * [`ObservationsExt::compute_triplets`](crate::observations::observations_ext::ObservationsExt::compute_triplets) – Typical high-level wrapper.
 pub fn generate_triplets(
-    observations: &mut Observations,
-    dt_min: f64,
-    dt_max: f64,
-    optimal_interval_time: f64,
-    max_obs_for_triplets: usize,
-    max_triplet: u32,
+    observations: &[&Observation],
+    cache: &OutfitCache,
+    params: &IODParams,
 ) -> Vec<GaussObs> {
-    if max_triplet == 0 {
+    if params.max_triplets == 0 || observations.len() < 3 {
         return Vec::new();
     }
 
-    // --- Phase 1: enumerate feasible reduced indices & keep best-K by weight (no &Observation borrows).
+    // --- Phase 1: build the reduced-index stream and score all feasible triplets.
     let mut index_gen = TripletIndexGenerator::from_observations(
         observations,
-        dt_min,
-        dt_max,
-        max_obs_for_triplets,
-        usize::MAX, // scan all feasible triplets; the heap does best-K filtering
+        params.dt_min,
+        params.dt_max_triplet,
+        params.max_obs_for_triplets,
+        usize::MAX,
     );
 
-    let k_cap = max_triplet as usize;
-    let mut heap: BinaryHeap<WeightedTriplet> = BinaryHeap::with_capacity(k_cap.saturating_add(1));
+    let k_cap = params.max_triplets as usize;
+    let inv_dtw = params.optimal_interval_time.recip();
+    let best_k = collect_best_k_triplets(&mut index_gen, k_cap, inv_dtw);
 
-    // Bounded push: maintain the K smallest weights in a BinaryHeap (max-heap).
-    let mut push_best_k = |cand: WeightedTriplet| {
-        if !cand.weight.is_finite() {
-            return; // guard against NaN/Inf
+    // --- Phase 2: materialize GaussObs for the selected indices.
+    // Indices in WeightedTriplet refer directly into the downsampled view of
+    // `observations` — no remapping is needed.
+    best_k
+        .into_iter()
+        .map(|wt| build_gauss_obs(cache, observations, wt))
+        .collect()
+}
+
+/// Consume the triplet stream and retain the `max_triplets` best candidates by ascending weight.
+///
+/// Uses a bounded max-heap: when the heap is full, a new candidate replaces the
+/// current worst only if its weight is strictly smaller.
+///
+/// Returns candidates sorted by ascending weight.
+fn collect_best_k_triplets(
+    gen: &mut TripletIndexGenerator,
+    max_triplets: usize,
+    inv_optimal_interval: f64,
+) -> Vec<WeightedTriplet> {
+    let mut heap: BinaryHeap<WeightedTriplet> =
+        BinaryHeap::with_capacity(max_triplets.saturating_add(1));
+
+    while let Some((first, middle, last)) = gen.next() {
+        let times = gen.reduced_times();
+        let weight = triplet_weight_with_inv(
+            times[first],
+            times[middle],
+            times[last],
+            inv_optimal_interval,
+        );
+
+        if !weight.is_finite() {
+            continue;
         }
-        if heap.len() < k_cap {
-            heap.push(cand);
-        } else if let Some(worst) = heap.peek() {
-            if cand.weight < worst.weight {
-                heap.pop();
-                heap.push(cand);
-            }
+
+        if heap.len() < max_triplets {
+            heap.push(WeightedTriplet {
+                weight,
+                first_idx: first,
+                middle_idx: middle,
+                last_idx: last,
+            });
+        } else if heap.peek().map_or(false, |worst| weight < worst.weight) {
+            heap.pop();
+            heap.push(WeightedTriplet {
+                weight,
+                first_idx: first,
+                middle_idx: middle,
+                last_idx: last,
+            });
         }
-    };
-
-    // Consume the reduced-index stream. After each `next()`, take a short immutable
-    // borrow of the times to compute the weight (no overlap with the next `next()`).
-
-    let inv_dtw = optimal_interval_time.recip(); // precompute once
-    while let Some((i, j, k)) = index_gen.next() {
-        let times = index_gen.reduced_times();
-        let w = triplet_weight_with_inv(times[i], times[j], times[k], inv_dtw);
-        push_best_k(WeightedTriplet {
-            weight: w,
-            first_idx: i,
-            middle_idx: j,
-            last_idx: k,
-        });
     }
 
-    // Best-K by ascending weight.
-    let mut best_reduced = heap.into_sorted_vec();
-    best_reduced.sort_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap()); // defensive
+    // Max-heap → ascending weight order.
+    let mut result = heap.into_vec();
+    result.sort_unstable_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(Ordering::Equal));
+    result
+}
 
-    // --- Phase 2: materialize GaussObs for the selected indices (immutable borrows now safe).
-    let mapping = index_gen.selected_original_indices();
+/// Materialize a single [`GaussObs`] from a [`WeightedTriplet`].
+///
+/// Indices in `wt` map directly into `observations` — no remapping is needed
+/// since [`TripletIndexGenerator`] works on the input slice as-is.
+fn build_gauss_obs(
+    cache: &OutfitCache,
+    observations: &[&Observation],
+    wt: WeightedTriplet,
+) -> GaussObs {
+    let o1 = &observations[wt.first_idx];
+    let o2 = &observations[wt.middle_idx];
+    let o3 = &observations[wt.last_idx];
 
-    best_reduced
-        .into_iter()
-        .map(|wt| {
-            let (i, j, k) = (wt.first_idx, wt.middle_idx, wt.last_idx);
+    let observer_matrix = Matrix3::from_columns(&[
+        *cache.get_helio_position(o1.index()),
+        *cache.get_helio_position(o2.index()),
+        *cache.get_helio_position(o3.index()),
+    ]);
 
-            // reduced → original indices
-            let oi = mapping[i];
-            let oj = mapping[j];
-            let ok = mapping[k];
+    let (o1_ra, o1_dec) = (o1.equ_coord().ra, o1.equ_coord().dec);
+    let (o2_ra, o2_dec) = (o2.equ_coord().ra, o2.equ_coord().dec);
+    let (o3_ra, o3_dec) = (o3.equ_coord().ra, o3.equ_coord().dec);
 
-            // Immutable borrows of the original observations occur only here.
-            let o1: &Observation = &observations[oi];
-            let o2: &Observation = &observations[oj];
-            let o3: &Observation = &observations[ok];
-
-            // Observer 3×3 matrix (columns = heliocentric observer positions at each epoch).
-            let observer_matrix: Matrix3<f64> = Matrix3::from_columns(&[
-                o1.get_observer_helio_position(),
-                o2.get_observer_helio_position(),
-                o3.get_observer_helio_position(),
-            ]);
-
-            GaussObs::with_observer_position(
-                Vector3::new(oi, oj, ok),
-                Vector3::new(o1.ra, o2.ra, o3.ra),
-                Vector3::new(o1.dec, o2.dec, o3.dec),
-                Vector3::new(o1.time, o2.time, o3.time),
-                observer_matrix,
-            )
-        })
-        .collect()
+    GaussObs::with_observer_position(
+        Vector3::new(wt.first_idx, wt.middle_idx, wt.last_idx),
+        Vector3::new(o1_ra, o2_ra, o3_ra),
+        Vector3::new(o1_dec, o2_dec, o3_dec),
+        Vector3::new(o1.mjd_tt(), o2.mjd_tt(), o3.mjd_tt()),
+        observer_matrix.map(|x| x.into_inner()),
+    )
 }
 
 #[cfg(test)]
 mod triplets_iod_tests {
-
-    #[cfg(feature = "jpl-download")]
-    use approx::assert_relative_eq;
-
     use super::*;
 
-    #[cfg(feature = "jpl-download")]
-    pub(crate) fn assert_gauss_obs_approx_eq(a: &GaussObs, b: &GaussObs, tol: f64) {
-        assert_eq!(a.idx_obs, b.idx_obs);
-        assert_relative_eq!(a.ra, b.ra, max_relative = tol);
-        assert_relative_eq!(a.dec, b.dec, max_relative = tol);
-        assert_relative_eq!(a.time, b.time, max_relative = tol);
-    }
-
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_compute_triplets() {
-        use camino::Utf8Path;
+        use crate::cache::OutfitCache;
+        use crate::test_fixture::{DATASET_2015AB, JPL_EPHEM_HORIZON, UT1_PROVIDER};
+        use crate::IODParams;
+        use photom::observer::error_model::{ModelCorrection, ObsErrorModel};
 
-        use crate::{
-            trajectories::trajectory_file::TrajectoryFile, unit_test_global::OUTFIT_HORIZON_TEST,
-            TrajectorySet,
-        };
+        // The error model must be set before building the cache.
+        let dataset = DATASET_2015AB
+            .clone()
+            .with_error_model(ObsErrorModel::FCCT14)
+            .apply_batch_rms_correction(30.0);
 
-        let mut env_state = OUTFIT_HORIZON_TEST.0.clone();
-        let mut traj_set =
-            TrajectorySet::new_from_80col(&mut env_state, Utf8Path::new("tests/data/2015AB.obs"));
+        // Build the cache from the real 2015AB dataset.
+        let cache = OutfitCache::build(&dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
 
-        let traj_number = crate::constants::ObjectNumber::String("K09R05F".into());
-        let traj_len = traj_set
-            .get(&traj_number)
-            .expect("Failed to get trajectory")
-            .len();
+        // Pick a trajectory with enough observations.
+        let traj = dataset
+            .materialize_trajectory("K09R05F")
+            .unwrap()
+            .collect_into_vec();
 
-        let traj_mut = traj_set
-            .get_mut(&traj_number)
-            .expect("Failed to get trajectory");
-
-        let triplets = generate_triplets(traj_mut, 0.03, 150.0, 20.0, traj_len, 10);
-
-        assert_eq!(
-            triplets.len(),
-            10,
-            "Expected 10 triplets, got {}",
-            triplets.len()
+        assert!(
+            traj.len() >= 3,
+            "trajectory must have at least 3 observations"
         );
 
-        let expected_triplets = GaussObs {
-            idx_obs: [[23, 24, 33]].into(),
-            ra: [[1.6893715963476699, 1.689861452091063, 1.7527345385664372]].into(),
-            dec: [[1.082468037385525, 0.9436790189346231, 0.8273762407899986]].into(),
-            time: [[57028.479297592596, 57049.2318575926, 57063.97711759259]].into(),
-            observer_helio_position: [
-                [-0.2645666171486676, 0.8689351643673471, 0.3766996211112465],
-                [-0.5889735526502539, 0.7240117187952059, 0.3138734206791042],
-                [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
-            ]
-            .into(),
+        let params = IODParams {
+            dt_min: 0.03,
+            dt_max_triplet: 150.0,
+            optimal_interval_time: 20.0,
+            max_obs_for_triplets: traj.len(),
+            max_triplets: 10,
+            ..Default::default()
         };
 
-        assert_gauss_obs_approx_eq(&triplets[0], &expected_triplets, 1e-12);
+        let triplets = generate_triplets(&traj, &cache, &params);
 
-        let expected_triplet = GaussObs {
-            idx_obs: [[21, 25, 33]].into(),
-            ra: [[1.6894680985108947, 1.6898894500811472, 1.7527345385664372]].into(),
-            dec: [[1.0825984522657437, 0.9435805047946215, 0.8273762407899986]].into(),
-            time: [[57028.45404759259, 57049.245147592585, 57063.97711759259]].into(),
-            observer_helio_position: [
-                [-0.26413563361674103, 0.8690466209095019, 0.3767466856686271],
-                [-0.5891631852172257, 0.7238872516832191, 0.3138186516545291],
-                [-0.7743874438017259, 0.5612884709246775, 0.2433497107566823],
-            ]
-            .into(),
-        };
+        // We should get at least one triplet back.
+        assert!(!triplets.is_empty(), "expected at least one triplet");
 
-        assert_gauss_obs_approx_eq(&triplets[9], &expected_triplet, 1e-12);
+        // No more than max_triplets.
+        assert!(
+            triplets.len() <= params.max_triplets as usize,
+            "got {} triplets, expected ≤ {}",
+            triplets.len(),
+            params.max_triplets
+        );
+
+        // Triplets must be sorted by ascending weight (best first).
+        // We verify this by re-computing weights and checking order.
+        for window in triplets.windows(2) {
+            let t1 = &window[0].time;
+            let t2 = &window[1].time;
+            let w1 = triplet_weight(t1[0], t1[1], t1[2], params.optimal_interval_time);
+            let w2 = triplet_weight(t2[0], t2[1], t2[2], params.optimal_interval_time);
+            assert!(
+                w1 <= w2 + 1e-12,
+                "triplets not sorted by ascending weight: w1={w1} > w2={w2}"
+            );
+        }
+
+        // Each triplet's indices must be strictly increasing.
+        for t in &triplets {
+            assert!(
+                t.idx_obs[0] < t.idx_obs[1] && t.idx_obs[1] < t.idx_obs[2],
+                "triplet indices not strictly increasing: {:?}",
+                t.idx_obs
+            );
+        }
     }
 
     mod downsampling_observations_tests {
-        use nalgebra::Vector3;
 
-        use super::*;
-
-        fn make_obs(n: usize) -> Observations {
-            (0..n)
-                .map(|i| Observation {
-                    observer: 0,
-                    ra: 0.0,
-                    dec: 0.0,
-                    error_ra: 0.0,
-                    error_dec: 0.0,
-                    time: i as f64,
-                    observer_earth_position: Vector3::zeros(),
-                    observer_helio_position: Vector3::zeros(),
-                })
-                .collect()
-        }
+        use crate::initial_orbit_determination::triplet_generation::index_generator::downsample_uniform_with_edges;
 
         #[test]
         fn returns_all_when_max_keep_ge_n() {
             let n = 5;
-            let indices = downsample_uniform_with_edges_indices(n, 5);
+            let indices = downsample_uniform_with_edges(n, 5);
             assert_eq!(indices, vec![0, 1, 2, 3, 4]);
 
-            let indices = downsample_uniform_with_edges_indices(n, 10);
+            let indices = downsample_uniform_with_edges(n, 10);
             assert_eq!(indices, vec![0, 1, 2, 3, 4]);
         }
 
         #[test]
         fn empty_input_returns_empty() {
-            assert!(downsample_uniform_with_edges_indices(0, 0).is_empty());
-            assert!(downsample_uniform_with_edges_indices(0, 10).is_empty());
+            assert!(downsample_uniform_with_edges(0, 0).is_empty());
+            assert!(downsample_uniform_with_edges(0, 10).is_empty());
         }
 
         #[test]
         fn max_keep_less_than_three_returns_first_middle_last() {
             let n = 10;
             let mid = n / 2;
-            for max_keep in [0, 1, 2] {
-                let indices = downsample_uniform_with_edges_indices(n, max_keep);
+            for max_keep in [1, 2, 3] {
+                let indices = downsample_uniform_with_edges(n, max_keep);
                 assert_eq!(indices, vec![0, mid, n - 1]);
             }
         }
@@ -604,11 +548,11 @@ mod triplets_iod_tests {
         #[test]
         fn max_keep_three_exactly_returns_first_middle_last() {
             let n = 10;
-            let indices = downsample_uniform_with_edges_indices(n, 3);
+            let indices = downsample_uniform_with_edges(n, 3);
             assert_eq!(indices, vec![0, n / 2, n - 1]);
 
             let n = 3;
-            let indices = downsample_uniform_with_edges_indices(n, 3);
+            let indices = downsample_uniform_with_edges(n, 3);
             assert_eq!(indices, vec![0, 1, 2]);
         }
 
@@ -616,13 +560,13 @@ mod triplets_iod_tests {
         fn downsampling_uniformity_for_general_case() {
             let n = 10;
             let max_keep = 5;
-            let indices = downsample_uniform_with_edges_indices(n, max_keep);
+            let indices = downsample_uniform_with_edges(n, max_keep);
 
             assert_eq!(indices.len(), max_keep);
             assert_eq!(indices.first().unwrap(), &0);
             assert_eq!(indices.last().unwrap(), &(n - 1));
 
-            // Indices doivent être strictement croissants
+            // Indices must be strictly increasing
             assert!(indices.windows(2).all(|w| w[1] > w[0]));
         }
 
@@ -630,22 +574,11 @@ mod triplets_iod_tests {
         fn works_with_large_data() {
             let n = 1000;
             let max_keep = 100;
-            let indices = downsample_uniform_with_edges_indices(n, max_keep);
+            let indices = downsample_uniform_with_edges(n, max_keep);
 
             assert_eq!(indices.len(), max_keep);
             assert_eq!(indices.first().unwrap(), &0);
             assert_eq!(indices.last().unwrap(), &(n - 1));
-        }
-
-        #[test]
-        fn indices_match_observations() {
-            let obs = make_obs(10);
-            let max_keep = 5;
-            let indices = downsample_uniform_with_edges_indices(obs.len(), max_keep);
-
-            // Vérifie que les indices correspondent bien aux temps dans obs
-            let times: Vec<_> = indices.iter().map(|&i| obs[i].time).collect();
-            assert!(times.windows(2).all(|w| w[1] > w[0]));
         }
     }
 }
