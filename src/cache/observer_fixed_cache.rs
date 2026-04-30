@@ -13,6 +13,7 @@ pub type ObserverFixedPosition = Vector3<NotNan<f64>>;
 /// Precomputed **body-fixed** velocity of the observer in **AU/day**.
 pub type ObserverFixedVelocity = Vector3<NotNan<f64>>;
 
+#[derive(Debug)]
 pub struct ObserverFixedCache {
     observer_fixed_positions: ObserverFixedPosition,
     observer_fixed_velocities: ObserverFixedVelocity,

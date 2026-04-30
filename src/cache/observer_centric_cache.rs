@@ -154,8 +154,15 @@ mod observer_test {
 
     #[test]
     fn test_helio_pos_obs() {
-        let (lon, lat, h) = (203.744090000, 20.707233557, 3067.694);
-        let pan_starrs = to_observer(lon, lat, h, Some("Pan-STARRS 1".to_string()), None, None);
+        let (lon, lat, h) = (203.744090000_f64, 20.707233557_f64, 3067.694_f64);
+        let pan_starrs = to_observer(
+            lon.to_radians(),
+            lat.to_radians(),
+            h,
+            Some("Pan-STARRS 1".to_string()),
+            None,
+            None,
+        );
         let observer_fixed_cache: ObserverFixedCache = (&pan_starrs).try_into().unwrap();
 
         let cases = [

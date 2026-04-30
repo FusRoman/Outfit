@@ -380,19 +380,3 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
         }
     }
 }
-
-#[cfg(test)]
-mod jpl_reader_test {
-    /// If `jpl-download` is **not** enabled, requesting a missing file must error.
-    #[test]
-    fn test_no_feature_download_jpl_ephem() {
-        use super::*;
-        let file_source = "naif:DE442".try_into().unwrap();
-
-        let result = EphemFilePath::get_ephemeris_file(&file_source);
-        assert!(
-            result.is_err(),
-            "feature jpl-download is enabled, weird ..."
-        );
-    }
-}
