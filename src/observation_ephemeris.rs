@@ -672,6 +672,7 @@ mod test_observations_ephemeris {
             dec_error: f64,
             t_obs: f64,
             mpc_code: MpcCode,
+            apply_model_errors: bool,
         ) -> (ObsDataset, OutfitCache) {
             let observation_input = ObservationInput::new(
                 0,
@@ -694,8 +695,13 @@ mod test_observations_ephemeris {
                 .push_observation(vec![observation_input])
                 .unwrap()
                 .0
-                .with_error_model(ObsErrorModel::FCCT14)
-                .apply_model_errors();
+                .with_error_model(ObsErrorModel::FCCT14);
+
+            let obs_dataset = if apply_model_errors {
+                obs_dataset.apply_model_errors()
+            } else {
+                obs_dataset
+            };
 
             let cache =
                 OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
@@ -750,6 +756,7 @@ mod test_observations_ephemeris {
                 1.259_582_891_829_317_7E-6,
                 57070.262067592594,
                 *b"F51",
+                false,
             );
 
             let equinoctial_element = EquinoctialElements {
@@ -773,7 +780,7 @@ mod test_observations_ephemeris {
             let equinoctial = simple_equinoctial(t_obs);
 
             let (obs_dataset, cache) =
-                make_obs_dataset_and_cache_mpc(0.0, 1e-6, 0.0, 1e-6, t_obs, *b"F51");
+                make_obs_dataset_and_cache_mpc(0.0, 1e-6, 0.0, 1e-6, t_obs, *b"F51", true);
 
             let obs = obs_dataset.get_observation(0).unwrap();
             let (alpha, delta) = obs
@@ -781,7 +788,7 @@ mod test_observations_ephemeris {
                 .unwrap();
 
             let (obs_dataset_match, cache_match) =
-                make_obs_dataset_and_cache_mpc(alpha, 1e-6, delta, 1e-6, t_obs, *b"F51");
+                make_obs_dataset_and_cache_mpc(alpha, 1e-6, delta, 1e-6, t_obs, *b"F51", true);
 
             let obs_match = obs_dataset_match.get_observation(0).unwrap();
             let error = obs_match
@@ -797,15 +804,22 @@ mod test_observations_ephemeris {
             let equinoctial = simple_equinoctial(t_obs);
 
             let (obs_dataset, cache) =
-                make_obs_dataset_and_cache_mpc(0.0, 1e-3, 0.0, 1e-3, t_obs, *b"F51");
+                make_obs_dataset_and_cache_mpc(0.0, 1e-3, 0.0, 1e-3, t_obs, *b"F51", true);
 
             let obs = obs_dataset.get_observation(0).unwrap();
             let (alpha, delta) = obs
                 .compute_apparent_position(&cache, &JPL_EPHEM_HORIZON, &equinoctial)
                 .unwrap();
 
-            let (obs_dataset_offset, cache_offset) =
-                make_obs_dataset_and_cache_mpc(alpha + 1e-3, 1e-3, delta, 1e-3, t_obs, *b"F51");
+            let (obs_dataset_offset, cache_offset) = make_obs_dataset_and_cache_mpc(
+                alpha + 1e-3,
+                1e-3,
+                delta,
+                1e-3,
+                t_obs,
+                *b"F51",
+                true,
+            );
 
             let obs_offset = obs_dataset_offset.get_observation(0).unwrap();
             let err = obs_offset
@@ -821,7 +835,7 @@ mod test_observations_ephemeris {
             let equinoctial = simple_equinoctial(t_obs);
 
             let (obs_dataset, cache) =
-                make_obs_dataset_and_cache_mpc(0.0, 1e-6, 0.0, 1e-6, t_obs, *b"F51");
+                make_obs_dataset_and_cache_mpc(0.0, 1e-6, 0.0, 1e-6, t_obs, *b"F51", true);
 
             let obs = obs_dataset.get_observation(0).unwrap();
             let (alpha, delta) = obs
@@ -835,6 +849,7 @@ mod test_observations_ephemeris {
                 1e-6,
                 t_obs,
                 *b"F51",
+                true,
             );
 
             let obs_wrapped = obs_dataset_wrapped.get_observation(0).unwrap();
@@ -851,7 +866,7 @@ mod test_observations_ephemeris {
             let equinoctial = simple_equinoctial(t_obs);
 
             let (obs_dataset, cache) =
-                make_obs_dataset_and_cache_mpc(0.0, 1.0, 0.0, 1.0, t_obs, *b"F51");
+                make_obs_dataset_and_cache_mpc(0.0, 1.0, 0.0, 1.0, t_obs, *b"F51", true);
 
             let obs = obs_dataset.get_observation(0).unwrap();
             let (alpha, delta) = obs
@@ -865,6 +880,7 @@ mod test_observations_ephemeris {
                 10.0,
                 t_obs,
                 *b"F51",
+                true,
             );
 
             let obs_large = obs_dataset_large.get_observation(0).unwrap();

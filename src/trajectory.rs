@@ -542,13 +542,19 @@ mod test_obs_ext {
 
     #[test]
     fn test_select_rms_interval() {
-        let traj = DATASET_2015AB
+        let corrected_dataset = DATASET_2015AB
+            .clone()
+            .with_error_model(ObsErrorModel::FCCT14)
+            .apply_model_errors();
+
+        let traj = corrected_dataset
             .materialize_trajectory("K09R05F")
             .unwrap()
             .collect_into_vec();
         let traj_len = traj.len();
 
-        let cache = OutfitCache::build(&DATASET_2015AB, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+        let cache =
+            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
 
         let iod_params = IODParams {
             dt_min: 0.03,
@@ -660,7 +666,7 @@ mod test_obs_ext {
             )
             .unwrap();
 
-        assert_eq!(rms, 68.88650730830162);
+        assert_eq!(rms, 153.84607281520138);
     }
 
     mod proptests_extract_errors {
@@ -795,16 +801,16 @@ mod test_obs_ext {
         let orbit = binding.get_orbit();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 57049.22904488294,
-            semi_major_axis: 1.801748431600605,
-            eccentricity: 0.283572284127787,
-            inclination: 0.20266779609836036,
-            ascending_node_longitude: 0.008022659889281067,
-            periapsis_argument: 1.245060173584828,
-            mean_anomaly: 0.44047943792316746,
+            reference_epoch: 57049.22904475403,
+            semi_major_axis: 1.8017609974509807,
+            eccentricity: 0.2835733667643381,
+            inclination: 0.20267686119302475,
+            ascending_node_longitude: 0.00799201841873464,
+            periapsis_argument: 1.245034216916367,
+            mean_anomaly: 0.4405089048961484,
         });
 
         assert!(approx_equal(orbit, &expected_orbit, 1e-14));
-        assert_relative_eq!(best_rms, 55.14810894219461, epsilon = 1e-14);
+        assert_relative_eq!(best_rms, 222.16583195747745, epsilon = 1e-14);
     }
 }

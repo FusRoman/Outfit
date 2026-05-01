@@ -10,6 +10,8 @@ use crate::{
     cache::OutfitCache, trajectory::TrajectoryFit, GaussResult, IODParams, JPLEphem, OutfitError,
 };
 
+/// Type alias for the RMS of normalized residuals from an IOD fit.
+/// This is a single scalar value representing the overall fit quality of the IOD solution.
 pub type IODRMS = f64;
 
 /// Full batch orbit determination results.
