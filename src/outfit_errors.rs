@@ -45,8 +45,8 @@
 //! **When**: Parsing observations, fixed-width records, ADES, or internal streams.
 //!
 //! - [`NomParsingError`](crate::outfit_errors::OutfitError::NomParsingError)
-//! - [`Parsing80ColumnFileError`](crate::outfit_errors::OutfitError::Parsing80ColumnFileError)
-//! - [`Parquet`](crate::outfit_errors::OutfitError::Parquet)
+//! - `Parsing80ColumnFileError` *(photom crate)*
+//! - `Parquet` *(photom crate)*
 //!
 //! **Typical causes**: schema drift; corrupted inputs; locale-specific formats;
 //! columnar format mismatches.
@@ -131,8 +131,8 @@
 //!
 //! ## See also
 //! -------------
-//! * [`Outfit`](crate::outfit::Outfit) – main crate context using this error type.
-//! * [`ParseObsError`](crate::trajectories::mpc_80col_reader::ParseObsError) – observation parsing errors.
+//! * `Outfit` – main crate context using this error type.
+//! * `ParseObsError` *(photom crate)* – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
 use photom::{

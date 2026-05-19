@@ -1,3 +1,36 @@
+//! Precomputed observer-centric positions for every observation epoch.
+//!
+//! This module computes and caches the **geocentric** and **heliocentric** position
+//! (and velocity) of each observer at the precise epoch of each observation. Unlike
+//! the body-fixed quantities in [`crate::cache::observer_fixed_cache`], these values
+//! depend on the observation time: Earth's rotation and orbital motion must be
+//! integrated at each epoch using the JPL ephemeris and the UT1 time scale.
+//!
+//! # Workflow
+//!
+//! 1. For each observation, look up the pre-built [`ObserverFixedCache`] by observer ID.
+//! 2. Call [`photom::observer::Observer::pvobs`] with the observation epoch and the
+//!    body-fixed cache to obtain the **geocentric position and velocity** in the
+//!    mean ecliptic J2000 frame.
+//! 3. Call [`photom::observer::Observer::helio_position`] with the JPL ephemeris to
+//!    add the geocentric Earth position and obtain the **heliocentric position**.
+//! 4. Store the results in [`ObserverCentricCache`].
+//!
+//! # Coordinate system
+//!
+//! All output vectors are expressed in the **ecliptic mean J2000** reference frame:
+//!
+//! - positions in **AU**
+//! - velocities in **AU/day**
+//!
+//! # Organisation
+//!
+//! - [`ObserverGeocentricPosition`] / [`ObserverGeocentricVelocity`] /
+//!   [`ObserverHeliocentricPosition`] — NaN-safe 3-vector type aliases.
+//! - [`ObserverCentricCache`] — epoch-dependent position/velocity for one observation.
+//! - [`CentricObserverCache`] — `Vec` of [`ObserverCentricCache`], indexed by `ObsIndex`.
+//! - [`build_centric_observer_cache`] — constructs the full vector for a dataset.
+
 use hifitime::{ut1::Ut1Provider, Epoch};
 use nalgebra::Vector3;
 use ordered_float::NotNan;
@@ -9,22 +42,63 @@ use crate::{
     JPLEphem, OutfitError,
 };
 
-/// Geocentric position of the observer at `time` of an observation (AU, ecliptic mean J2000).
+/// Geocentric position of the observer at the epoch of an observation.
+///
+/// Expressed in the **ecliptic mean J2000** frame, in **AU**.
+/// Uses [`NotNan<f64>`] components to enforce NaN-safety at construction time.
 pub type ObserverGeocentricPosition = Vector3<NotNan<f64>>;
-/// Geocentric velocity of the observer at `time` of an observation (AU/day, ecliptic mean J2000).
+
+/// Geocentric velocity of the observer at the epoch of an observation.
+///
+/// Expressed in the **ecliptic mean J2000** frame, in **AU/day**.
+/// Uses [`NotNan<f64>`] components to enforce NaN-safety at construction time.
 pub type ObserverGeocentricVelocity = Vector3<NotNan<f64>>;
-/// Heliocentric position of the observer at `time` of an observation (AU, ecliptic mean J2000).
+
+/// Heliocentric position of the observer at the epoch of an observation.
+///
+/// This is the sum of the geocentric observer position and the geocentric
+/// position of the Earth's centre, both in the **ecliptic mean J2000** frame,
+/// in **AU**.
+/// Uses [`NotNan<f64>`] components to enforce NaN-safety at construction time.
 pub type ObserverHeliocentricPosition = Vector3<NotNan<f64>>;
 
-/// Geocentric and heliocentric observer positions for a single observation epoch.
+/// Geocentric and heliocentric observer state for a single observation epoch.
+///
+/// Built for each observation in the dataset by [`build_centric_observer_cache`].
+/// The fields are indexed positionally: the *i*-th element of
+/// [`CentricObserverCache`] corresponds to the *i*-th observation in the dataset
+/// (i.e., at `ObsIndex` *i*).
+///
+/// All vectors are in the **ecliptic mean J2000** frame.
 #[derive(Debug)]
 pub struct ObserverCentricCache {
+    /// Geocentric position of the observer at the observation epoch, in AU.
     pub geo_position: ObserverGeocentricPosition,
+    /// Geocentric velocity of the observer at the observation epoch, in AU/day.
     pub geo_velocity: ObserverGeocentricVelocity,
+    /// Heliocentric position of the observer at the observation epoch, in AU.
     pub helio_position: ObserverHeliocentricPosition,
 }
 
 impl ObserverCentricCache {
+    /// Computes the geocentric and heliocentric observer state at a given observation epoch.
+    ///
+    /// # Arguments
+    ///
+    /// - `jpl` — JPL planetary ephemeris used to obtain the geocentric Earth position.
+    /// - `ut1_provider` — UT1 time scale data required to compute Earth's sidereal angle
+    ///   at the observation epoch.
+    /// - `obs_time` — observation epoch as a Modified Julian Date in the TT time scale
+    ///   (see [`MJDTT`]).
+    /// - `observer_fixed_cache` — precomputed body-fixed position and velocity of the
+    ///   observer (see [`ObserverFixedCache`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OutfitError`] if:
+    /// - [`photom::observer::Observer::pvobs`] fails (e.g., missing UT1 data for the epoch), or
+    /// - [`photom::observer::Observer::helio_position`] fails (e.g., epoch out of range
+    ///   for the JPL ephemeris).
     pub fn new(
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
@@ -45,8 +119,46 @@ impl ObserverCentricCache {
     }
 }
 
+/// Full observer-centric cache for an entire observation dataset.
+///
+/// A contiguous `Vec` where the element at index *i* holds the precomputed
+/// geocentric and heliocentric state for the *i*-th observation
+/// (i.e., at [`photom::ObsIndex`] *i*).
 pub type CentricObserverCache = Vec<ObserverCentricCache>;
 
+/// Builds the [`CentricObserverCache`] for every observation in a dataset.
+///
+/// Iterates over all observations in `obs_dataset`, looks up the pre-built
+/// body-fixed cache entry for the corresponding observer, and computes the
+/// epoch-dependent geocentric and heliocentric state via
+/// [`ObserverCentricCache::new`].
+///
+/// # Arguments
+///
+/// - `jpl` — JPL planetary ephemeris used to compute Earth's heliocentric position.
+/// - `ut1_provider` — UT1 time scale data for Earth rotation at each epoch.
+/// - `obs_dataset` — the full observation dataset to process.
+/// - `observer_fixed_cache` — pre-built map from [`photom::observer::dataset::ObserverId`]
+///   to body-fixed observer state (see [`BodyFixedObserverCache`]).
+///
+/// # Errors
+///
+/// Returns [`OutfitError`] if:
+/// - any observation has no associated observer ID
+///   ([`OutfitError::ObserverIdIsNone`]), or
+/// - the observer ID is not found in `observer_fixed_cache`, or
+/// - [`ObserverCentricCache::new`] fails for any observation epoch.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let centric_cache = build_centric_observer_cache(
+///     &jpl,
+///     &ut1_provider,
+///     &obs_dataset,
+///     &fixed_cache,
+/// )?;
+/// ```
 pub fn build_centric_observer_cache(
     jpl: &JPLEphem,
     ut1_provider: &Ut1Provider,

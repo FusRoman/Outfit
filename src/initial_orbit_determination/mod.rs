@@ -7,7 +7,7 @@
 //! ## Purpose
 //!
 //! The [`IODParams`](crate::initial_orbit_determination::IODParams) object centralizes all tunable parameters used by
-//! [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+//! [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
 //! It allows you to:
 //!
 //! - Select and filter candidate observation triplets (time spans, downsampling, maximum counts),
@@ -69,7 +69,7 @@
 //!
 //! ## See also
 //!
-//! * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – main IOD entry point
+//! * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point
 //! * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss solver
 //! * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result type for preliminary/corrected orbits
 //! * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection
@@ -82,7 +82,7 @@ pub mod gauss_result;
 pub mod triplet_generation;
 
 /// Configuration parameters controlling the behavior of
-/// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+/// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
 ///
 /// This structure centralizes all tunable parameters used during
 /// preliminary orbit determination with the Gauss method. It lets you adjust:
@@ -209,7 +209,7 @@ pub mod triplet_generation;
 ///
 /// See also
 /// -----------------
-/// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – main IOD entry point.
+/// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss pipeline.
 /// * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result types for preliminary/corrected solutions.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection.
@@ -270,15 +270,14 @@ impl IODParams {
     ///
     /// This is a **fluent builder API** for [`IODParams`], allowing you to
     /// override the default parameters step by step before running
-    /// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+    /// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use rand::{rngs::StdRng, SeedableRng};
     /// use outfit::initial_orbit_determination::IODParams;
-    /// use outfit::constants::Observations;
-    /// use outfit::observations::observations_ext::ObservationIOD;
+    /// use outfit::obs_dataset::FitIOD;
     ///
     /// let params = IODParams::builder()
     ///     .n_noise_realizations(100)
@@ -287,16 +286,12 @@ impl IODParams {
     ///     .max_triplets(50)
     ///     .build().unwrap();
     ///
-    /// # let observations: Observations = unimplemented!();
-    /// # let state = unimplemented!();
-    /// # let error_model = unimplemented!();
-    /// # let mut rng = StdRng::seed_from_u64(42);
-    /// # let _ = observations.estimate_best_orbit(&state, &error_model, &mut rng, &params);
+    /// // Pass `params` to `FitIOD::fit_iod` or `FitIOD::fit_full_iod`.
     /// ```
     ///
     /// # See also
     /// * [`IODParams`] – Holds all configuration parameters for IOD.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – Consumes these parameters to perform orbit determination.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – Consumes these parameters to perform orbit determination.
     pub fn builder() -> IODParamsBuilder {
         IODParamsBuilder::new()
     }
@@ -537,7 +532,7 @@ impl IODParamsBuilder {
     /// ```
     ///
     /// When `.build()` succeeds, the resulting [`IODParams`] can be passed
-    /// to [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+    /// to [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
     pub fn build(self) -> Result<IODParams, OutfitError> {
         let p = &self.params;
 

@@ -36,7 +36,7 @@
 //!
 //! This type is returned by functions such as
 //! [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit)
-//! or [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+//! or [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
 //!
 //! ```rust,no_run
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;

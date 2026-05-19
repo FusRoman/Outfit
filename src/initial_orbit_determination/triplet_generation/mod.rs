@@ -39,16 +39,17 @@
 //!
 //! ## Example
 //!
-//! ```rust,no_run
-//! use outfit::constants::Observations;
-//! use outfit::observations::triplets_iod::generate_triplets;
+//! ```rust,ignore
+//! use outfit::initial_orbit_determination::triplet_generation::generate_triplets;
 //!
-//! // Your observations loaded elsewhere:
-//! let mut obs: Observations = unimplemented!();
+//! // Your observations loaded elsewhere (sorted by ascending epoch):
+//! let obs: Vec<&Observation> = unimplemented!();
+//! let cache: &OutfitCache = unimplemented!();
 //!
 //! // Build best triplets for Gauss IOD
 //! let triplets = generate_triplets(
-//!     &mut obs,
+//!     &obs,
+//!     cache,
 //!     0.03,   // dt_min [days]
 //!     150.0,  // dt_max [days]
 //!     20.0,   // optimal_interval_time [days]
@@ -57,7 +58,6 @@
 //! );
 //!
 //! // Now pass `triplets` to your Gauss solver…
-//! # Ok::<(), outfit::outfit_errors::OutfitError>(())
 //! ```
 //!
 //! ## Guarantees & edge cases
@@ -71,7 +71,7 @@
 //! - [`generate_triplets`] – Core function assembling and ranking triplets.
 //! - [`triplet_weight`] – Spacing-based scoring rule.
 //! - [`GaussObs`] – Triplet container consumed by the Gauss IOD solver.
-//! - [`crate::observations::observations_ext::ObservationsExt::compute_triplets`] – Higher-level wrapper.
+//! - `ObservationsExt::compute_triplets` – Higher-level wrapper (internal API).
 
 pub mod index_generator;
 

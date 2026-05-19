@@ -182,7 +182,7 @@ impl TripletIndexGenerator {
     /// Build from a time-sorted observation slice, with optional downsampling.
     ///
     /// The input slice **must already be sorted in ascending time order**.
-    /// Downsampling via [`downsample_uniform_with_edges`] is applied, always
+    /// Downsampling via `downsample_uniform_with_edges` is applied, always
     /// preserving the first and last observations.
     ///
     /// Arguments

@@ -1,3 +1,25 @@
+//! Core IOD pipeline trait over sorted observation slices.
+//!
+//! This module defines [`TrajectoryFit`], a `pub(crate)` trait implemented on
+//! `Vec<&Observation>`. It encapsulates the sequential stages of the Gauss
+//! Initial Orbit Determination pipeline:
+//!
+//! 1. **Triplet generation** — [`TrajectoryFit::compute_triplets`] selects the
+//!    best-K observation triplets using a time-windowed enumeration and a
+//!    bounded max-heap scorer.
+//! 2. **RMS interval selection** — [`TrajectoryFit::select_rms_interval`]
+//!    determines the observation arc over which the residual quality metric is
+//!    evaluated.
+//! 3. **RMS evaluation** — [`TrajectoryFit::rms_orbit_error`] measures how
+//!    well a candidate orbit reproduces the arc's astrometry.
+//! 4. **Orbit selection** — [`TrajectoryFit::estimate_best_orbit`] drives the
+//!    full Monte-Carlo noise loop, combining triplets, Gauss solutions, and RMS
+//!    scoring to return the best preliminary orbit.
+//!
+//! The public entry points are [`crate::obs_dataset::FitIOD::fit_iod`] and
+//! [`crate::obs_dataset::FitIOD::fit_full_iod`], which call
+//! [`TrajectoryFit::estimate_best_orbit`] after building the shared cache.
+
 use std::ops::ControlFlow;
 
 use nalgebra::Vector3;

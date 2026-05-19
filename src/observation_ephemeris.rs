@@ -1,3 +1,24 @@
+//! Apparent-position computation and astrometric residuals for individual observations.
+//!
+//! This module provides the [`ObservationEphemeris`](crate::observation_ephemeris::ObservationEphemeris) trait, which extends
+//! [`photom::observation_dataset::observation::Observation`] with two methods:
+//!
+//! - [`ObservationEphemeris::compute_apparent_position`](crate::observation_ephemeris::ObservationEphemeris::compute_apparent_position) — propagates an orbit
+//!   from its reference epoch to the observation epoch, applies the observer
+//!   geometry and aberration correction, and returns the predicted (RA, DEC).
+//! - [`ObservationEphemeris::ephemeris_error`](crate::observation_ephemeris::ObservationEphemeris::ephemeris_error) — computes the sum of squared,
+//!   normalised astrometric residuals between the measured and predicted
+//!   (RA, DEC), suitable as a χ² contribution.
+//!
+//! A stand-alone helper function [`correct_aberration`](crate::observation_ephemeris::correct_aberration) is also exported for
+//! direct use when only the first-order aberration shift is needed.
+//!
+//! # Coordinate conventions
+//!
+//! - Positions are in **AU**, velocities in **AU/day**, angles in **radians**.
+//! - Intermediate computations use the **ecliptic mean J2000** frame; the final
+//!   apparent coordinates are returned in the **equatorial** frame (RA, DEC).
+
 use std::f64::consts::PI;
 
 use hifitime::Epoch;
@@ -55,9 +76,9 @@ pub trait ObservationEphemeris {
     /// See also
     /// ------------
     /// * [`EquinoctialElements::solve_two_body_problem`] – Orbit propagation.
-    /// * [`Observer::pvobs`] – Computes observer’s geocentric position.
+    /// * [`ResolvedObserver::pvobs`](crate::observer_extension::ResolvedObserver::pvobs) – Computes observer's geocentric position.
     /// * [`correct_aberration`] – Aberration correction.
-    /// * [`cartesian_to_radec`] – Convert Cartesian vectors to (RA, DEC).
+    /// * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Convert Cartesian vectors to (RA, DEC).
     fn compute_apparent_position(
         &self,
         cache: &OutfitCache,
@@ -98,10 +119,10 @@ pub trait ObservationEphemeris {
     ///
     /// See also
     /// ------------
-    /// * [`compute_apparent_position`](crate::observations::Observation::compute_apparent_position) – Used internally to obtain predicted RA/DEC.
-    /// * [`Observer::pvobs`] – Computes observer’s geocentric position.
+    /// * [`compute_apparent_position`](crate::observation_ephemeris::ObservationEphemeris::compute_apparent_position) – Used internally to obtain predicted RA/DEC.
+    /// * [`ResolvedObserver::pvobs`](crate::observer_extension::ResolvedObserver::pvobs) – Computes observer's geocentric position.
     /// * [`correct_aberration`] – Applies aberration correction.
-    /// * [`cartesian_to_radec`] – Converts 3D vectors to (RA, DEC).
+    /// * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Converts 3D vectors to (RA, DEC).
     /// * [`EquinoctialElements::solve_two_body_problem`] – Two-body propagation.
     fn ephemeris_error(
         &self,

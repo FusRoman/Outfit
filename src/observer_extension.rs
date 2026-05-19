@@ -1,3 +1,20 @@
+//! Ground-observer geometry: body-fixed and heliocentric position routines.
+//!
+//! This module provides the [`ResolvedObserver`](crate::observer_extension::ResolvedObserver) trait, which extends
+//! [`photom::observer::Observer`] with the geometric computations required
+//! before any orbit determination step:
+//!
+//! - [`ResolvedObserver::earth_fixed_position`](crate::observer_extension::ResolvedObserver::earth_fixed_position) — observer position in the
+//!   geocentric Earth-fixed frame (AU).
+//! - [`ResolvedObserver::earth_fixed_velocity`](crate::observer_extension::ResolvedObserver::earth_fixed_velocity) — observer velocity due to
+//!   Earth's sidereal rotation (AU/day).
+//! - [`ResolvedObserver::pvobs`](crate::observer_extension::ResolvedObserver::pvobs) — geocentric position and velocity in the
+//!   **ecliptic mean J2000** frame at a given epoch, accounting for Earth
+//!   rotation, nutation, and precession.
+//! - [`ResolvedObserver::helio_position`](crate::observer_extension::ResolvedObserver::helio_position) — heliocentric observer position in
+//!   the **equatorial mean J2000** frame (AU), formed by adding the Earth's
+//!   JPL-ephemeris position to the geocentric site vector.
+
 use hifitime::{ut1::Ut1Provider, Epoch};
 use nalgebra::Vector3;
 use ordered_float::NotNan;
@@ -65,7 +82,7 @@ pub trait ResolvedObserver {
     ///     4. Returns position and velocity in the J2000 ecliptic frame (used in classical orbital mechanics).
     ///
     /// # See also
-    /// * [`Observer::body_fixed_coord`] – observer's base vector in Earth-fixed frame
+    /// * [`ResolvedObserver::earth_fixed_position`] – observer's base vector in Earth-fixed frame
     /// * [`rotpn`] – rotation between reference frames
     /// * [`gmst`], [`equequ`] – time-dependent Earth orientation
     fn pvobs(
@@ -104,9 +121,9 @@ pub trait ResolvedObserver {
     ///
     /// See also
     /// ------------
-    /// * [`Observer::pvobs`] – Geocentric position (and velocity) of the site at `epoch`.
-    /// * [`Outfit::get_jpl_ephem`] – Access Earth’s heliocentric state from JPL ephemerides.
-    /// * [`Outfit::get_rot_eclmj2000_to_equmj2000`] – Rotation between ecliptic and equatorial J2000.
+    /// * [`ResolvedObserver::pvobs`] – Geocentric position (and velocity) of the site at `epoch`.
+    /// * [`JPLEphem`] – Access Earth's heliocentric state from JPL ephemerides.
+    /// * [`crate::constants::ROT_ECLMJ2000_TO_EQUMJ2000`] – Rotation between ecliptic and equatorial J2000.
     fn helio_position(
         jpl: &JPLEphem,
         epoch: &Epoch,

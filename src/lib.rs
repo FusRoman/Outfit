@@ -34,15 +34,12 @@
 //!   - Ecliptic ↔ equatorial conversions, RA/DEC parsing, time systems.
 //! - **Ephemerides**:
 //!   - Built-in support for **JPL DE440** (NAIF/SPICE kernels and Horizons format).
-//! - **Observation I/O**:
-//!   - **MPC 80-column**, **ADES XML**, and **Parquet** (batch) readers,
-//!   - Optimized batched loading, automatic per-observer error assignments.
 //! - **Observer management**:
 //!   - Build from **MPC observatory code** or custom geodetic coordinates.
 //! - **Residuals & quality metrics**:
 //!   - RMS computation of normalized astrometric residuals, filtering utilities.
-//! - **Examples & benches**:
-//!   - End-to-end examples in `examples/`, Criterion benchmarks for IOD.
+//! - **Examples**:
+//!   - End-to-end examples in `examples/`.
 //! - **Parallel IOD (feature `parallel`)**:
 //!   - Batched multi-core execution via **Rayon**,
 //!     optional global progress bar when combined with the `progress` feature.
@@ -50,169 +47,108 @@
 //! ### Planned extensions
 //!
 //! - **Vaisalä method** for short arcs,
-//! - Full support for **hyperbolic trajectories**,
+//! - Full support for **hyperbolic trajectories**.
 //!
 //! ## Workflow at a Glance
 //!
-//! 1. **Load observations** (MPC/ADES/Parquet).
-//! 2. **Initialize** an [`Outfit`](crate::Outfit) environment with JPL ephemerides.
-//! 3. **Form triplets** and run the Gauss IOD solver.
-//! 4. **Evaluate residuals** (RMS) and select the best candidate.
+//! 1. **Load observations** into an [`ObsDataset`](photom::observation_dataset::ObsDataset)
+//!    (MPC 80-column, ADES XML, or Parquet).
+//! 2. **Load JPL ephemerides** via [`JPLEphem`] and prepare a UT1 provider.
+//! 3. **Run IOD** by calling [`FitIOD::fit_iod`](obs_dataset::FitIOD::fit_iod) on the dataset.
+//! 4. **Evaluate residuals** (RMS) using the returned [`IODRMS`](obs_dataset::IODRMS).
 //! 5. **Propagate** using Keplerian dynamics or convert to equinoctial elements as needed.
 //!
-//! ## Example (MPC 80-column)
+//! ## Example (single-trajectory IOD from MPC 80-column)
 //!
-//! ```rust
-//! use camino::Utf8Path;
+//! ```rust,no_run
+//! use photom::observation_dataset::ObsDataset;
+//! use photom::observer::error_model::ObsErrorModel;
+//! use hifitime::ut1::Ut1Provider;
 //! use rand::{rngs::StdRng, SeedableRng};
-//! use outfit::{Outfit, ErrorModel, IODParams};
-//! use outfit::constants::ObjectNumber;
-//! use outfit::TrajectorySet;
-//! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
+//! use outfit::obs_dataset::FitIOD;
+//! use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+//! use outfit::IODParams;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
+//!     // Load observations from an MPC 80-column file.
+//!     let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 //!
-//!     // Load observations (80-col MPC).
-//!     let mut trajs = TrajectorySet::new_from_80col(
-//!         &mut env,
-//!         Utf8Path::new("tests/data/2015AB.obs"),
-//!     );
-//!     trajs.add_from_80col(&mut env, Utf8Path::new("tests/data/8467.obs"));
+//!     // Load JPL DE440 ephemeris (Horizons format).
+//!     let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+//!     let jpl = JPLEphem::new(&jpl_source)?;
 //!
-//!     // Select an object.
-//!     let obj = ObjectNumber::String("K09R05F".into());
-//!     let obs = trajs.get_mut(&obj).expect("object not found");
+//!     // Obtain a UT1 provider for Earth orientation corrections.
+//!     let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
 //!
 //!     // Configure IOD.
 //!     let params = IODParams::builder()
 //!         .n_noise_realizations(10)
-//!         .noise_scale(1.1)
-//!         .max_obs_for_triplets(obs.len())
+//!         .max_obs_for_triplets(50)
 //!         .max_triplets(30)
 //!         .build()?;
 //!
 //!     let mut rng = StdRng::seed_from_u64(42);
 //!
-//!     // Run Gauss IOD.
-//!     let (best_orbit, best_rms) = obs.estimate_best_orbit(
-//!         &mut env,
-//!         &ErrorModel::FCCT14,
-//!         &mut rng,
+//!     // Run Gauss IOD for a single trajectory.
+//!     let (best_orbit, best_rms) = dataset.fit_iod(
+//!         "K09R05F",
+//!         &jpl,
+//!         &ut1,
 //!         &params,
+//!         ObsErrorModel::FCCT14,
+//!         &mut rng,
 //!     )?;
 //!
-//!     println!("Best orbit: {:?}", best_orbit);
-//!     println!("RMS: {}", best_rms);
+//!     println!("Best orbit: {best_orbit}");
+//!     println!("RMS: {best_rms:.6}");
 //!     Ok(())
 //! }
 //! ```
 //!
-//! For more end-to-end flows, see the [`examples/`](https://github.com/FusRoman/Outfit/tree/main/examples) folder (e.g. `parquet_to_orbit.rs`).
+//! For more end-to-end flows, see the [`examples/`](https://github.com/FusRoman/Outfit/tree/main/examples) folder.
 //!
-//! ## Example (Parallel batched IOD)
+//! ## Example (batch IOD — all trajectories at once)
 //!
-//! This example requires the `parallel` feature (and optionally `progress` for a global progress bar).
-//!
-//! ```rust
-//! use camino::Utf8Path;
+//! ```rust,no_run
+//! use photom::observation_dataset::ObsDataset;
+//! use photom::observer::error_model::ObsErrorModel;
+//! use hifitime::ut1::Ut1Provider;
 //! use rand::{rngs::StdRng, SeedableRng};
-//! use outfit::{Outfit, ErrorModel, IODParams};
-//! use outfit::constants::ObjectNumber;
-//! use outfit::TrajectorySet;
-//! use outfit::TrajectoryFit;
-//! use outfit::prelude::*; // TrajectoryExt, ObservationIOD
+//! use outfit::obs_dataset::{FitIOD, FullOrbitResult};
+//! use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+//! use outfit::IODParams;
 //!
-//! # #[cfg(all(feature = "parallel", feature = "jpl-download"))]
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut env = Outfit::new("horizon:DE440", ErrorModel::FCCT14)?;
-//!     
-//!     let test_data = "tests/data/test_from_fink.parquet";
-//!     let path_file = Utf8Path::new(test_data);
-//!     
-//!     let ztf_observer = env.get_observer_from_mpc_code(&"I41".into());
-//!     let mut traj_set = TrajectorySet::new_from_parquet(
-//!         &mut env,
-//!         path_file,
-//!         ztf_observer,
-//!         0.5,
-//!         0.5,
-//!         None
-//!     )?;
+//!     let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
+//!
+//!     let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+//!     let jpl = JPLEphem::new(&jpl_source)?;
+//!     let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
 //!
 //!     let params = IODParams::builder()
-//!         .max_obs_for_triplets(12)
 //!         .n_noise_realizations(10)
+//!         .max_obs_for_triplets(50)
 //!         .build()?;
 //!
 //!     let mut rng = StdRng::seed_from_u64(42);
-//!     let batch_size = 256; // tune for locality & memory
 //!
-//!     let results = traj_set.estimate_all_orbits_in_batches_parallel(&env, &mut rng, &params, batch_size);
+//!     // Run Gauss IOD for every trajectory in the dataset.
+//!     let results: FullOrbitResult = dataset.fit_full_iod(
+//!         &jpl,
+//!         &ut1,
+//!         &params,
+//!         ObsErrorModel::FCCT14,
+//!         &mut rng,
+//!     )?;
 //!
-//!     for (obj, res) in results {
+//!     for (traj_id, res) in &results {
 //!         match res {
-//!             Ok((gauss, rms)) => {
-//!                 println!("{} → RMS = {rms:.4}", obj);
-//!                 println!("{gauss}");
-//!             }
-//!             Err(e) => eprintln!("{} → error: {e}", obj),
+//!             Ok((gauss, rms)) => println!("{traj_id} → RMS = {rms:.4}\n{gauss}"),
+//!             Err(e) => eprintln!("{traj_id} → error: {e}"),
 //!         }
 //!     }
-//!
 //!     Ok(())
 //! }
-//!
-//! # #[cfg(not(feature = "parallel"))]
-//! # fn main() {}
-//! ```
-//!
-//! **Notes**
-//! - Batches are processed **in parallel**; each batch is handled **sequentially** to preserve cache locality.
-//! - Per-object RNG seeds are **deterministically derived** from a single base seed.
-//! - Set `RAYON_NUM_THREADS=N` to cap threads if needed.
-//!
-//! ## Data Formats
-//!
-//! - **MPC 80-column** — standard fixed-width astrometry  
-//!   <https://minorplanetcenter.net/iau/info/OpticalObs.html>
-//! - **ADES XML** — IAU’s Astrometric Data Exchange Standard  
-//!   <https://www.iau.org/static/science/scientific_bodies/commissions/f1/ADES-Specification.html>
-//! - **Parquet** — columnar format for large batch processing (typical columns: `ra`, `dec`, `jd`, `trajectory_id`)  
-//!   <https://parquet.apache.org/docs/>
-//!
-//! ## Cargo Features
-//!
-//! - **`jpl-download`**  
-//!   Automatically download JPL ephemerides (NAIF/Horizons) into a local cache.
-//!
-//!   Cache layout (Linux):
-//!   ```text
-//!   ~/.cache/outfit_cache/jpl_ephem/
-//!   ├── jpl_horizon/
-//!   │   └── DE440.bsp
-//!   └── naif/
-//!       └── de440.bsp
-//!   ```
-//!   This feature enables some integration tests and pulls `reqwest`, `tokio`, `tokio-stream`.
-//!
-//! - **`progress`** *(optional)*  
-//!   Enables lightweight progress bars (via `indicatif`) and loop timing utilities for long-running jobs.
-//!
-//! - **`parallel`** *(optional)*  
-//!   Enables **multi-core** IOD via **Rayon**, exposing
-//!   [`TrajectorySet::estimate_all_orbits_in_batches_parallel`](crate::trajectories::trajectory_fit::TrajectoryFit::estimate_all_orbits_in_batches_parallel).
-//!   Combine with `progress` for a thread-safe global progress bar.
-//!
-//! ```toml
-//! [dependencies]
-//! outfit = { version = "...", features = ["jpl-download"] }
-//! # with progress indicators
-//! outfit = { version = "...", features = ["jpl-download", "progress"] }
-//! # with multi-core IOD
-//! outfit = { version = "...", features = ["parallel"] }
-//! # combine as needed
-//! outfit = { version = "...", features = ["jpl-download", "progress", "parallel"] }
 //! ```
 //!
 //! ## Error Handling
@@ -239,13 +175,24 @@
 //!
 //! Developed by **FusRoman** and contributors.
 //!
-//! ## Useful Modules (See also)
-//! ------------
-//! - [`initial_orbit_determination`] — Gauss IOD and helpers.
-//! - [`observations`] — Readers (MPC/ADES/Parquet) and trajectory utilities.
-//! - [`observers`] — Observatory registry and geodetic utilities.
-//! - [`jpl_ephem`] — Ephemerides backends (Horizons/NAIF).
-//! - [`ref_system`] — Reference frame conversions and rotations.
+//! ## See also
+//!
+//! - [`initial_orbit_determination`] — Gauss IOD algorithm, triplet generation, and IOD parameters.
+//! - [`obs_dataset`] — [`FitIOD`](obs_dataset::FitIOD) trait and batch/single-trajectory IOD entry points.
+//! - [`jpl_ephem`] — Ephemerides backends (Horizons/NAIF DE440).
+//! - [`orbit_type`] — Orbital element representations (Keplerian, Equinoctial, Cometary).
+//! - [`ref_system`] — Reference frame transformations.
+//! - [`constants`] — Physical constants and unit conversions.
+//! - [`conversion`] — RA/DEC parsing and coordinate utilities.
+//! - [`earth_orientation`] — Precession, nutation, and obliquity models.
+//! - [`kepler`] — Universal Kepler propagator and Lagrange f–g solver.
+//! - [`orb_elem`] — State-vector to orbital-elements conversion.
+//! - [`outfit_errors`] — Unified error enum for the whole crate.
+//! - [`time`] — Time scale conversions and sidereal time.
+//! - [`cache`] — Precomputed observer position cache.
+//! - [`observation_ephemeris`] — Apparent position computation and ephemeris residuals.
+//! - [`observer_extension`] — Geocentric and heliocentric observer position routines.
+//! - [`trajectory`](crate::obs_dataset) — Core IOD pipeline trait over observation slices.
 
 // === Modules (internals). Keep public modules as they are; the facade is built via `pub use` below.
 
@@ -282,11 +229,20 @@ pub mod ref_system;
 /// Time management and conversions (UTC, TDB, TT).
 pub mod time;
 
+/// Precomputed observer position cache used throughout the fitting pipeline.
 pub mod cache;
+
+/// [`FitIOD`] trait and batch/single-trajectory IOD entry points on [`photom::observation_dataset::ObsDataset`].
 pub mod obs_dataset;
+
+/// Apparent position computation and astrometric residuals for individual observations.
 pub mod observation_ephemeris;
+
+/// Ground-observer geometry: body-fixed and heliocentric position routines.
 pub mod observer_extension;
-pub mod trajectory;
+
+/// Core IOD pipeline trait over sorted observation slices.
+pub(crate) mod trajectory;
 
 // === Public API FACADE =====================================================
 // Re-export carefully curated symbols for a simple, stable top-level API.
@@ -312,6 +268,9 @@ pub use crate::constants::{
 // JPL ephemeris enum for runtime inspection (optional but convenient)
 pub use crate::jpl_ephem::JPLEphem;
 
+// IOD entry points and result types
+pub use crate::obs_dataset::{FitIOD, FullOrbitResult, IODRMS};
+
 // A convenient crate-wide Result alias.
 pub type Result<T> = core::result::Result<T, OutfitError>;
 
@@ -322,7 +281,9 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// use outfit::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::{GaussResult, IODParams, JPLEphem, OutfitError};
+    pub use crate::{
+        FitIOD, FullOrbitResult, GaussResult, IODParams, JPLEphem, OutfitError, IODRMS,
+    };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
 }

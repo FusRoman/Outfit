@@ -323,7 +323,7 @@ impl GaussObs {
     /// ------------
     /// * [`generate_noisy_realizations`](crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations) – Eager version collecting all realizations into a `Vec`.
     /// * [`GaussObs::prelim_orbit`] – Consumes each realization to compute a Gauss preliminary orbit.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – High-level search loop that leverages this iterator with early pruning.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – High-level search loop that leverages this iterator with early pruning.
     pub fn realizations_iter<'a, R: Rng + 'a>(
         self,
         errors_ra: &Vector3<f64>,
@@ -426,7 +426,7 @@ impl GaussObs {
     /// * [`realizations_iter`](crate::initial_orbit_determination::gauss::GaussObs::realizations_iter) – Lazy version that yields realizations on demand and
     ///   supports early-stop pruning.
     /// * [`GaussObs::prelim_orbit`] – Compute a preliminary Gauss solution from each realization.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – End-to-end search that consumes realizations.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – End-to-end search that consumes realizations.
     pub fn generate_noisy_realizations(
         self,
         errors_ra: &Vector3<f64>,
