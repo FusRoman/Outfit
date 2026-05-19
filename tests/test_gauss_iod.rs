@@ -9,13 +9,13 @@ use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
 use outfit::JPLEphem;
 use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 use crate::common::approx_equal;
 
 #[test]
-
 fn test_gauss_iod() {
     let test_max_relative = 1e-11;
     let test_epsilon = 1e-11;
@@ -23,10 +23,10 @@ fn test_gauss_iod() {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_file: EphemFileSource = "naif:DE440"
+    let jpl_file: EphemFileSource = "horizon:DE440"
         .try_into()
         .expect("Failed to parse JPL ephemeris source");
-    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif");
+    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
@@ -51,6 +51,7 @@ fn test_gauss_iod() {
             &jpl_ephem,
             &ut1_provider,
             &default,
+            ObsErrorModel::FCCT14,
             &mut StdRng::seed_from_u64(42),
         )
         .unwrap();
@@ -59,61 +60,61 @@ fn test_gauss_iod() {
     let orbit = best_orbit.get_orbit();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 57049.22904452732,
-        semi_major_axis: 1.8017634341924542,
-        eccentricity: 0.28360400982137396,
-        inclination: 0.20267485730439427,
-        ascending_node_longitude: 0.00810182022710516,
-        periapsis_argument: 1.2445523487100616,
-        mean_anomaly: 0.44069989140091426,
+        reference_epoch: 57049.2684537375,
+        semi_major_axis: 1.801740835743616,
+        eccentricity: 0.28356259478492557,
+        inclination: 0.2026828189979528,
+        ascending_node_longitude: 0.007951791820548622,
+        periapsis_argument: 1.2450647642587158,
+        mean_anomaly: 0.4408048786626789,
     });
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        47.67954270293223,
+        66.97479288637471,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60672.24113100201,
-        semi_major_axis: 3.189546977249391,
-        eccentricity: 0.05434034666134485,
-        inclination: 0.18343383575588465,
-        ascending_node_longitude: 0.03253594968161228,
-        periapsis_argument: 2.0197545218038355,
-        mean_anomaly: 4.85070383704545,
+        reference_epoch: 60672.2443617134,
+        semi_major_axis: 3.2199380906809876,
+        eccentricity: 0.0624192099888107,
+        inclination: 0.1829771029880289,
+        ascending_node_longitude: 0.030775930195064964,
+        periapsis_argument: 1.9053705720223801,
+        mean_anomaly: 4.980622835177979,
     });
 
-    let (best_orbit, best_rms) = full_orbit.remove(&"8467".into()).unwrap().unwrap();
+    let (best_orbit, best_rms) = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
     let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        0.550927559734816,
+        0.5739558189489471,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60465.26778016307,
-        semi_major_axis: 2.192136202201971,
-        eccentricity: 0.2042936374305811,
-        inclination: 0.1189651192106584,
-        ascending_node_longitude: 3.091130251223283,
-        periapsis_argument: 2.4714439663661487,
-        mean_anomaly: 4.9466622638827324,
+        reference_epoch: 60465.26777915681,
+        semi_major_axis: 2.1874983804796972,
+        eccentricity: 0.20256414489486008,
+        inclination: 0.11906245183260411,
+        ascending_node_longitude: 3.0918063960305293,
+        periapsis_argument: 2.4793248309745692,
+        mean_anomaly: 4.934465465531324,
     });
 
-    let (best_orbit, best_rms) = full_orbit.remove(&"33803".into()).unwrap().unwrap();
+    let (best_orbit, best_rms) = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
     let orbit = best_orbit.get_orbit();
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_rms,
-        6.319395085728921,
+        18.963755528781288,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );

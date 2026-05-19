@@ -17,6 +17,7 @@ pub type ObserverGeocentricVelocity = Vector3<NotNan<f64>>;
 pub type ObserverHeliocentricPosition = Vector3<NotNan<f64>>;
 
 /// Geocentric and heliocentric observer positions for a single observation epoch.
+#[derive(Debug)]
 pub struct ObserverCentricCache {
     pub geo_position: ObserverGeocentricPosition,
     pub geo_velocity: ObserverGeocentricVelocity,

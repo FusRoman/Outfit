@@ -75,10 +75,15 @@ pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;
 // Angular velocity of Earth rotation (rad/day) on the z-axis.
 pub const EARTH_ROTATION: Vector3<f64> = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
 
+/// Hard coded rotation matrices for coordinate transformations between mean equatorial J2000 and mean ecliptic J2000 frames.
+/// Can be computed using the rotpn function in the ref_system module
+
 /// Rotation matrix from mean equatorial J2000 to mean ecliptic J2000.
 ///
 /// Rotation of $-\varepsilon$ around the X-axis, where $\varepsilon$ is the
 /// obliquity of the ecliptic at J2000.
+/// 
+/// call rotpn(RefSystem::Equm(RefEpoch::J2000), RefSystem::Eclm(RefEpoch::J2000)) for same computed result
 pub const ROT_EQUMJ2000_TO_ECLMJ2000: Matrix3<f64> = Matrix3::new(
     1.00000000000000000e0,
     0.00000000000000000e0,
@@ -94,6 +99,8 @@ pub const ROT_EQUMJ2000_TO_ECLMJ2000: Matrix3<f64> = Matrix3::new(
 /// Rotation matrix from mean ecliptic J2000 to mean equatorial J2000.
 ///
 /// Transpose (inverse) of [`ROT_EQUMJ2000_TO_ECLMJ2000`].
+/// 
+/// call rotpn(RefSystem::Eclm(RefEpoch::J2000), RefSystem::Equm(RefEpoch::J2000)) for same computed result
 pub const ROT_ECLMJ2000_TO_EQUMJ2000: Matrix3<f64> = Matrix3::new(
     1.00000000000000000e0,
     0.00000000000000000e0,

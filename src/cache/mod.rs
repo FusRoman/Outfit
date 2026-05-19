@@ -22,6 +22,7 @@ use crate::{
 /// Built once before any trajectory fitting. Each entry is keyed by the
 /// observation's [`ObsIndex`], which is stable for the lifetime of the
 /// [`ObsDataset`].
+#[derive(Debug)]
 pub struct OutfitCache {
     /// len == number of observations in the dataset. Indexed by [`ObsIndex`].
     observer_centric: CentricObserverCache,

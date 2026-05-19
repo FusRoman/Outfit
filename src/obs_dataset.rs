@@ -2,9 +2,10 @@ use ahash::AHashMap;
 use hifitime::ut1::Ut1Provider;
 use photom::{
     observation_dataset::{observation::Observation, ObsDataset},
-    observer::error_model::ModelCorrection,
+    observer::error_model::{ModelCorrection, ObsErrorModel},
     TrajId,
 };
+use rand::{rngs::SmallRng, SeedableRng};
 
 use crate::{
     cache::OutfitCache, trajectory::TrajectoryFit, GaussResult, IODParams, JPLEphem, OutfitError,
@@ -37,6 +38,7 @@ pub trait FitIOD {
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
         params: &IODParams,
+        error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<FullOrbitResult, OutfitError>;
 
@@ -46,6 +48,7 @@ pub trait FitIOD {
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
         params: &IODParams,
+        error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<(GaussResult, IODRMS), OutfitError>;
 }
@@ -57,10 +60,11 @@ impl FitIOD for ObsDataset {
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
         params: &IODParams,
+        error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<(GaussResult, IODRMS), OutfitError> {
         let corrected_dataset = self
-            .apply_model_errors()
+            .with_error_model(error_model)
             .apply_batch_rms_correction(params.gap_max);
 
         let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
@@ -73,22 +77,40 @@ impl FitIOD for ObsDataset {
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
         params: &IODParams,
+        error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<FullOrbitResult, OutfitError> {
         let corrected_dataset = self
+            .with_error_model(error_model)
             .apply_model_errors()
             .apply_batch_rms_correction(params.gap_max);
 
         let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
 
+        // Draw a single base seed from the caller's RNG.
+        // All per-trajectory RNGs are derived from this seed → deterministic
+        // regardless of trajectory ordering or parallelism.
+        let base_seed: u64 = rng.random();
+
         let results: FullOrbitResult = corrected_dataset
             .iter_traj_id()
             .into_iter()
             .flatten()
-            .map(|traj| {
-                println!("Fitting IOD for Trajectory ID: {}", traj);
-                let result = fit_single_traj(traj, &corrected_dataset, &cache, jpl, params, rng);
-                (traj.clone(), result)
+            .map(|traj_id| {
+                // Derive a per-trajectory seed from the base seed and the trajectory ID.
+                // Two trajectories with different IDs always get independent sequences.
+                let traj_seed = base_seed ^ traj_id.stable_hash();
+                let mut local_rng = SmallRng::seed_from_u64(traj_seed);
+
+                let result = fit_single_traj(
+                    &traj_id,
+                    &corrected_dataset,
+                    &cache,
+                    jpl,
+                    params,
+                    &mut local_rng,
+                );
+                (traj_id.clone(), result)
             })
             .collect();
 
@@ -108,7 +130,7 @@ fn fit_single_traj(
         .materialize_trajectory(traj)
         .ok_or_else(|| OutfitError::TrajectoryIdNotFound(traj.clone()))?;
 
-    let mut obs_vec_refs: Vec<&Observation> = materialized_traj.iter().collect();
+    let mut obs_vec_refs: Vec<&Observation> = materialized_traj.collect_into_vec();
     obs_vec_refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
 
     obs_vec_refs.estimate_best_orbit(cache, jpl, params, rng)

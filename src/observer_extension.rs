@@ -18,7 +18,7 @@ use crate::{
     JPLEphem, OutfitError,
 };
 
-pub(crate) trait ResolvedObserver {
+pub trait ResolvedObserver {
     /// Get the fixed position of an observatory using its geographic coordinates
     ///
     /// Return
