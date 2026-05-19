@@ -230,9 +230,6 @@ pub enum OutfitError {
     #[error("Gauss preliminary orbit determination failed: {0}")]
     GaussPrelimOrbitFailed(String),
 
-    #[error(transparent)]
-    Parquet(#[from] parquet::errors::ParquetError),
-
     #[error("No viable orbit could be determined after {attempts} attempts: {cause}")]
     NoViableOrbit {
         cause: Box<OutfitError>,
@@ -296,7 +293,6 @@ impl PartialEq for OutfitError {
             (UreqHttpError(_), UreqHttpError(_)) => true,
             (IoError(_), IoError(_)) => true,
             (ReqwestError(_), ReqwestError(_)) => true,
-            (Parquet(_), Parquet(_)) => true,
 
             (UnableToCreateBaseDir(a), UnableToCreateBaseDir(b)) => a == b,
             (Utf8PathError(a), Utf8PathError(b)) => a == b,

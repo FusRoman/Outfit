@@ -25,36 +25,23 @@ photom = { version = "0.1.0", path = "../photom" }
 
 aberth = { version = "0.4.1", default-features = false }
 ahash = { version = "0.8.11", default-features = false }
-arrow-array = { version = "54.3.1", default-features = false }
 camino = { version = "1.1.9", default-features = false }
 directories = "6.0.0"
 hifitime = { version = "4.2.0", default-features = false, features = [
     "ut1",
     "std",
 ] }
-itertools = { version = "0.14.0", default-features = false, features = [
-    "use_std",
-] }
 nalgebra = { version = "0.33.2" }
 ordered-float = { version = "5.0.0", default-features = false }
-parquet = { version = "54.2.1", default-features = false, features = [
-    "arrow",
-    "snap",
-] }
-quick-xml = { version = "0.37.3", features = [
-    "serialize",
-], default-features = false }
-serde = { version = "1.0", features = ["derive"], default-features = false }
 smallvec = { version = "1.14.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 ureq = { version = "3.0.10", default-features = false, features = ["rustls"] }
 nom = { version = "8.0.0" }
-once_cell = { version = "1.21.3", default-features = false }
 roots = { version = "0.0.8", default-features = false }
 rand = { version = "0.9.2", default-features = false, features = [
     "std_rng",
     "os_rng",
-    "small_rng"
+    "small_rng",
 ] }
 rand_distr = { version = "0.5.1", default-features = false }
 
@@ -70,9 +57,6 @@ tokio = { version = "1.44.1", default-features = false, features = [
     "io-util",
 ] }
 tokio-stream = { version = "0.1.17", default-features = false }
-indicatif = { version = "0.18", optional = true, default-features = false }
-rayon = { version = "1.11.0", optional = true, default-features = false }
-comfy-table = { version = "7.1.4", default-features = false }
 
 [dev-dependencies]
 approx = { version = "0.5.1", default-features = false }
@@ -80,51 +64,12 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 husky-rs = "0.1.5"
 proptest = "1.7.0"
 
-photom = { version = "0.1.0", path = "../photom", features = ["mpc_80_col", "ades"] }
-
-[features]
-progress = ["dep:indicatif"]
-parallel = ["dep:rayon"]
-
-[[test]]
-name = "test_large_parquet"
-path = "tests/trajectories_from_parquet.rs"
-required-features = ["jpl-download"]
-
-[[test]]
-name = "test_trajectories_from_vec"
-path = "tests/trajectories_from_vec.rs"
-required-features = ["jpl-download"]
-
-[[example]]
-name = "gauss_iod_once"
-path = "examples/gauss_iod_once.rs"
-required-features = ["jpl-download"]
-
-[[example]]
-name = "parquet_to_orbit"
-path = "examples/parquet_to_orbit.rs"
-required-features = ["jpl-download"]
-
-[[bench]]
-name = "load_parquet"
-harness = false
-required-features = ["jpl-download"]
-
-[[bench]]
-name = "outfit_gauss_iod"
-harness = false
-required-features = ["jpl-download"]
-
-[[bench]]
-name = "solve_kepler_equation"
-harness = false
-required-features = ["jpl-download"]
-
-[[bench]]
-name = "gauss_prelim_orbit"
-harness = false
-required-features = ["jpl-download"]
+photom = { version = "0.1.0", path = "../photom", features = [
+    "mpc_80_col",
+    "ades",
+    "polars",
+] }
+polars = { version = "0.53.0", features = ["is_in"] }
 
 [profile.bench]
 opt-level = 3
