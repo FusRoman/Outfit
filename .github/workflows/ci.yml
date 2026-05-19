@@ -10,20 +10,6 @@ jobs:
     name: Test Outfit
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - name: Default features
-            features: ""
-          - name: With jpl-download feature
-            features: "--features jpl-download"
-          - name: With parallel feature
-            features: '--features "parallel"'
-            rayon_threads: "2"
-          - name: With parallel + progress
-            features: '--features "parallel progress"'
-            rayon_threads: "2"
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,13 +26,8 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run tests (${{ matrix.name }})
-        env:
-          # Cap Rayon threads only when provided in the matrix (no effect otherwise)
-          RAYON_NUM_THREADS: ${{ matrix.rayon_threads }}
-        run: |
-          echo "Running cargo test with features: '${{ matrix.features }}'"
-          cargo test --locked --all-targets ${{ matrix.features }}
+      - name: Run tests
+        run: cargo test --locked --all-targets
 
   fmt:
     name: Check formatting
@@ -91,8 +72,8 @@ jobs:
         run: |
           rustc --version
           cargo clippy --version
-      - name: Run cargo clippy (all features)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
 
   coverage:
     name: Coverage (stable, cargo-llvm-cov → Codecov)
@@ -122,14 +103,10 @@ jobs:
       - name: Clean coverage artifacts
         run: cargo llvm-cov clean --workspace
 
-      - name: Generate coverage (lcov, all features incl. parallel)
-        env:
-          # Tame thread count for reproducible & stable coverage
-          RAYON_NUM_THREADS: 2
+      - name: Generate coverage (lcov)
         run: |
           cargo llvm-cov \
             --workspace \
-            --all-features \
             --lcov --output-path lcov.info
 
       - name: Upload to Codecov
@@ -155,5 +132,4 @@ jobs:
       - name: Check semver (baseline = PR base)
         uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
-          feature-group: all-features
           baseline-rev: ${{ github.event.pull_request.base.sha }}
