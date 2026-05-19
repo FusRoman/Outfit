@@ -59,11 +59,11 @@ pub fn build_centric_observer_cache(
         .map(|(idx, obs)| {
             let observer_id = obs
                 .observer_id()
-                .ok_or_else(|| return OutfitError::ObserverIdIsNone(idx as u64))?;
+                .ok_or_else(|| OutfitError::ObserverIdIsNone(idx as u64))?;
 
             let fixed_cache = observer_fixed_cache
-                .get(&observer_id)
-                .ok_or_else(|| return OutfitError::ObserverIdIsNone(idx as u64))?;
+                .get(observer_id)
+                .ok_or_else(|| OutfitError::ObserverIdIsNone(idx as u64))?;
 
             ObserverCentricCache::new(jpl, ut1_provider, obs.mjd_tt(), fixed_cache)
         })
@@ -90,9 +90,8 @@ mod observer_test {
         ra_accuracy: Option<f64>,
         dec_accuracy: Option<f64>,
     ) -> Observer {
-        let observer = Observer::new(longitude, latitude, height, name, ra_accuracy, dec_accuracy)
-            .expect("Failed to create Observer");
-        observer
+        Observer::new(longitude, latitude, height, name, ra_accuracy, dec_accuracy)
+            .expect("Failed to create Observer")
     }
 
     #[test]

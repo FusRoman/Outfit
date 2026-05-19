@@ -346,17 +346,14 @@ pub(crate) mod test_fixture {
         let jpl_file: EphemFileSource = "horizon:DE440"
             .try_into()
             .expect("Failed to parse JPL ephemeris source");
-        let jpl_ephem =
-            JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
-        jpl_ephem
+        JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon")
     });
 
     pub(crate) static JPL_EPHEM_NAIF: LazyLock<JPLEphem> = LazyLock::new(|| {
         let jpl_file: EphemFileSource = "naif:DE440"
             .try_into()
             .expect("Failed to parse JPL ephemeris source");
-        let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif");
-        jpl_ephem
+        JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif")
     });
 
     pub(crate) static DATASET_2015AB: LazyLock<ObsDataset> = LazyLock::new(|| {

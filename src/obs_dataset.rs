@@ -103,7 +103,7 @@ impl FitIOD for ObsDataset {
                 let mut local_rng = SmallRng::seed_from_u64(traj_seed);
 
                 let result = fit_single_traj(
-                    &traj_id,
+                    traj_id,
                     &corrected_dataset,
                     &cache,
                     jpl,

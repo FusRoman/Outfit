@@ -307,7 +307,7 @@ fn s_gap(dt: f64, inv_dtw: f64) -> f64 {
 /// - `observations`         – Time-sorted observation slice (ascending epoch).
 /// - `cache`                – Precomputed heliocentric observer positions.
 /// - `params`               – IOD parameters controlling time bounds, downsampling cap,
-///                            optimal spacing, and the best-K limit.
+///   optimal spacing, and the best-K limit.
 ///
 /// # Return
 ///
@@ -390,7 +390,7 @@ fn collect_best_k_triplets(
                 middle_idx: middle,
                 last_idx: last,
             });
-        } else if heap.peek().map_or(false, |worst| weight < worst.weight) {
+        } else if heap.peek().is_some_and(|worst| weight < worst.weight) {
             heap.pop();
             heap.push(WeightedTriplet {
                 weight,
