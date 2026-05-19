@@ -62,18 +62,14 @@
 //! use outfit::initial_orbit_determination::gauss::GaussObs;
 //! use outfit::orbit_type::{OrbitalElements, keplerian_element::KeplerianElements};
 //! use nalgebra::Vector3;
-//! use outfit::outfit::Outfit;
-//! use outfit::error_models::ErrorModel;
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;
 //! use outfit::initial_orbit_determination::IODParams;
-//!
-//! let env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
 //! // Build GaussObs (here positions are assumed precomputed)
 //! let gauss: GaussObs = unimplemented!("Construct GaussObs from RA/DEC/time and observer state");
 //!
 //! // Run the preliminary orbit computation
-//! let result = gauss.prelim_orbit(&env, &IODParams::default()).unwrap();
+//! let result = gauss.prelim_orbit(&IODParams::default()).unwrap();
 //!
 //! // Match on the returned orbital-element representation
 //! match result {
