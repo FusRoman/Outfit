@@ -21,7 +21,7 @@ authors = ["Roman Le Montagner <roman.le-montagner@ijclab.in2p3.fr>"]
 
 [dependencies]
 
-photom = { version = "0.1.0", path = "../photom" }
+photom = { version = "0.1.0", default-features = false }
 
 aberth = { version = "0.4.1", default-features = false }
 ahash = { version = "0.8.11", default-features = false }
@@ -64,7 +64,7 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 husky-rs = "0.1.5"
 proptest = "1.7.0"
 
-photom = { version = "0.1.0", path = "../photom", features = [
+photom = { version = "0.1.0", default-features = false, features = [
     "mpc_80_col",
     "ades",
     "polars",

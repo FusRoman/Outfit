@@ -1924,6 +1924,8 @@ dependencies = [
 [[package]]
 name = "photom"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1b59ed9dc7b6c690c1ab1559756a9a13e03b15b8809808c6a1086869860b319"
 dependencies = [
  "ahash",
  "camino",
