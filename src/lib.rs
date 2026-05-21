@@ -40,9 +40,7 @@
 //!   - RMS computation of normalized astrometric residuals, filtering utilities.
 //! - **Examples**:
 //!   - End-to-end examples in `examples/`.
-//! - **Parallel IOD (feature `parallel`)**:
-//!   - Batched multi-core execution via **Rayon**,
-//!     optional global progress bar when combined with the `progress` feature.
+//! - **Parallel IOD (feature `parallel`)**
 //!
 //! ### Planned extensions
 //!
