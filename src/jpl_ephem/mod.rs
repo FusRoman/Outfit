@@ -168,4 +168,22 @@ impl JPLEphem {
             }
         }
     }
+
+    pub fn try_into_horizon(self) -> Result<HorizonData, OutfitError> {
+        match self {
+            JPLEphem::HorizonFile(horizon_data) => Ok(horizon_data),
+            _ => Err(OutfitError::InvalidJPLEphemFileSource(
+                "Expected a JPL Horizon source".to_string(),
+            )),
+        }
+    }
+
+    pub fn try_into_naif(self) -> Result<NaifData, OutfitError> {
+        match self {
+            JPLEphem::NaifFile(naif_data) => Ok(naif_data),
+            _ => Err(OutfitError::InvalidJPLEphemFileSource(
+                "Expected a NAIF source".to_string(),
+            )),
+        }
+    }
 }

@@ -45,8 +45,8 @@
 //! **When**: Parsing observations, fixed-width records, ADES, or internal streams.
 //!
 //! - [`NomParsingError`](crate::outfit_errors::OutfitError::NomParsingError)
-//! - [`Parsing80ColumnFileError`](crate::outfit_errors::OutfitError::Parsing80ColumnFileError)
-//! - [`Parquet`](crate::outfit_errors::OutfitError::Parquet)
+//! - `Parsing80ColumnFileError` *(photom crate)*
+//! - `Parquet` *(photom crate)*
 //!
 //! **Typical causes**: schema drift; corrupted inputs; locale-specific formats;
 //! columnar format mismatches.
@@ -131,12 +131,14 @@
 //!
 //! ## See also
 //! -------------
-//! * [`Outfit`](crate::outfit::Outfit) – main crate context using this error type.
-//! * [`ParseObsError`](crate::trajectories::mpc_80col_reader::ParseObsError) – observation parsing errors.
+//! * `Outfit` – main crate context using this error type.
+//! * `ParseObsError` *(photom crate)* – observation parsing errors.
 //! * [`roots::SearchError`] – wrapped in [`RootFindingError`](crate::outfit_errors::OutfitError::RootFindingError).
 //! * [`rand_distr::NormalError`] – wrapped in [`NoiseInjectionError`](crate::outfit_errors::OutfitError::NoiseInjectionError).
-
-use crate::trajectories::mpc_80col_reader::ParseObsError;
+use photom::{
+    observation_dataset::{ObsDatasetError, ObsId},
+    TrajId,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -159,7 +161,6 @@ pub enum OutfitError {
     #[error("Filesystem I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[cfg(feature = "jpl-download")]
     #[error("HTTP request failed (reqwest): {0}")]
     ReqwestError(#[from] reqwest::Error),
 
@@ -186,9 +187,6 @@ pub enum OutfitError {
 
     #[error("Parsing error (nom): {0}")]
     NomParsingError(String),
-
-    #[error("Parsing error in 80-column observation file: {0}")]
-    Parsing80ColumnFileError(ParseObsError),
 
     #[error("Gaussian noise generation failed: {0:?}")]
     NoiseInjectionError(rand_distr::NormalError),
@@ -232,9 +230,6 @@ pub enum OutfitError {
     #[error("Gauss preliminary orbit determination failed: {0}")]
     GaussPrelimOrbitFailed(String),
 
-    #[error(transparent)]
-    Parquet(#[from] parquet::errors::ParquetError),
-
     #[error("No viable orbit could be determined after {attempts} attempts: {cause}")]
     NoViableOrbit {
         cause: Box<OutfitError>,
@@ -253,6 +248,27 @@ pub enum OutfitError {
 
     #[error("Non-finite score encountered: {0}")]
     NonFiniteScore(f64),
+
+    #[error("The provided observation {0} has no associated observer (ObserverId is None)")]
+    ObserverIdIsNone(ObsId),
+
+    #[error(transparent)]
+    ObsDatasetError(#[from] ObsDatasetError),
+
+    #[error("Observer dataset error: {0}")]
+    ObsDatasetErrorRef(String),
+
+    #[error("Trajectory ID not found in dataset: {0}")]
+    TrajectoryIdNotFound(TrajId),
+
+    #[error("No trajectory index available in the dataset")]
+    NoTrajectoryIndex,
+}
+
+impl From<&ObsDatasetError> for OutfitError {
+    fn from(e: &ObsDatasetError) -> Self {
+        OutfitError::ObsDatasetErrorRef(e.to_string())
+    }
 }
 
 impl From<rand_distr::NormalError> for OutfitError {
@@ -279,9 +295,7 @@ impl PartialEq for OutfitError {
             // Opaque external error kinds compare equal by variant only
             (UreqHttpError(_), UreqHttpError(_)) => true,
             (IoError(_), IoError(_)) => true,
-            #[cfg(feature = "jpl-download")]
             (ReqwestError(_), ReqwestError(_)) => true,
-            (Parquet(_), Parquet(_)) => true,
 
             (UnableToCreateBaseDir(a), UnableToCreateBaseDir(b)) => a == b,
             (Utf8PathError(a), Utf8PathError(b)) => a == b,
@@ -291,7 +305,6 @@ impl PartialEq for OutfitError {
             (InvalidErrorModel(a), InvalidErrorModel(b)) => a == b,
             (InvalidErrorModelFilePath(a), InvalidErrorModelFilePath(b)) => a == b,
             (NomParsingError(a), NomParsingError(b)) => a == b,
-            (Parsing80ColumnFileError(a), Parsing80ColumnFileError(b)) => a == b,
             (NoiseInjectionError(a), NoiseInjectionError(b)) => a == b,
             (InvalidSpkDataType(a), InvalidSpkDataType(b)) => a == b,
             (InvalidIODParameter(a), InvalidIODParameter(b)) => a == b,

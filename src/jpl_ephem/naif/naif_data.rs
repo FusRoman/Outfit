@@ -277,23 +277,23 @@ impl NaifData {
 
 #[cfg(test)]
 mod test_naif_file {
-    #[cfg(feature = "jpl-download")]
     use super::*;
 
-    #[cfg(feature = "jpl-download")]
     use crate::jpl_ephem::naif::naif_ids::{
         planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary,
     };
-    #[cfg(feature = "jpl-download")]
-    use crate::unit_test_global::JPL_EPHEM_NAIF;
-    #[cfg(feature = "jpl-download")]
+    use crate::test_fixture::JPL_EPHEM_NAIF;
     use hifitime::Epoch;
 
+    fn get_naif_data() -> NaifData {
+        JPL_EPHEM_NAIF.clone().try_into_naif().unwrap()
+    }
+
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_naif() {
+        let naif_data = get_naif_data();
         assert_eq!(
-            JPL_EPHEM_NAIF.daf_header,
+            naif_data.daf_header,
             DAFHeader {
                 idword: "DAF/SPK".to_string(),
                 internal_filename: "NIO2SPK".to_string(),
@@ -308,7 +308,7 @@ mod test_naif_file {
         );
 
         assert_eq!(
-            JPL_EPHEM_NAIF.header,
+            naif_data.header,
             JPLEphemHeader {
                 version: "DE440".to_string(),
                 creation_date: "25 June 2020".to_string(),
@@ -319,7 +319,7 @@ mod test_naif_file {
             }
         );
 
-        let record_earth_sun = JPL_EPHEM_NAIF
+        let record_earth_sun = naif_data
             .get_records(
                 NaifIds::PB(PlanetaryBary::EarthMoon),
                 NaifIds::SSB(SolarSystemBary::SSB),
@@ -412,12 +412,12 @@ mod test_naif_file {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_get_record() {
         let date_str = "2024-04-10T12:30:45";
         let epoch = Epoch::from_gregorian_str(date_str).unwrap();
 
-        let record = JPL_EPHEM_NAIF
+        let naif_data = get_naif_data();
+        let record = naif_data
             .get_record(
                 NaifIds::PB(PlanetaryBary::EarthMoon),
                 NaifIds::SSB(SolarSystemBary::SSB),
@@ -480,11 +480,10 @@ mod test_naif_file {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
 
-        let interp = JPL_EPHEM_NAIF.ephemeris(
+        let interp = get_naif_data().ephemeris(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch1.to_et_seconds(),
@@ -512,7 +511,7 @@ mod test_naif_file {
         );
 
         let epoch2 = Epoch::from_mjd_in_time_scale(57_049.231_857_592_59, hifitime::TimeScale::TT);
-        let interp = JPL_EPHEM_NAIF.ephemeris(
+        let interp = get_naif_data().ephemeris(
             NaifIds::PB(PlanetaryBary::EarthMoon),
             NaifIds::SSB(SolarSystemBary::SSB),
             epoch2.to_et_seconds(),

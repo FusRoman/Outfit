@@ -7,7 +7,7 @@
 //! ## Purpose
 //!
 //! The [`IODParams`](crate::initial_orbit_determination::IODParams) object centralizes all tunable parameters used by
-//! [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+//! [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
 //! It allows you to:
 //!
 //! - Select and filter candidate observation triplets (time spans, downsampling, maximum counts),
@@ -69,7 +69,7 @@
 //!
 //! ## See also
 //!
-//! * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – main IOD entry point
+//! * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point
 //! * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss solver
 //! * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result type for preliminary/corrected orbits
 //! * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection
@@ -79,9 +79,10 @@ use std::fmt;
 
 pub mod gauss;
 pub mod gauss_result;
+pub mod triplet_generation;
 
 /// Configuration parameters controlling the behavior of
-/// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+/// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
 ///
 /// This structure centralizes all tunable parameters used during
 /// preliminary orbit determination with the Gauss method. It lets you adjust:
@@ -208,7 +209,7 @@ pub mod gauss_result;
 ///
 /// See also
 /// -----------------
-/// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – main IOD entry point.
+/// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss pipeline.
 /// * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result types for preliminary/corrected solutions.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection.
@@ -254,11 +255,6 @@ pub struct IODParams {
     pub newton_max_it: usize,
     /// Maximum allowed imaginary part magnitude for complex roots promoted to real (AU).
     pub root_imag_eps: f64,
-
-    // --- Multi-threading (if enabled) ---
-    #[cfg(feature = "parallel")]
-    /// Number of trajectory batches to process in parallel (if `> 1` and `rayon` feature enabled).
-    pub batch_size: usize,
 }
 
 impl IODParams {
@@ -274,15 +270,14 @@ impl IODParams {
     ///
     /// This is a **fluent builder API** for [`IODParams`], allowing you to
     /// override the default parameters step by step before running
-    /// [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+    /// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
     ///
     /// # Example
     ///
     /// ```rust,no_run
     /// use rand::{rngs::StdRng, SeedableRng};
     /// use outfit::initial_orbit_determination::IODParams;
-    /// use outfit::constants::Observations;
-    /// use outfit::observations::observations_ext::ObservationIOD;
+    /// use outfit::obs_dataset::FitIOD;
     ///
     /// let params = IODParams::builder()
     ///     .n_noise_realizations(100)
@@ -291,16 +286,12 @@ impl IODParams {
     ///     .max_triplets(50)
     ///     .build().unwrap();
     ///
-    /// # let observations: Observations = unimplemented!();
-    /// # let state = unimplemented!();
-    /// # let error_model = unimplemented!();
-    /// # let mut rng = StdRng::seed_from_u64(42);
-    /// # let _ = observations.estimate_best_orbit(&state, &error_model, &mut rng, &params);
+    /// // Pass `params` to `FitIOD::fit_iod` or `FitIOD::fit_full_iod`.
     /// ```
     ///
     /// # See also
     /// * [`IODParams`] – Holds all configuration parameters for IOD.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – Consumes these parameters to perform orbit determination.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – Consumes these parameters to perform orbit determination.
     pub fn builder() -> IODParamsBuilder {
         IODParamsBuilder::new()
     }
@@ -340,10 +331,6 @@ impl Default for IODParams {
             newton_eps: 1.0e-10,
             newton_max_it: 50,
             root_imag_eps: 1.0e-6,
-
-            // Multi-threading (if enabled)
-            #[cfg(feature = "parallel")]
-            batch_size: 4,
         }
     }
 }
@@ -464,13 +451,6 @@ impl IODParamsBuilder {
         self
     }
 
-    // --- Multi-threading (if enabled) ---
-    #[cfg(feature = "parallel")]
-    pub fn batch_size(mut self, v: usize) -> Self {
-        self.params.batch_size = v;
-        self
-    }
-
     // ---- Numeric helpers for PartialOrd (handle NaN as invalid) ----
 
     /// Return true iff x > 0.0 and comparable (i.e., not NaN).
@@ -552,7 +532,7 @@ impl IODParamsBuilder {
     /// ```
     ///
     /// When `.build()` succeeds, the resulting [`IODParams`] can be passed
-    /// to [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+    /// to [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
     pub fn build(self) -> Result<IODParams, OutfitError> {
         let p = &self.params;
 
@@ -633,6 +613,11 @@ impl IODParamsBuilder {
         }
 
         Ok(self.params)
+    }
+
+    /// Create an [`IODParams`] directly from the builder's internal parameters without validation.
+    pub fn from_params(params: IODParams) -> Self {
+        Self { params }
     }
 }
 
@@ -773,16 +758,6 @@ impl fmt::Display for IODParams {
                 self.max_tested_solutions,
                 "Max Gauss solutions kept"
             )?;
-
-            // --- Multi-threading (if enabled) ---
-            #[cfg(feature = "parallel")]
-            {
-                line!(
-                    "batch_size           = {}",
-                    self.batch_size,
-                    "Number of trajectory batches to process in parallel"
-                )?;
-            }
 
             Ok(())
         } else {

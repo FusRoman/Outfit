@@ -62,18 +62,14 @@
 //! use outfit::initial_orbit_determination::gauss::GaussObs;
 //! use outfit::orbit_type::{OrbitalElements, keplerian_element::KeplerianElements};
 //! use nalgebra::Vector3;
-//! use outfit::outfit::Outfit;
-//! use outfit::error_models::ErrorModel;
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;
 //! use outfit::initial_orbit_determination::IODParams;
-//!
-//! let env = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
 //!
 //! // Build GaussObs (here positions are assumed precomputed)
 //! let gauss: GaussObs = unimplemented!("Construct GaussObs from RA/DEC/time and observer state");
 //!
 //! // Run the preliminary orbit computation
-//! let result = gauss.prelim_orbit(&env, &IODParams::default()).unwrap();
+//! let result = gauss.prelim_orbit(&IODParams::default()).unwrap();
 //!
 //! // Match on the returned orbital-element representation
 //! match result {
@@ -109,10 +105,12 @@ use std::ops::ControlFlow;
 use aberth::StopReason;
 use nalgebra::Matrix3;
 use nalgebra::Vector3;
+use photom::Radians;
+use photom::MJDTT;
 use rand_distr::StandardNormal;
 use smallvec::SmallVec;
 
-use crate::constants::Radian;
+use crate::constants::ROT_EQUMJ2000_TO_ECLMJ2000;
 use crate::constants::{GAUSS_GRAV, VLIGHT_AU};
 
 use crate::initial_orbit_determination::gauss_result::GaussResult;
@@ -120,7 +118,6 @@ use crate::initial_orbit_determination::IODParams;
 use crate::kepler::velocity_correction_with_guess;
 use crate::orb_elem::eccentricity_control;
 use crate::orbit_type::OrbitalElements;
-use crate::outfit::Outfit;
 use crate::outfit_errors::OutfitError;
 use aberth::aberth;
 use rand::Rng;
@@ -153,9 +150,9 @@ use rand::Rng;
 #[derive(Debug, PartialEq, Clone)]
 pub struct GaussObs {
     pub(crate) idx_obs: Vector3<usize>,
-    pub(crate) ra: Vector3<Radian>,
-    pub(crate) dec: Vector3<Radian>,
-    pub(crate) time: Vector3<f64>,
+    pub(crate) ra: Vector3<Radians>,
+    pub(crate) dec: Vector3<Radians>,
+    pub(crate) time: Vector3<MJDTT>,
     pub(crate) observer_helio_position: Matrix3<f64>,
 }
 
@@ -322,11 +319,11 @@ impl GaussObs {
     /// ------------
     /// * [`generate_noisy_realizations`](crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations) – Eager version collecting all realizations into a `Vec`.
     /// * [`GaussObs::prelim_orbit`] – Consumes each realization to compute a Gauss preliminary orbit.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – High-level search loop that leverages this iterator with early pruning.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – High-level search loop that leverages this iterator with early pruning.
     pub fn realizations_iter<'a, R: Rng + 'a>(
-        &'a self,
-        errors_ra: &'a Vector3<f64>,
-        errors_dec: &'a Vector3<f64>,
+        self,
+        errors_ra: &Vector3<f64>,
+        errors_dec: &Vector3<f64>,
         n_realizations: usize,
         noise_scale: f64,
         rng: &'a mut R,
@@ -425,9 +422,9 @@ impl GaussObs {
     /// * [`realizations_iter`](crate::initial_orbit_determination::gauss::GaussObs::realizations_iter) – Lazy version that yields realizations on demand and
     ///   supports early-stop pruning.
     /// * [`GaussObs::prelim_orbit`] – Compute a preliminary Gauss solution from each realization.
-    /// * [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit) – End-to-end search that consumes realizations.
+    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – End-to-end search that consumes realizations.
     pub fn generate_noisy_realizations(
-        &self,
+        self,
         errors_ra: &Vector3<f64>,
         errors_dec: &Vector3<f64>,
         n_realizations: usize,
@@ -880,7 +877,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// ---------
-    /// * `state` – The outfit global state containing the rotation matrix
+    /// * `rot_equmj2000_to_eclmj2000` – rotation matrix from equatorial mean J2000 to ecliptic mean J2000
     /// * `asteroid_position` – Cartesian heliocentric position vector of the object (in AU), in equatorial J2000 frame.
     /// * `asteroid_velocity` – Cartesian heliocentric velocity vector of the object (in AU/day), in equatorial J2000 frame.
     /// * `reference_epoch` – Epoch (in MJD TT) corresponding to the state vector, used as the reference time for the elements.
@@ -908,16 +905,12 @@ impl GaussObs {
     /// * [`KeplerianElements`] – definition of the orbital elements struct.
     fn compute_orbit_from_state(
         &self,
-        state: &Outfit,
         &asteroid_position: &Vector3<f64>,
         &asteroid_velocity: &Vector3<f64>,
         reference_epoch: f64,
     ) -> Result<OrbitalElements, OutfitError> {
-        // get the rotation matrix from equatorial mean J2000 to ecliptic mean J2000
-        let roteqec = state.get_rot_equmj2000_to_eclmj2000();
-
         // Apply the transformation to position and velocity vectors
-        let matrix_elc_transform = roteqec.transpose();
+        let matrix_elc_transform = ROT_EQUMJ2000_TO_ECLMJ2000.transpose();
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 
@@ -1053,6 +1046,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// -----------------
+    /// * `rot_equmj2000_to_eclmj2000` – rotation matrix from equatorial mean J2000 to ecliptic mean J2000
     /// * `pos_all_time`: `3×3` heliocentric positions at `t1|t2|t3` (AU).
     /// * `vel_t2`: heliocentric velocity at `t2` (AU/day).
     /// * `epoch`: reference epoch for the state (MJD TT).
@@ -1068,14 +1062,13 @@ impl GaussObs {
     #[inline]
     fn build_result(
         &self,
-        state: &Outfit,
         pos_all_time: &Matrix3<f64>,
         vel_t2: &Vector3<f64>,
         epoch: f64,
         corrected: bool,
     ) -> Option<GaussResult> {
         let r_t2: Vector3<f64> = pos_all_time.column(1).into();
-        match self.compute_orbit_from_state(state, &r_t2, vel_t2, epoch) {
+        match self.compute_orbit_from_state(&r_t2, vel_t2, epoch) {
             Ok(orbit) if corrected => Some(GaussResult::CorrectedOrbit(orbit)),
             Ok(orbit) => Some(GaussResult::PrelimOrbit(orbit)),
             Err(_) => None,
@@ -1103,7 +1096,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// -----------------
-    /// * `state`: Global context (ephemerides, constants, settings).
+    /// * `rot_equmj2000_to_eclmj2000` – rotation matrix from equatorial mean J2000 to ecliptic mean J2000
     /// * `iod_params`: Parameters controlling the IOD process, including root filtering and correction settings.
     ///
     /// Return
@@ -1125,7 +1118,6 @@ impl GaussObs {
     /// * [`IODParams`] – Configuration parameters for the IOD process.
     pub fn prelim_orbit_all(
         &self,
-        state: &Outfit,
         iod_params: &IODParams,
     ) -> Result<Vec<GaussResult>, OutfitError> {
         // 1) Core Gauss quantities
@@ -1182,15 +1174,14 @@ impl GaussObs {
                             iod_params.newton_eps,
                             iod_params.newton_max_it,
                         ) {
-                            if let Some(res) =
-                                self.build_result(state, &pos_cor, &v_cor, epoch_cor, true)
+                            if let Some(res) = self.build_result(&pos_cor, &v_cor, epoch_cor, true)
                             {
                                 if solutions.len() < iod_params.max_tested_solutions {
                                     solutions.push(res);
                                 }
                             }
                         } else if let Some(res) =
-                            self.build_result(state, &pos_all, &v_pre, epoch_ref, false)
+                            self.build_result(&pos_all, &v_pre, epoch_ref, false)
                         {
                             if solutions.len() < iod_params.max_tested_solutions {
                                 solutions.push(res);
@@ -1224,7 +1215,7 @@ impl GaussObs {
     ///
     /// Arguments
     /// -----------------
-    /// * `state`: The global context (ephemerides, constants, settings).
+    /// * `rot_equmj2000_to_eclmj2000` – rotation matrix from equatorial mean J2000 to ecliptic mean J2000
     /// * `iod_params`: Parameters controlling the IOD process, including root filtering and correction settings.
     ///
     /// Return
@@ -1244,12 +1235,8 @@ impl GaussObs {
     /// * [`prelim_orbit_all`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit_all) – Enumerates and returns up to three acceptable solutions.
     /// * [`pos_and_vel_correction`](crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction) – Iterative velocity update (Lagrange f/g).
     /// * [`IODParams`] – Configuration parameters for the IOD process.
-    pub fn prelim_orbit(
-        &self,
-        state: &Outfit,
-        iod_params: &IODParams,
-    ) -> Result<GaussResult, OutfitError> {
-        let all = self.prelim_orbit_all(state, iod_params)?;
+    pub fn prelim_orbit(&self, iod_params: &IODParams) -> Result<GaussResult, OutfitError> {
+        let all = self.prelim_orbit_all(iod_params)?;
         if let Some(best_corr) = all
             .iter()
             .find(|s| matches!(s, GaussResult::CorrectedOrbit(_)))
@@ -1432,14 +1419,10 @@ impl GaussObs {
 }
 
 #[cfg(test)]
-#[cfg(feature = "jpl-download")]
 pub(crate) mod gauss_test {
 
     use super::*;
-    use crate::{
-        orbit_type::{keplerian_element::KeplerianElements, orbit_type_test::approx_equal},
-        unit_test_global::OUTFIT_HORIZON_TEST,
-    };
+    use crate::orbit_type::{keplerian_element::KeplerianElements, orbit_type_test::approx_equal};
 
     #[test]
     fn test_gauss_prelim() {
@@ -1718,7 +1701,6 @@ pub(crate) mod gauss_test {
 
     #[test]
     fn test_solve_orbit() {
-        let env = &OUTFIT_HORIZON_TEST.0;
         let tol = 1e-13;
 
         let gauss = GaussObs {
@@ -1747,7 +1729,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit(env, &IODParams::default()).unwrap();
+        let binding = gauss.prelim_orbit(&IODParams::default()).unwrap();
         let prelim_orbit = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
@@ -1781,7 +1763,7 @@ pub(crate) mod gauss_test {
             .into(),
         };
 
-        let binding = a.prelim_orbit(env, &IODParams::default()).unwrap();
+        let binding = a.prelim_orbit(&IODParams::default()).unwrap();
         let prelim_orbit_a = binding.get_orbit();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
@@ -1827,7 +1809,7 @@ pub(crate) mod gauss_test {
             ),
         };
 
-        let binding = gauss.prelim_orbit(env, &IODParams::default()).unwrap();
+        let binding = gauss.prelim_orbit(&IODParams::default()).unwrap();
         let prelim_orbit_b = binding.get_orbit();
 
         // This is the expected orbit based on the Orbfit software
@@ -1983,8 +1965,13 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
 
-            let realizations =
-                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 5, 1.0, &mut rng);
+            let realizations = gauss.clone().generate_noisy_realizations(
+                &errors_ra,
+                &errors_dec,
+                5,
+                1.0,
+                &mut rng,
+            );
 
             assert_eq!(realizations.len(), 6); // 1 original + 5 noisy
 
@@ -2017,8 +2004,13 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(123);
 
-            let realizations =
-                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 3, 1.0, &mut rng);
+            let realizations = gauss.clone().generate_noisy_realizations(
+                &errors_ra,
+                &errors_dec,
+                3,
+                1.0,
+                &mut rng,
+            );
 
             for g in realizations {
                 assert_eq!(g.ra, gauss.ra);
@@ -2041,8 +2033,13 @@ pub(crate) mod gauss_test {
 
             let mut rng = StdRng::seed_from_u64(123);
 
-            let realizations =
-                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 0, 1.0, &mut rng);
+            let realizations = gauss.clone().generate_noisy_realizations(
+                &errors_ra,
+                &errors_dec,
+                0,
+                1.0,
+                &mut rng,
+            );
 
             assert_eq!(realizations.len(), 1); // Only the original observation
             assert_eq!(realizations[0], gauss);
@@ -2064,10 +2061,20 @@ pub(crate) mod gauss_test {
             let mut rng_low = StdRng::seed_from_u64(42);
             let mut rng_high = StdRng::seed_from_u64(42); // same seed
 
-            let low_noise =
-                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 1, 0.1, &mut rng_low);
-            let high_noise =
-                gauss.generate_noisy_realizations(&errors_ra, &errors_dec, 1, 10.0, &mut rng_high);
+            let low_noise = gauss.clone().generate_noisy_realizations(
+                &errors_ra,
+                &errors_dec,
+                1,
+                0.1,
+                &mut rng_low,
+            );
+            let high_noise = gauss.clone().generate_noisy_realizations(
+                &errors_ra,
+                &errors_dec,
+                1,
+                10.0,
+                &mut rng_high,
+            );
 
             let diff_low = (low_noise[1].ra - gauss.ra).norm();
             let diff_high = (high_noise[1].ra - gauss.ra).norm();

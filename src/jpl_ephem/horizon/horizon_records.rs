@@ -48,13 +48,13 @@
 //!     horizon_data::HorizonData,
 //!     horizon_ids::HorizonID,
 //! };
-//! use outfit::constants::MJD;
+//! use outfit::constants::MJDET;
 //!
 //! // Load the binary and build HorizonData (details omitted here).
 //! let hd: HorizonData = unimplemented!("Construct HorizonData from a loaded Horizons file");
 //!
 //! // Interpolate Earth wrt Solar System Barycenter at an epoch:
-//! let et: MJD = 60200.0; // example MJD
+//! let et: MJDET = 60200.0; // example MJD (TT)
 //! let res = hd.ephemeris(HorizonID::Earth, HorizonID::SolarSystemBarycenter, et, true, true);
 //! println!("r[km] = {:?}", res.position);
 //! println!("v[km/day] = {:?}", res.velocity);

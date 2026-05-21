@@ -13,13 +13,13 @@
 //!
 //! ## Coordinate systems & epochs
 //!
-//! - [`RefSystem::Equm(e)`] — *Equatorial mean* at epoch `e` (precession only).
-//! - [`RefSystem::Equt(e)`] — *Equatorial true* at epoch `e` (precession + nutation).
-//! - [`RefSystem::Eclm(e)`] — *Ecliptic mean* at epoch `e` (mean obliquity).
+//! - [`RefSystem::Equm`](crate::ref_system::RefSystem::Equm) — *Equatorial mean* at epoch `e` (precession only).
+//! - [`RefSystem::Equt`](crate::ref_system::RefSystem::Equt) — *Equatorial true* at epoch `e` (precession + nutation).
+//! - [`RefSystem::Eclm`](crate::ref_system::RefSystem::Eclm) — *Ecliptic mean* at epoch `e` (mean obliquity).
 //!
 //! Epochs are represented by [`RefEpoch`](crate::ref_system::RefEpoch):
 //! - [`RefEpoch::J2000`](crate::ref_system::RefEpoch::J2000) — Fixed epoch at **MJD 51544.5 (TT)**.
-//! - [`RefEpoch::Epoch(d)`] — “of-date” epoch at MJD `d` (TT).
+//! - [`RefEpoch::Epoch`](crate::ref_system::RefEpoch::Epoch) — “of-date” epoch at MJD `d` (TT).
 //!
 //! **Units & conventions**
 //! -----------------------
@@ -137,7 +137,7 @@ impl RefEpoch {
     ///
     /// # Returns
     /// * For [`RefEpoch::J2000`]: returns the constant [`T2000`].
-    /// * For [`RefEpoch::Epoch(d)`]: returns the stored `d`.
+    /// * For [`RefEpoch::Epoch`]: returns the stored `d`.
     pub fn date(&self) -> f64 {
         match *self {
             RefEpoch::J2000 => T2000,

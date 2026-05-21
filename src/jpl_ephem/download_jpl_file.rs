@@ -43,9 +43,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use directories::BaseDirs;
 use std::{fs, str::FromStr};
 
-#[cfg(feature = "jpl-download")]
 use tokio::{fs::File, io::AsyncWriteExt};
-#[cfg(feature = "jpl-download")]
 use tokio_stream::StreamExt;
 
 use super::{horizon::horizon_version::JPLHorizonVersion, naif::naif_version::NaifVersion};
@@ -139,7 +137,6 @@ impl EphemFileSource {
     /// See also
     /// --------
     /// * [`EphemFileSource::get_version_url`]
-    #[cfg(feature = "jpl-download")]
     fn get_baseurl(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/",
@@ -157,7 +154,6 @@ impl EphemFileSource {
     /// --------
     /// * [`JPLHorizonVersion::get_filename`]
     /// * [`NaifVersion::get_filename`]
-    #[cfg(feature = "jpl-download")]
     pub fn get_version_url(&self) -> String {
         let base_url = self.get_baseurl();
         match self {
@@ -210,7 +206,6 @@ impl EphemFileSource {
 /// See also
 /// --------
 /// * [`EphemFileSource::get_version_url`] — Compose the URL for a versioned file.
-#[cfg(feature = "jpl-download")]
 pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
     let mut file = File::create(path).await?;
     println!("Downloading {url}...");
@@ -296,7 +291,6 @@ impl EphemFilePath {
         if local_file.exists() {
             Ok(local_file)
         } else {
-            #[cfg(feature = "jpl-download")]
             {
                 let url = file_source.get_version_url();
 
@@ -307,10 +301,6 @@ impl EphemFilePath {
                 rt.block_on(async { download_big_file(&url, local_file.path()).await })?;
 
                 Ok(local_file)
-            }
-            #[cfg(not(feature = "jpl-download"))]
-            {
-                Err(OutfitError::JPLFileNotFound(local_file.path().to_string()))
             }
         }
     }
@@ -388,22 +378,5 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
             }
             EphemFileSource::Naif(version) => Ok(EphemFilePath::Naif(local_file, version)),
         }
-    }
-}
-
-#[cfg(test)]
-mod jpl_reader_test {
-    /// If `jpl-download` is **not** enabled, requesting a missing file must error.
-    #[test]
-    #[cfg(not(feature = "jpl-download"))]
-    fn test_no_feature_download_jpl_ephem() {
-        use super::*;
-        let file_source = "naif:DE442".try_into().unwrap();
-
-        let result = EphemFilePath::get_ephemeris_file(&file_source);
-        assert!(
-            result.is_err(),
-            "feature jpl-download is enabled, weird ..."
-        );
     }
 }

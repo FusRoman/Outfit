@@ -5,7 +5,7 @@
 <div align="center">
 <h1>Outfit</h1>
 
-A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
+A fast, safe, and modular Rust library for **initial orbit determination (IOD)** of Solar System small bodies. Outfit focuses exclusively on **orbital dynamics and computation**: Gauss IOD, Keplerian propagation, reference frame transformations, and JPL ephemeris support. Observation I/O and data structures are provided by the companion crate [**photom**](https://crates.io/crates/photom).
 </div>
 
 <p align="center">
@@ -25,27 +25,22 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
     <img src="https://codecov.io/gh/FusRoman/Outfit/branch/main/graph/badge.svg" alt="codecov"/>
   </a>
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/MSRV-1.82%2B-orange" alt="MSRV"/>
+    <img src="https://img.shields.io/badge/MSRV-1.94%2B-orange" alt="MSRV"/>
   </a>
 </p>
 
-> **Why Outfit?**  
-> Modern asteroid pipelines need a library that is **fast (Rust)**, **reproducible**, and **easy to integrate** in data-intensive workflows (batch files, Parquet, CI/benchmarks). Outfit re-implements classic OrbFit IOD logic with a **memory-safe**, **modular** design and production-grade ergonomics (features, docs, tests, benches). It is built to:
-> - ingest **large datasets** efficiently (columnar Parquet, batch APIs);
-> - run **deterministic IOD** with controlled noise and repeatable seeds;
-> - interface **cleanly** with JPL ephemerides (e.g., DE440);
-> - provide a **clean API** that composes well across projects.
+> **Ecosystem split**  
+> Outfit v3 is a focused **orbital dynamics engine**. Everything related to observation loading (MPC 80-column, ADES XML, Parquet), observer management, and astrometric data structures now lives in the separate **[photom](https://crates.io/crates/photom)** crate. Outfit depends on `photom` and exposes the `FitIOD` trait that bridges photom's `ObsDataset` into the IOD pipeline.
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
+- [Ecosystem: Outfit + photom](#ecosystem-outfit--photom)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Data Formats](#data-formats)
 - [Initial Orbit Determination](#initial-orbit-determination)
-- [Observers & Reference Frames](#observers--reference-frames)
 - [Cargo Feature Flags](#cargo-feature-flags)
 - [Performance & Reproducibility](#performance--reproducibility)
 - [Roadmap](#roadmap)
@@ -57,96 +52,157 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
 
 ## Features
 
-- **Observation I/O**
-  - MPC **80-column** files
-  - **ADES XML** files
-  - **Parquet** batches for high-throughput pipelines
-- **Observer management**
-  - Lookup by **MPC code**
-  - Topocentric geometry (geocentric & heliocentric positions, AU, J2000)
-- **Initial Orbit Determination**
+- **Initial Orbit Determination (IOD)**
   - **Gauss method** on observation triplets
   - Iterative velocity correction with Lagrange coefficients
   - Dynamic acceptability filters (perihelion, eccentricity, geometry)
   - RMS evaluation on extended arcs
+- **Orbital elements**
+  - Classical **Keplerian elements**
+  - **Equinoctial elements** with conversions and two-body solver
+  - **Cometary elements**
 - **Ephemerides**
-  - Interface with **JPL** ephemerides (e.g., **DE440**)
-- **Error models**
-  - Built-in astrometric uncertainty models (e.g., FCCT14)
-- **Batch processing & benchmarking**
-  - Stream triplets, evaluate, and rank candidates
-  - Criterion-based micro/macro benchmarks
-  - Optional parallel batch IOD using Rayon (feature: `parallel`)
+  - Interface with **JPL DE440** (Horizons and NAIF/SPICE formats)
+- **Reference frames & preprocessing**
+  - Precession, nutation (IAU 1980), aberration, light-time correction
+  - Ecliptic ↔ equatorial conversions, RA/DEC parsing, time systems
+- **Observer geometry**
+  - Geocentric and heliocentric observer positions in AU, J2000
+- **Batch IOD**
+  - Single-trajectory and full-dataset IOD via the `FitIOD` trait
+  - Optional parallel batch execution with Rayon (`parallel` feature)
+
+---
+
+## Ecosystem: Outfit + photom
+
+Outfit is one half of a two-crate pipeline:
+
+| Crate | Responsibility |
+|-------|---------------|
+| [**photom**](https://crates.io/crates/photom) | Observation I/O (MPC 80-col, ADES XML, Parquet), data structures (`ObsDataset`, `Observer`, error models), trajectory grouping |
+| **outfit** | Pure orbital computation: Gauss IOD, Keplerian/equinoctial elements, JPL ephemerides, reference frames, residuals |
+
+A typical workflow:
+
+1. Use **photom** to load observations into an `ObsDataset`.
+2. Call **outfit**'s `FitIOD::fit_iod` (single trajectory) or `FitIOD::fit_full_iod` (all trajectories) on the dataset.
+3. Inspect the returned `GaussResult` and RMS values.
 
 ---
 
 ## Installation
 
-Add Outfit to your `Cargo.toml`:
+Add Outfit and photom to your `Cargo.toml`:
 
 ~~~toml
 [dependencies]
-outfit = "2.0.0"
+outfit = "3.0.0"
+photom = { version = "0.1.0", features = ["mpc_80_col"] }
 ~~~
 
-Enable automatic ephemeris download (JPL DE440) with the `jpl-download` feature:
+Enable optional features as needed:
 
 ~~~toml
 [dependencies]
-outfit = { version = "2.0.0", features = ["jpl-download"] }
-~~~
-
-Enable a CLI-style progress bar for long loops:
-
-~~~toml
-[dependencies]
-outfit = { version = "2.0.0", features = ["progress"] }
-~~~
-
-Combine features as needed (example):
-
-~~~toml
-[dependencies]
-outfit = { version = "2.0.0", features = ["jpl-download", "progress", "parallel"] }
+outfit  = "3.0.0"
+photom  = { version = "0.1.0", features = ["mpc_80_col", "ades", "polars"] }
 ~~~
 
 ---
 
 ## Quick Start
 
-The crate ships with several **ready-to-run examples** in the [`examples/`](examples) directory.  
-They demonstrate end-to-end workflows such as:
+### Single-trajectory IOD from an MPC 80-column file
 
-- Reading observations (MPC 80-column, ADES XML, Parquet)
-- Building a `TrajectorySet` (now via `TrajectoryFile` ingestion helpers)
-- Running Gauss initial orbit determination (single triplet or full batch)
-- Inspecting and printing orbital elements with RMS statistics
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::obs_dataset::FitIOD;
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
 
-Run an example directly with Cargo:
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load observations (photom handles I/O).
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 
-```bash
-cargo run --release --example parquet_to_orbit --features jpl-download
+    // Load JPL DE440 ephemeris.
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+
+    // Earth orientation corrections.
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
+
+    // Configure IOD parameters.
+    let params = IODParams::builder()
+        .n_noise_realizations(10)
+        .max_obs_for_triplets(50)
+        .max_triplets(30)
+        .build()?;
+
+    let mut rng = StdRng::seed_from_u64(42);
+
+    // Run Gauss IOD — outfit does the orbital computation.
+    let (best_orbit, best_rms) = dataset.fit_iod(
+        "K09R05F",
+        &jpl,
+        &ut1,
+        &params,
+        ObsErrorModel::FCCT14,
+        &mut rng,
+    )?;
+
+    println!("Best orbit: {best_orbit}");
+    println!("RMS: {best_rms:.6}");
+    Ok(())
+}
 ```
 
-This will:
+### Batch IOD — all trajectories at once
 
-- Load observations from a Parquet file,
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::obs_dataset::{FitIOD, FullOrbitResult};
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
 
-- Identify the observer by MPC code,
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 
-- Run the Gauss IOD pipeline,
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
 
-- Print the best-fit orbit with its RMS value.
+    let params = IODParams::builder()
+        .n_noise_realizations(10)
+        .max_obs_for_triplets(50)
+        .build()?;
 
----
+    let mut rng = StdRng::seed_from_u64(42);
 
-## Data Formats
+    // Run Gauss IOD for every trajectory in the dataset.
+    let results: FullOrbitResult = dataset.fit_full_iod(
+        &jpl,
+        &ut1,
+        &params,
+        ObsErrorModel::FCCT14,
+        &mut rng,
+    )?;
 
-- **MPC 80-column** – [Minor Planet Center fixed-width astrometry format](https://minorplanetcenter.net/iau/info/OpticalObs.html)  
-- **ADES XML** – [IAU Astrometric Data Exchange Standard (ADES)](https://minorplanetcenter.net/iau/info/ADES.html)  
-- **Parquet** – [Apache Parquet](https://parquet.apache.org/) columnar format for large batch processing  
-  Typical columns: `ra`, `dec`, `jd` or `mjd`, `trajectory_id` (configurable)
-
+    for (traj_id, res) in &results {
+        match res {
+            Ok((gauss, rms)) => println!("{traj_id} → RMS = {rms:.4}\n{gauss}"),
+            Err(e)           => eprintln!("{traj_id} → error: {e}"),
+        }
+    }
+    Ok(())
+}
+```
 
 ---
 
@@ -164,69 +220,14 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ---
 
-### Parallel batches
-
-Compile with `--features parallel` and prefer the adaptive batching API for very large sets:
-
-```bash
-cargo run --release --example parquet_to_orbit --features "jpl-download,parallel"
-```
-
-Then call `estimate_all_orbits_in_batches_parallel` (same signature + extra `batch_size` argument) for improved throughput when trajectory sets exceed CPU cache friendliness.
-
-### Result helpers
-
-Access individual solutions ergonomically:
-
-```rust
-use outfit::trajectories::trajectory_fit::{gauss_result_for, take_gauss_result};
-// Borrow without moving:
-if let Some(Ok((g, rms))) = gauss_result_for(&results, &some_object) {
-   println!("Semi-major axis: {} AU (rms={rms:.3})", g.keplerian.a);
-}
-```
-
-Errors are explicit (no `Option` inside `Result`); pathological numeric scores (`NaN`, `inf`) surface as `OutfitError::NonFiniteScore`.
-
----
-
-## Observers & Reference Frames
-
-- Observer lookup by **MPC code**.
-- Geocentric and heliocentric positions in **AU**, **J2000** (equatorial).
-- Earth orientation (nutation, precession) and **aberration** corrections via internal reference-system utilities.
-
----
-
-## Cargo Feature Flags
-
-The crate keeps the feature surface intentionally small and orthogonal. All core parsing (MPC 80-col, ADES XML, Parquet) and Gauss IOD logic are always compiled; features only toggle optional runtime dependencies.
-
-| Feature        | Adds                                                    | Notes |
-|----------------|---------------------------------------------------------|-------|
-| `jpl-download` | `reqwest`, `tokio` (multi-thread RT), on-demand fetch   | Downloads and caches JPL ephemerides (e.g. DE440) in the user data dir on first access. Offline re-use afterward. |
-| `progress`     | `indicatif` progress bars + moving average timing       | Enabled in long batch IOD loops; zero cost when not used. |
-| `parallel`     | `rayon`                                                 | Enables `TrajectoryFit::estimate_all_orbits_in_batches_parallel`; set `IODParams.batch_size` to tune batch granularity. |
-
-Planned (not yet implemented): least-squares refinement and alternative IOD methods will likely get their own feature gates.
-
----
-
 ## Performance & Reproducibility
 
 - **Deterministic runs** by default (set RNG seeds explicitly when noise is used).
-- **Batch-friendly APIs** (Parquet; streaming triplets).
-- Avoid ephemeris I/O in hot paths by **precomputing observer positions**.
-- Benchmarks via **criterion** (see below).
-
-**Tips**
+- **Precompute observer positions** to avoid ephemeris I/O in hot paths.
 - Compile with `--release` for production.
-- Keep ephemerides cached locally (with `jpl-download` enabled) to avoid I/O stalls.
-- Use the `progress` feature to instrument long loops without cluttering core logic.
-- `ObservationBatch` conversions (deg/arcsec → rad) happen once; avoid re-normalizing angles inside tight loops.
-- Group observations by unique epoch to reuse cached observer positions (already done by built-in ingestion pipelines).
-- Handle errors rather than filtering silently: a non-finite RMS is raised early as `OutfitError::NonFiniteScore` to prevent propagating invalid states.
-- For very large trajectory sets, tune `IODParams.batch_size` (with `parallel`) so each batch fits comfortably in cache (start with 4–8 and benchmark).
+- Keep ephemerides cached locally to avoid I/O stalls on repeated runs.
+- For large trajectory sets, tune `IODParams.batch_size` (with `parallel`) so each batch fits comfortably in cache (start with 4–8 and benchmark).
+- Handle errors explicitly: a non-finite RMS surfaces as `OutfitError::NonFiniteScore`.
 
 ---
 
@@ -234,10 +235,10 @@ Planned (not yet implemented): least-squares refinement and alternative IOD meth
 
 - **Full least-squares orbit fitting** across full arcs
 - **Hyperbolic & parabolic orbits** (e ≥ 1) for interstellar candidates
-- **Alternative IOD methods** (e.g., **Vaisala**)
-- **Ephemerides backends** (e.g., ANISE/SPICE integration)
+- **Vaisälä method** for short arcs
+- **Additional ephemerides backends** (e.g., ANISE/SPICE integration)
 
-See the issue tracker for the latest details and discussion.
+See the issue tracker for details and discussion.
 
 ---
 
@@ -257,7 +258,6 @@ A typical dev loop:
 cargo fmt --all
 cargo clippy --all-targets --all-features
 cargo test --all-features
-cargo bench --features jpl-download
 ~~~
 
 ---
