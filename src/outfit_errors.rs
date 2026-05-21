@@ -262,7 +262,7 @@ pub enum OutfitError {
     TrajectoryIdNotFound(TrajId),
 
     #[error("No trajectory index available in the dataset")]
-    NoTrajectoryIndex
+    NoTrajectoryIndex,
 }
 
 impl From<&ObsDatasetError> for OutfitError {

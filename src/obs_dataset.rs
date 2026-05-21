@@ -176,8 +176,8 @@ impl FitIOD for ObsDataset {
         let (corrected_dataset, cache, base_seed) =
             prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
 
-        // Default is not implemented for RandomState so a collect cannot be used directly. 
-        // Instead, we create a new map which initialize correctly the RandomState 
+        // Default is not implemented for RandomState so a collect cannot be used directly.
+        // Instead, we create a new map which initialize correctly the RandomState
         // then for each trajectory, insert the results into it.
         corrected_dataset
             .iter_traj_id()
