@@ -1842,6 +1842,7 @@ dependencies = [
  "proptest",
  "rand 0.9.4",
  "rand_distr",
+ "rayon",
  "reqwest",
  "roots",
  "smallvec",
@@ -1923,9 +1924,9 @@ dependencies = [
 
 [[package]]
 name = "photom"
-version = "0.1.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1b59ed9dc7b6c690c1ab1559756a9a13e03b15b8809808c6a1086869860b319"
+checksum = "e1da7b297d3d9ca6122953f2aa6528f66cbc49960825bd018388d9d1115c4422"
 dependencies = [
  "ahash",
  "camino",
@@ -1936,6 +1937,7 @@ dependencies = [
  "ordered-float",
  "polars",
  "quick-xml",
+ "rayon",
  "serde",
  "thiserror",
  "ureq",

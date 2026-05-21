@@ -16,7 +16,7 @@
 //! - [`IODRMS`] — scalar quality metric (RMS of normalised residuals).
 //! - [`FullOrbitResult`] — batch result map keyed by trajectory ID.
 
-use ahash::AHashMap;
+use ahash::RandomState;
 use hifitime::ut1::Ut1Provider;
 use photom::{
     observation_dataset::{observation::Observation, ObsDataset},
@@ -24,10 +24,14 @@ use photom::{
     TrajId,
 };
 use rand::{rngs::SmallRng, SeedableRng};
+use std::collections::HashMap;
 
 use crate::{
     cache::OutfitCache, trajectory::TrajectoryFit, GaussResult, IODParams, JPLEphem, OutfitError,
 };
+
+#[cfg(feature = "parallel")]
+use rayon::iter::ParallelIterator;
 
 /// Type alias for the RMS of normalized residuals from an IOD fit.
 /// This is a single scalar value representing the overall fit quality of the IOD solution.
@@ -48,7 +52,9 @@ pub type IODRMS = f64;
 /// -----------------
 /// * `Ok((GaussResult, IODRMS))` – a successful IOD with its RMS of normalized residuals.
 /// * `Err(OutfitError)` – a failure isolated to that object.
-pub type FullOrbitResult = AHashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>>;
+///
+/// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
+pub type FullOrbitResult = HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>;
 
 /// Extension trait that adds Initial Orbit Determination methods to
 /// [`ObsDataset`].
@@ -84,6 +90,22 @@ pub trait FitIOD {
     /// range).  Individual trajectory failures are **not** propagated as errors;
     /// they are stored as `Err(…)` entries in the returned [`FullOrbitResult`].
     fn fit_full_iod(
+        self,
+        jpl: &JPLEphem,
+        ut1_provider: &Ut1Provider,
+        params: &IODParams,
+        error_model: ObsErrorModel,
+        rng: &mut impl rand::Rng,
+    ) -> Result<FullOrbitResult, OutfitError>;
+
+    /// Parallel version of [`FitIOD::fit_full_iod`] that processes trajectories concurrently.
+    ///
+    /// Enabled with the `parallel` feature flag, which also enables the `rayon`
+    /// dependency.  Trajectories are processed in parallel using Rayon, but each
+    /// trajectory's RNG is still deterministically derived from the caller's `rng`
+    /// to ensure reproducibility regardless of processing order or parallelism.
+    #[cfg(feature = "parallel")]
+    fn fit_full_iod_parallel(
         self,
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
@@ -137,11 +159,8 @@ impl FitIOD for ObsDataset {
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<(GaussResult, IODRMS), OutfitError> {
-        let corrected_dataset = self
-            .with_error_model(error_model)
-            .apply_batch_rms_correction(params.gap_max);
-
-        let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
+        let (corrected_dataset, cache, _) =
+            prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
 
         fit_single_traj(&traj.into(), &corrected_dataset, &cache, jpl, params, rng)
     }
@@ -154,41 +173,60 @@ impl FitIOD for ObsDataset {
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
     ) -> Result<FullOrbitResult, OutfitError> {
-        let corrected_dataset = self
-            .with_error_model(error_model)
-            .apply_model_errors()
-            .apply_batch_rms_correction(params.gap_max);
+        let (corrected_dataset, cache, base_seed) =
+            prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
 
-        let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
-
-        // Draw a single base seed from the caller's RNG.
-        // All per-trajectory RNGs are derived from this seed → deterministic
-        // regardless of trajectory ordering or parallelism.
-        let base_seed: u64 = rng.random();
-
-        let results: FullOrbitResult = corrected_dataset
+        // Default is not implemented for RandomState so a collect cannot be used directly. 
+        // Instead, we create a new map which initialize correctly the RandomState 
+        // then for each trajectory, insert the results into it.
+        corrected_dataset
             .iter_traj_id()
-            .into_iter()
-            .flatten()
-            .map(|traj_id| {
-                // Derive a per-trajectory seed from the base seed and the trajectory ID.
-                // Two trajectories with different IDs always get independent sequences.
-                let traj_seed = base_seed ^ traj_id.stable_hash();
-                let mut local_rng = SmallRng::seed_from_u64(traj_seed);
-
-                let result = fit_single_traj(
-                    traj_id,
-                    &corrected_dataset,
-                    &cache,
-                    jpl,
-                    params,
-                    &mut local_rng,
-                );
-                (traj_id.clone(), result)
+            .ok_or(OutfitError::NoTrajectoryIndex)
+            .map(|iter| {
+                let mut map = HashMap::with_hasher(ahash::RandomState::new());
+                iter.map(|traj_id| {
+                    process_traj(traj_id, &corrected_dataset, &cache, jpl, params, base_seed)
+                })
+                .for_each(|(k, v)| {
+                    map.insert(k, v);
+                });
+                map
             })
-            .collect();
+    }
 
-        Ok(results)
+    #[cfg(feature = "parallel")]
+    fn fit_full_iod_parallel(
+        self,
+        jpl: &JPLEphem,
+        ut1_provider: &Ut1Provider,
+        params: &IODParams,
+        error_model: ObsErrorModel,
+        rng: &mut impl rand::Rng,
+    ) -> Result<FullOrbitResult, OutfitError> {
+        let (corrected_dataset, cache, base_seed) =
+            prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
+
+        let new_map = || HashMap::with_hasher(ahash::RandomState::new());
+
+        // parallel iteration over the trajectory Ids
+        // For each trajectory, we process it and get a map of results for that trajectory.
+        // Fold produce a single map for each thread, and then we reduce all the maps into a single one.
+        corrected_dataset
+            .par_iter_traj_id()
+            .ok_or(OutfitError::NoTrajectoryIndex)
+            .map(|iter| {
+                iter.map(|traj_id| {
+                    process_traj(traj_id, &corrected_dataset, &cache, jpl, params, base_seed)
+                })
+                .fold(new_map, |mut map, (k, v)| {
+                    map.insert(k, v);
+                    map
+                })
+                .reduce(new_map, |mut a, b| {
+                    a.extend(b);
+                    a
+                })
+            })
     }
 }
 
@@ -208,4 +246,48 @@ fn fit_single_traj(
     obs_vec_refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
 
     obs_vec_refs.estimate_best_orbit(cache, jpl, params, rng)
+}
+
+fn prepare_iod(
+    dataset: ObsDataset,
+    jpl: &JPLEphem,
+    ut1_provider: &Ut1Provider,
+    params: &IODParams,
+    error_model: ObsErrorModel,
+    rng: &mut impl rand::Rng,
+) -> Result<(ObsDataset, OutfitCache, u64), OutfitError> {
+    let corrected_dataset = dataset
+        .with_error_model(error_model)
+        .apply_model_errors()
+        .apply_batch_rms_correction(params.gap_max);
+
+    let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
+
+    // Draw a single base seed from the caller's RNG.
+    // All per-trajectory RNGs are derived from this seed → deterministic
+    // regardless of trajectory ordering or parallelism.
+    let base_seed: u64 = rng.random();
+
+    Ok((corrected_dataset, cache, base_seed))
+}
+
+fn process_traj(
+    traj_id: &TrajId,
+    corrected_dataset: &ObsDataset,
+    cache: &OutfitCache,
+    jpl: &JPLEphem,
+    params: &IODParams,
+    base_seed: u64,
+) -> (TrajId, Result<(GaussResult, IODRMS), OutfitError>) {
+    let traj_seed = base_seed ^ traj_id.stable_hash();
+    let mut local_rng = SmallRng::seed_from_u64(traj_seed);
+    let result = fit_single_traj(
+        traj_id,
+        corrected_dataset,
+        cache,
+        jpl,
+        params,
+        &mut local_rng,
+    );
+    (traj_id.clone(), result)
 }

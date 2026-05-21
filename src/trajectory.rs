@@ -433,13 +433,7 @@ impl TrajectoryFit for Vec<&Observation> {
         params: &IODParams,
         rng: &mut impl rand::Rng,
     ) -> Result<(GaussResult, IODRMS), OutfitError> {
-        // Placeholder for the actual orbit estimation logic.
-        // This would involve:
-        // 1. Extracting the relevant observations for this trajectory.
-        // 2. Applying the Gauss method to compute the initial orbit.
-        // 3. Calculating the RMS of normalized residuals.
-        // 4. Returning either a successful result or an error.
-
+        // Compute candidate triplets for preliminary orbit estimation, sorted by geometric spacing.
         let triplets = self.compute_triplets(cache, params);
 
         if triplets.is_empty() {
@@ -472,7 +466,7 @@ impl TrajectoryFit for Vec<&Observation> {
             // Extract 1-σ astrometric uncertainties for the three obs of this triplet.
             let (error_ra, error_dec) = self.extract_errors(triplet.idx_obs);
 
-            // --- Stage 4: For each (lazy) noisy realization of this triplet...
+            // For each (lazy) noisy realization of this triplet...
             // The iterator yields the original triplet first, then noisy copies.
             for realization in triplet.realizations_iter(
                 &error_ra,
@@ -527,7 +521,7 @@ impl TrajectoryFit for Vec<&Observation> {
             }
         }
 
-        // --- Stage 5: If at least one candidate succeeded, return the best; otherwise, propagate an error.
+        // If at least one candidate succeeded, return the best; otherwise, propagate an error.
         if let Some(orbit) = best_orbit {
             Ok((orbit, best_rms))
         } else {

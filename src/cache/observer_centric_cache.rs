@@ -165,9 +165,15 @@ pub fn build_centric_observer_cache(
     obs_dataset: &ObsDataset,
     observer_fixed_cache: &BodyFixedObserverCache,
 ) -> Result<CentricObserverCache, OutfitError> {
-    obs_dataset
-        .iter_observations()
-        .enumerate()
+    #[cfg(not(feature = "parallel"))]
+    let iter = obs_dataset.iter_observations();
+
+    #[cfg(feature = "parallel")]
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+    #[cfg(feature = "parallel")]
+    let iter = obs_dataset.par_iter_observations();
+
+    iter.enumerate()
         .map(|(idx, obs)| {
             let observer_id = obs
                 .observer_id()
