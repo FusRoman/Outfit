@@ -1,22 +1,21 @@
 //! IOD entry points that operate on [`ObsDataset`](photom::observation_dataset::ObsDataset).
 //!
-//! This module exposes the [`FitIOD`] trait, which adds Initial Orbit
+//! This module exposes the [`crate::FitIOD`] trait, which adds Initial Orbit
 //! Determination methods directly to
 //! [`photom::observation_dataset::ObsDataset`]. Two entry points are provided:
 //!
-//! - [`FitIOD::fit_iod`] — run IOD for a **single** named trajectory.
-//! - [`FitIOD::fit_full_iod`] — run IOD for **every** trajectory in the
-//!   dataset and collect the results in a [`FullOrbitResult`] map.
+//! - [`crate::FitIOD::fit_iod`] — run IOD for a **single** named trajectory.
+//! - [`crate::FitIOD::fit_full_iod`] — run IOD for **every** trajectory in the
+//!   dataset and collect the results in a [`crate::FullOrbitResult`] map.
 //!
 //! Both methods apply an astrometric error model, batch-RMS corrections, and
 //! build a per-observation position cache before invoking the Gauss method.
 //!
 //! # Type aliases
 //!
-//! - [`IODRMS`] — scalar quality metric (RMS of normalised residuals).
-//! - [`FullOrbitResult`] — batch result map keyed by trajectory ID.
+//! - [`crate::IODRMS`] — scalar quality metric (RMS of normalised residuals).
+//! - [`crate::FullOrbitResult`] — batch result map keyed by trajectory ID.
 
-use ahash::RandomState;
 use hifitime::ut1::Ut1Provider;
 use photom::{
     observation_dataset::{observation::Observation, ObsDataset},
@@ -27,34 +26,12 @@ use rand::{rngs::SmallRng, SeedableRng};
 use std::collections::HashMap;
 
 use crate::{
-    cache::OutfitCache, trajectory::TrajectoryFit, GaussResult, IODParams, JPLEphem, OutfitError,
+    cache::OutfitCache, trajectory::TrajectoryFit, FullOrbitResult, GaussResult, IODParams,
+    JPLEphem, OutfitError, IODRMS,
 };
 
 #[cfg(feature = "parallel")]
 use rayon::iter::ParallelIterator;
-
-/// Type alias for the RMS of normalized residuals from an IOD fit.
-/// This is a single scalar value representing the overall fit quality of the IOD solution.
-pub type IODRMS = f64;
-
-/// Full batch orbit determination results.
-///
-/// Each entry maps an [`TrajId`] to the outcome of a full
-/// Initial Orbit Determination (IOD) attempt on its set of observations.
-///
-/// Internally, this is implemented as:
-///
-/// ```ignore
-/// HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>
-/// ```
-///
-/// Return semantics
-/// -----------------
-/// * `Ok((GaussResult, IODRMS))` – a successful IOD with its RMS of normalized residuals.
-/// * `Err(OutfitError)` – a failure isolated to that object.
-///
-/// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
-pub type FullOrbitResult = HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>;
 
 /// Extension trait that adds Initial Orbit Determination methods to
 /// [`ObsDataset`].

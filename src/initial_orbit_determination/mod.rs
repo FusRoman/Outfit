@@ -7,7 +7,7 @@
 //! ## Purpose
 //!
 //! The [`IODParams`](crate::initial_orbit_determination::IODParams) object centralizes all tunable parameters used by
-//! [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
+//! [`FitIOD::fit_iod`](crate::FitIOD::fit_iod).
 //! It allows you to:
 //!
 //! - Select and filter candidate observation triplets (time spans, downsampling, maximum counts),
@@ -69,7 +69,7 @@
 //!
 //! ## See also
 //!
-//! * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point
+//! * [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) – main IOD entry point
 //! * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss solver
 //! * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result type for preliminary/corrected orbits
 //! * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection
@@ -77,12 +77,20 @@ use crate::outfit_errors::OutfitError;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::fmt;
 
+/// Gauss method for preliminary orbit determination, including triplet generation, Monte Carlo perturbations, and physical/numerical filtering of candidate solutions.
 pub mod gauss;
+
+/// Result types for preliminary/corrected orbits, including physical/validation flags and RMS scores.
 pub mod gauss_result;
+
+/// Triplet generation utilities, including time-based filtering and downsampling of observations
 pub mod triplet_generation;
 
+/// [`crate::FitIOD`] trait and batch/single-trajectory IOD entry points on [`photom::observation_dataset::ObsDataset`].
+pub mod obs_dataset_api;
+
 /// Configuration parameters controlling the behavior of
-/// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
+/// [`FitIOD::fit_iod`](crate::FitIOD::fit_iod).
 ///
 /// This structure centralizes all tunable parameters used during
 /// preliminary orbit determination with the Gauss method. It lets you adjust:
@@ -209,7 +217,7 @@ pub mod triplet_generation;
 ///
 /// See also
 /// -----------------
-/// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – main IOD entry point.
+/// * [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) – main IOD entry point.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs`] – triplet generation & Gauss pipeline.
 /// * [`crate::initial_orbit_determination::gauss_result::GaussResult`] – result types for preliminary/corrected solutions.
 /// * [`crate::initial_orbit_determination::gauss::GaussObs::solve_8poly`] – 8th-degree distance polynomial and root selection.
@@ -270,7 +278,7 @@ impl IODParams {
     ///
     /// This is a **fluent builder API** for [`IODParams`], allowing you to
     /// override the default parameters step by step before running
-    /// [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
+    /// [`FitIOD::fit_iod`](crate::FitIOD::fit_iod).
     ///
     /// # Example
     ///
@@ -291,7 +299,7 @@ impl IODParams {
     ///
     /// # See also
     /// * [`IODParams`] – Holds all configuration parameters for IOD.
-    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – Consumes these parameters to perform orbit determination.
+    /// * [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) – Consumes these parameters to perform orbit determination.
     pub fn builder() -> IODParamsBuilder {
         IODParamsBuilder::new()
     }
@@ -532,7 +540,7 @@ impl IODParamsBuilder {
     /// ```
     ///
     /// When `.build()` succeeds, the resulting [`IODParams`] can be passed
-    /// to [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod).
+    /// to [`FitIOD::fit_iod`](crate::FitIOD::fit_iod).
     pub fn build(self) -> Result<IODParams, OutfitError> {
         let p = &self.params;
 

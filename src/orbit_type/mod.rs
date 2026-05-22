@@ -69,8 +69,8 @@ pub mod cometary_element;
 /// * [`KeplerianElements`] – Classical Keplerian elements.
 /// * [`EquinoctialElements`] – Non-singular elements (equinoctial).
 /// * [`CometaryElements`] – Perihelion distance representation for e≥1.
-/// * [`OrbitalElements::to_equinoctial`] – Lossless conversion for elliptic orbits.
-/// * [`OrbitalElements::to_keplerian`] – Conversion with domain checks.
+/// * [`crate::orbit_type::OrbitalElements::to_equinoctial`] – Lossless conversion for elliptic orbits.
+/// * [`crate::orbit_type::OrbitalElements::to_keplerian`] – Conversion with domain checks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrbitalElements {
     Keplerian(KeplerianElements),

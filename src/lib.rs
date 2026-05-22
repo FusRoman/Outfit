@@ -52,8 +52,8 @@
 //! 1. **Load observations** into an [`ObsDataset`](photom::observation_dataset::ObsDataset)
 //!    (MPC 80-column, ADES XML, or Parquet).
 //! 2. **Load JPL ephemerides** via [`JPLEphem`] and prepare a UT1 provider.
-//! 3. **Run IOD** by calling [`FitIOD::fit_iod`](obs_dataset::FitIOD::fit_iod) on the dataset.
-//! 4. **Evaluate residuals** (RMS) using the returned [`IODRMS`](obs_dataset::IODRMS).
+//! 3. **Run IOD** by calling [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) on the dataset.
+//! 4. **Evaluate residuals** (RMS) using the returned [`IODRMS`](crate::IODRMS).
 //! 5. **Propagate** using Keplerian dynamics or convert to equinoctial elements as needed.
 //!
 //! ## Example (single-trajectory IOD from MPC 80-column)
@@ -63,7 +63,7 @@
 //! use photom::observer::error_model::ObsErrorModel;
 //! use hifitime::ut1::Ut1Provider;
 //! use rand::{rngs::StdRng, SeedableRng};
-//! use outfit::obs_dataset::FitIOD;
+//! use outfit::FitIOD;
 //! use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
 //! use outfit::IODParams;
 //!
@@ -175,8 +175,7 @@
 //!
 //! ## See also
 //!
-//! - [`initial_orbit_determination`] — Gauss IOD algorithm, triplet generation, and IOD parameters.
-//! - [`obs_dataset`] — [`FitIOD`](obs_dataset::FitIOD) trait and batch/single-trajectory IOD entry points.
+//! - [`initial_orbit_determination`] — Gauss IOD algorithm, triplet generation, IOD parameters, public api to perform iod on an [`ObsDataset`](photom::observation_dataset::ObsDataset).
 //! - [`jpl_ephem`] — Ephemerides backends (Horizons/NAIF DE440).
 //! - [`orbit_type`] — Orbital element representations (Keplerian, Equinoctial, Cometary).
 //! - [`ref_system`] — Reference frame transformations.
@@ -190,7 +189,6 @@
 //! - [`cache`] — Precomputed observer position cache.
 //! - [`observation_ephemeris`] — Apparent position computation and ephemeris residuals.
 //! - [`observer_extension`] — Geocentric and heliocentric observer position routines.
-//! - [`trajectory`](crate::obs_dataset) — Core IOD pipeline trait over observation slices.
 
 // === Modules (internals). Keep public modules as they are; the facade is built via `pub use` below.
 
@@ -205,6 +203,9 @@ pub mod earth_orientation;
 
 /// Initial Orbit Determination algorithms (Gauss method).
 pub mod initial_orbit_determination;
+
+/// Full orbit determination utilities.
+pub mod full_orbit_determination;
 
 /// JPL ephemerides management (Horizon/NAIF kernels).
 pub mod jpl_ephem;
@@ -229,9 +230,6 @@ pub mod time;
 
 /// Precomputed observer position cache used throughout the fitting pipeline.
 pub mod cache;
-
-/// [`FitIOD`] trait and batch/single-trajectory IOD entry points on [`photom::observation_dataset::ObsDataset`].
-pub mod obs_dataset;
 
 /// Apparent position computation and astrometric residuals for individual observations.
 pub mod observation_ephemeris;
@@ -260,14 +258,14 @@ pub use crate::initial_orbit_determination::IODParams;
 
 // Selected constants that are widely useful
 pub use crate::constants::{
-    AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU,
+    FullOrbitResult, AU, GAUSS_GRAV, IODRMS, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU,
 };
 
 // JPL ephemeris enum for runtime inspection (optional but convenient)
 pub use crate::jpl_ephem::JPLEphem;
 
 // IOD entry points and result types
-pub use crate::obs_dataset::{FitIOD, FullOrbitResult, IODRMS};
+pub use crate::initial_orbit_determination::obs_dataset_api::FitIOD;
 
 // A convenient crate-wide Result alias.
 pub type Result<T> = core::result::Result<T, OutfitError>;

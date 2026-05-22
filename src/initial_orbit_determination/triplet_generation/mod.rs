@@ -10,7 +10,7 @@
 //! - **Score** triplets with a spacing-based weight that favors near-uniform timing,
 //! - **Select** only the best candidates using a heap-based pruning strategy.
 //!
-//! The output is a small set of [`GaussObs`] triplets, ready to be passed to
+//! The output is a small set of [`crate::initial_orbit_determination::gauss::GaussObs`] triplets, ready to be passed to
 //! the Gauss preliminary-orbit routine.
 //!
 //! ## Workflow overview
@@ -18,9 +18,9 @@
 //! 1. **Sort in time** (in-place).
 //! 2. **Downsample** to at most *N* points with uniform coverage (always keep first/last).
 //! 3. **Enumerate** triplets `(i, j, k)` such that `dt_min ≤ t_k − t_i ≤ dt_max`.
-//! 4. **Score** each triplet with [`triplet_weight`], using `optimal_interval_time` as target spacing.
+//! 4. **Score** each triplet with [`crate::initial_orbit_determination::triplet_generation::triplet_weight`], using `optimal_interval_time` as target spacing.
 //! 5. **Keep top-K** (lowest weight) using a `BinaryHeap` configured as a **max-heap**.
-//! 6. **Materialize** the winners as [`GaussObs`] with precomputed observer positions.
+//! 6. **Materialize** the winners as [`crate::initial_orbit_determination::gauss::GaussObs`] with precomputed observer positions.
 //!
 //! ## Complexity & performance
 //!
@@ -68,9 +68,9 @@
 //!
 //! ## See also
 //!
-//! - [`generate_triplets`] – Core function assembling and ranking triplets.
-//! - [`triplet_weight`] – Spacing-based scoring rule.
-//! - [`GaussObs`] – Triplet container consumed by the Gauss IOD solver.
+//! - [`crate::initial_orbit_determination::triplet_generation::generate_triplets`] – Core function assembling and ranking triplets.
+//! - [`crate::initial_orbit_determination::triplet_generation::triplet_weight`] – Spacing-based scoring rule.
+//! - [`crate::initial_orbit_determination::gauss::GaussObs`] – Triplet container consumed by the Gauss IOD solver.
 //! - `ObservationsExt::compute_triplets` – Higher-level wrapper (internal API).
 
 pub mod index_generator;

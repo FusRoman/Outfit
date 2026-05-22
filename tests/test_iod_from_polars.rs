@@ -3,9 +3,7 @@ mod common;
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::orbit_type::{keplerian_element::KeplerianElements, OrbitalElements};
-use outfit::{
-    jpl_ephem::download_jpl_file::EphemFileSource, obs_dataset::FitIOD, IODParams, JPLEphem,
-};
+use outfit::{jpl_ephem::download_jpl_file::EphemFileSource, FitIOD, IODParams, JPLEphem};
 use photom::io::polars::ContiguousChoice;
 use photom::{
     io::polars::FromPolarsArgs, observation_dataset::ObsDataset,

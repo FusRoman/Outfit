@@ -28,9 +28,8 @@ use photom::{observation_dataset::observation::Observation, Radians};
 use crate::{
     cache::OutfitCache,
     initial_orbit_determination::{gauss::GaussObs, triplet_generation::generate_triplets},
-    obs_dataset::IODRMS,
     observation_ephemeris::ObservationEphemeris,
-    EquinoctialElements, GaussResult, IODParams, JPLEphem, OutfitError,
+    EquinoctialElements, GaussResult, IODParams, JPLEphem, OutfitError, IODRMS,
 };
 
 pub(crate) trait TrajectoryFit {

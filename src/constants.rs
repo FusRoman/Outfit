@@ -19,7 +19,13 @@
 // Physical constants and unit conversions
 // -------------------------------------------------------------------------------------------------
 
+use std::collections::HashMap;
+
+use ahash::RandomState;
 use nalgebra::{Matrix3, Vector3};
+use photom::TrajId;
+
+use crate::{GaussResult, OutfitError};
 
 /// 2π, useful for trigonometric conversions
 pub const DPI: f64 = 2. * std::f64::consts::PI;
@@ -115,3 +121,26 @@ pub const ROT_ECLMJ2000_TO_EQUMJ2000: Matrix3<f64> = Matrix3::new(
 
 /// Modified Julian Date (Scale Ephemeris Time, ET)
 pub type MJDET = f64;
+
+/// Type alias for the RMS of normalized residuals from an IOD fit.
+/// This is a single scalar value representing the overall fit quality of the IOD solution.
+pub type IODRMS = f64;
+
+/// Full batch orbit determination results.
+///
+/// Each entry maps an [`TrajId`] to the outcome of a full
+/// Initial Orbit Determination (IOD) attempt on its set of observations.
+///
+/// Internally, this is implemented as:
+///
+/// ```ignore
+/// HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>
+/// ```
+///
+/// Return semantics
+/// -----------------
+/// * `Ok((GaussResult, IODRMS))` – a successful IOD with its RMS of normalized residuals.
+/// * `Err(OutfitError)` – a failure isolated to that object.
+///
+/// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
+pub type FullOrbitResult = HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>;
