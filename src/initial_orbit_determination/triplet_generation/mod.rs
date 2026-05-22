@@ -457,7 +457,7 @@ mod triplets_iod_tests {
             .apply_batch_rms_correction(30.0);
 
         // Build the cache from the real 2015AB dataset.
-        let cache = OutfitCache::build(&dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+        let cache = OutfitCache::build(&dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
 
         // Pick a trajectory with enough observations.
         let traj = dataset

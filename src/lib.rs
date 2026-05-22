@@ -112,7 +112,7 @@
 //! use photom::observer::error_model::ObsErrorModel;
 //! use hifitime::ut1::Ut1Provider;
 //! use rand::{rngs::StdRng, SeedableRng};
-//! use outfit::obs_dataset::{FitIOD, FullOrbitResult};
+//! use outfit::{FitIOD, FullOrbitResult};
 //! use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
 //! use outfit::IODParams;
 //!

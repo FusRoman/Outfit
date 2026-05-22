@@ -309,7 +309,7 @@ mod test_observations_ephemeris {
 
             let obs_dataset = obsdataset_with_observation_time(t_obs);
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
 
             let equinoctial = simple_circular_elements(t_obs);
 
@@ -331,7 +331,7 @@ mod test_observations_ephemeris {
 
             let obs_dataset = obsdataset_with_observation_time(t_epoch);
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
 
             let equinoctial = simple_circular_elements(t_epoch);
 
@@ -355,7 +355,7 @@ mod test_observations_ephemeris {
 
             let obs_dataset = obsdataset_with_observation_time(t_obs);
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
 
             let mut equinoctial = simple_circular_elements(t_obs);
 
@@ -376,7 +376,7 @@ mod test_observations_ephemeris {
         fn test_compute_apparent_position_propagation_failure() {
             let obs_dataset = obsdataset_with_observation_time(0.0);
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
 
             // Invalid orbital elements to force failure in solve_two_body_problem
             let equinoctial = EquinoctialElements {
@@ -498,7 +498,8 @@ mod test_observations_ephemeris {
                     .apply_model_errors();
 
                 let cache =
-                    OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                    OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                        .unwrap();
 
                 (obs_dataset, cache)
             }
@@ -535,7 +536,8 @@ mod test_observations_ephemeris {
                     .apply_model_errors();
 
                 let cache =
-                    OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                    OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                        .unwrap();
 
                 (obs_dataset, cache)
             }
@@ -725,7 +727,7 @@ mod test_observations_ephemeris {
             };
 
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
             (obs_dataset, cache)
         }
 
@@ -764,7 +766,7 @@ mod test_observations_ephemeris {
                 .apply_model_errors();
 
             let cache =
-                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+                OutfitCache::build(&obs_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
             (obs_dataset, cache)
         }
 

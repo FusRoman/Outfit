@@ -62,6 +62,14 @@ pub type ObserverGeocentricVelocity = Vector3<NotNan<f64>>;
 /// Uses [`NotNan<f64>`] components to enforce NaN-safety at construction time.
 pub type ObserverHeliocentricPosition = Vector3<NotNan<f64>>;
 
+/// Heliocentric velocity of the observer at the epoch of an observation.
+///
+/// This is the sum of the geocentric observer velocity and the geocentric
+/// velocity of the Earth's centre, both in the **ecliptic mean J2000** frame,
+/// in **AU/day**.
+/// Uses [`NotNan<f64>`] components to enforce NaN-safety at construction time.
+pub type ObserverHeliocentricVelocity = Vector3<NotNan<f64>>;
+
 /// Geocentric and heliocentric observer state for a single observation epoch.
 ///
 /// Built for each observation in the dataset by [`build_centric_observer_cache`].
@@ -75,9 +83,11 @@ pub struct ObserverCentricCache {
     /// Geocentric position of the observer at the observation epoch, in AU.
     pub geo_position: ObserverGeocentricPosition,
     /// Geocentric velocity of the observer at the observation epoch, in AU/day.
-    pub geo_velocity: ObserverGeocentricVelocity,
+    pub geo_velocity: Option<ObserverGeocentricVelocity>,
     /// Heliocentric position of the observer at the observation epoch, in AU.
     pub helio_position: ObserverHeliocentricPosition,
+    /// Heliocentric velocity of the observer at the observation epoch, in AU/day.
+    pub helio_velocity: Option<ObserverHeliocentricVelocity>,
 }
 
 impl ObserverCentricCache {
@@ -92,6 +102,7 @@ impl ObserverCentricCache {
     ///   (see [`MJDTT`]).
     /// - `observer_fixed_cache` — precomputed body-fixed position and velocity of the
     ///   observer (see [`ObserverFixedCache`]).
+    /// - `cache_velocity` — whether to compute and cache the velocity components. If `false`, the velocity fields will be set to `None` to save computation time and memory.
     ///
     /// # Errors
     ///
@@ -104,17 +115,28 @@ impl ObserverCentricCache {
         ut1_provider: &Ut1Provider,
         obs_time: MJDTT,
         observer_fixed_cache: &ObserverFixedCache,
+        cache_velocity: bool,
     ) -> Result<Self, OutfitError> {
         let obs_mjd = Epoch::from_mjd_in_time_scale(obs_time, hifitime::TimeScale::TT);
         let (geocentric_pos, geocentric_vel) =
-            Observer::pvobs(&obs_mjd, ut1_provider, observer_fixed_cache)?;
+            Observer::pvobs(&obs_mjd, ut1_provider, observer_fixed_cache, cache_velocity)?;
 
         let heliocentric_pos = Observer::helio_position(jpl, &obs_mjd, &geocentric_pos)?;
+        let heliocentric_vel = if cache_velocity {
+            Some(Observer::helio_velocity(jpl, &obs_mjd, &geocentric_vel)?)
+        } else {
+            None
+        };
 
         Ok(Self {
             geo_position: geocentric_pos,
-            geo_velocity: geocentric_vel,
+            geo_velocity: if cache_velocity {
+                Some(geocentric_vel)
+            } else {
+                None
+            },
             helio_position: heliocentric_pos,
+            helio_velocity: heliocentric_vel,
         })
     }
 }
@@ -140,6 +162,7 @@ pub type CentricObserverCache = Vec<ObserverCentricCache>;
 /// - `obs_dataset` — the full observation dataset to process.
 /// - `observer_fixed_cache` — pre-built map from [`photom::observer::dataset::ObserverId`]
 ///   to body-fixed observer state (see [`BodyFixedObserverCache`]).
+/// - `cache_velocity` — whether to compute and cache the velocity components in the resulting `ObserverCentricCache`. If `false`, the velocity fields will be set to `None` to save computation time and memory.
 ///
 /// # Errors
 ///
@@ -164,6 +187,7 @@ pub fn build_centric_observer_cache(
     ut1_provider: &Ut1Provider,
     obs_dataset: &ObsDataset,
     observer_fixed_cache: &BodyFixedObserverCache,
+    cache_velocity: bool,
 ) -> Result<CentricObserverCache, OutfitError> {
     #[cfg(not(feature = "parallel"))]
     let iter = obs_dataset.iter_observations();
@@ -183,7 +207,7 @@ pub fn build_centric_observer_cache(
                 .get(observer_id)
                 .ok_or_else(|| OutfitError::ObserverIdIsNone(idx as u64))?;
 
-            ObserverCentricCache::new(jpl, ut1_provider, obs.mjd_tt(), fixed_cache)
+            ObserverCentricCache::new(jpl, ut1_provider, obs.mjd_tt(), fixed_cache, cache_velocity)
         })
         .collect()
 }
@@ -191,10 +215,12 @@ pub fn build_centric_observer_cache(
 #[cfg(test)]
 mod observer_test {
 
+    use approx::assert_relative_eq;
     use photom::{Meters, Radians};
 
     use crate::{
         cache::observer_centric_cache::ObserverCentricCache,
+        conversion::ToNotNan,
         test_fixture::{JPL_EPHEM_HORIZON, UT1_PROVIDER},
     };
 
@@ -250,7 +276,7 @@ mod observer_test {
         let observer_fixed_cache: ObserverFixedCache = (&pan_starrs).try_into().unwrap();
 
         let (observer_position, observer_velocity) =
-            Observer::pvobs(&epoch, &UT1_PROVIDER, &observer_fixed_cache).unwrap();
+            Observer::pvobs(&epoch, &UT1_PROVIDER, &observer_fixed_cache, true).unwrap();
 
         assert_eq!(
             observer_position.as_slice(),
@@ -268,6 +294,11 @@ mod observer_test {
                 5.262184624215718e-5
             ]
         );
+
+        let (_, observer_velocity) =
+            Observer::pvobs(&epoch, &UT1_PROVIDER, &observer_fixed_cache, false).unwrap();
+
+        assert_eq!(observer_velocity.as_slice(), [0.0, 0.0, 0.0]);
     }
 
     #[test]
@@ -304,10 +335,131 @@ mod observer_test {
                 &UT1_PROVIDER,
                 tmjd,
                 &observer_fixed_cache,
+                true,
             )
             .unwrap();
 
             assert_eq!(obs.helio_position.as_slice(), expected, "tmjd = {tmjd}");
         }
+    }
+
+    fn v3(x: f64, y: f64, z: f64) -> Vector3<NotNan<f64>> {
+        Vector3::new(x, y, z).to_notnan().unwrap()
+    }
+
+    fn to_f64(v: &Vector3<NotNan<f64>>) -> Vector3<f64> {
+        v.map(|x| x.into_inner())
+    }
+
+    fn assert_v3_eq(actual: &Vector3<NotNan<f64>>, expected: &Vector3<NotNan<f64>>, eps: f64) {
+        assert_relative_eq!(to_f64(actual), to_f64(expected), epsilon = eps);
+    }
+
+    #[test]
+    fn test_helio_pos_vel_geocenter() {
+        let geocenter =
+            Observer::from_parallax(0.0, 0.0, 0.0, Some("Geocenter".to_string()), None, None)
+                .unwrap();
+
+        let observer_fixed_cache: ObserverFixedCache = (&geocenter).try_into().unwrap();
+
+        let obs = ObserverCentricCache::new(
+            &JPL_EPHEM_HORIZON,
+            &UT1_PROVIDER,
+            59000.0,
+            &observer_fixed_cache,
+            true,
+        )
+        .unwrap();
+
+        assert_v3_eq(&obs.geo_position, &v3(0.0, 0.0, 0.0), 1e-10);
+        assert_v3_eq(
+            &obs.helio_position,
+            &v3(
+                -0.35112872984703947,
+                -0.8726911829575209,
+                -0.37831199013326505,
+            ),
+            1e-10,
+        );
+        assert_v3_eq(
+            obs.helio_velocity.as_ref().unwrap(),
+            &v3(
+                0.015860197805364396,
+                -0.005519387867661577,
+                -0.002392757495907968,
+            ),
+            1e-10,
+        );
+
+        assert_v3_eq(&obs.geo_position, &v3(0.0, 0.0, 0.0), 1e-10);
+        assert_v3_eq(
+            obs.geo_velocity.as_ref().unwrap(),
+            &v3(0.0, 0.0, 0.0),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn test_helio_pos_vel_mauna_kea() {
+        // MPC code 568 — Mauna Kea (W. M. Keck Observatory)
+        // lon = 204.5284°, lat = 19.8260°, h = 4160 m
+        let mauna_kea = Observer::from_parallax(
+            204.5278_f64.to_radians(),
+            0.94171,
+            0.33725,
+            Some("Maunakea".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let observer_fixed_cache: ObserverFixedCache = (&mauna_kea).try_into().unwrap();
+
+        let obs = ObserverCentricCache::new(
+            &JPL_EPHEM_HORIZON,
+            &UT1_PROVIDER,
+            59000.0,
+            &observer_fixed_cache,
+            true,
+        )
+        .unwrap();
+
+        assert_v3_eq(
+            &obs.helio_position,
+            &v3(
+                -3.511307549159519e-01,
+                -8.726510855672746e-01,
+                -3.782976072020051e-01,
+            ),
+            1e-9,
+        );
+        assert_v3_eq(
+            obs.helio_velocity.as_ref().unwrap(),
+            &v3(
+                1.560756863717671e-02,
+                -5.532323168433832e-03,
+                -2.392265222947331e-03,
+            ),
+            1e-8,
+        );
+        assert_v3_eq(
+            &obs.geo_position,
+            &v3(
+                -2.025068912418855e-06,
+                4.250983777758508e-05,
+                -2.753744421400818e-06,
+            ),
+            1e-8,
+        );
+        assert_v3_eq(
+            obs.geo_velocity.as_ref().unwrap(),
+            &v3(
+                -2.526291681876792e-04,
+                -1.167209148779009e-05,
+                5.597018763337186e-06,
+            ),
+            1e-8,
+        );
     }
 }

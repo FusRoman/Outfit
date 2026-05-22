@@ -43,7 +43,7 @@ impl CacheFixture {
             .with_error_model(ObsErrorModel::FCCT14)
             .apply_batch_rms_correction(self.default_params.gap_max);
 
-        let cache = OutfitCache::build(&obs_dataset, &self.jpl_ephem, &self.ut1_provider)
+        let cache = OutfitCache::build(&obs_dataset, &self.jpl_ephem, &self.ut1_provider, false)
             .expect("Failed to build outfit cache");
 
         (cache, obs_dataset)

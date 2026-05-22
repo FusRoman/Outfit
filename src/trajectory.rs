@@ -569,7 +569,8 @@ mod test_obs_ext {
         let traj_len = traj.len();
 
         let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                .unwrap();
 
         let iod_params = IODParams {
             dt_min: 0.03,
@@ -635,7 +636,8 @@ mod test_obs_ext {
             .collect_into_vec();
 
         let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                .unwrap();
 
         let triplets = GaussObs {
             idx_obs: Vector3::new(34, 35, 36),
@@ -805,8 +807,8 @@ mod test_obs_ext {
             .build()
             .unwrap();
 
-        let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+        let cache = OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, true)
+            .unwrap();
 
         let (best_orbit, best_rms) = traj
             .estimate_best_orbit(&cache, &JPL_EPHEM_HORIZON, &iod_params, &mut rng)

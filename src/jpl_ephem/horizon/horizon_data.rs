@@ -801,6 +801,7 @@ impl HorizonData {
     ///   - `velocity` \[km/day\] (if requested),
     ///   - `acceleration` \[km/day²\] (if requested),
     ///     all expressed relative to the center body.
+    ///     Express in the Ecliptic J2000 frame, consistent with Horizons output.
     ///
     /// See also
     /// ------------

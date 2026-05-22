@@ -126,7 +126,6 @@ impl JPLEphem {
     /// - **Legacy DE (`horizon`)**: `Earth` − `Sun`; after `.to_au()`: **AU** and **AU/day**.
     /// - **NAIF SPK/DAF (`naif`)**: `EMB` − `SSB`; after `.to_au()`: **AU** and **AU/s**.
     ///
-    /// If a uniform velocity unit is required, convert NAIF velocities by `* 86400.0`.
     ///
     /// # Parameters
     /// * `ephem_time` — Observation epoch (`hifitime::Epoch`).
@@ -134,6 +133,8 @@ impl JPLEphem {
     ///
     /// # Returns
     /// `(position_au, velocity_opt)` with velocity present only if requested.
+    ///     - `position_au`: Earth position in **AU** (geocenter for `horizon`, EMB for `naif`).
+    ///     - `velocity_opt`: Earth velocity in **AU/day**.
     ///
     /// # See also
     /// * [`horizon::HorizonData::ephemeris`](crate::jpl_ephem::horizon::horizon_data::HorizonData::ephemeris)
@@ -164,7 +165,7 @@ impl JPLEphem {
                         ephem_time.to_et_seconds(),
                     )
                     .to_au();
-                (ephem_res.position, ephem_res.velocity)
+                (ephem_res.position, ephem_res.velocity.map(|v| v / 86400.0)) // Convert from AU/s to AU/day
             }
         }
     }

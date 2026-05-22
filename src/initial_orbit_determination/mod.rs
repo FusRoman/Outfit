@@ -285,7 +285,7 @@ impl IODParams {
     /// ```rust,no_run
     /// use rand::{rngs::StdRng, SeedableRng};
     /// use outfit::initial_orbit_determination::IODParams;
-    /// use outfit::obs_dataset::FitIOD;
+    /// use outfit::FitIOD;
     ///
     /// let params = IODParams::builder()
     ///     .n_noise_realizations(100)

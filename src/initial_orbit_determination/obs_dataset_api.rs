@@ -238,7 +238,7 @@ fn prepare_iod(
         .apply_model_errors()
         .apply_batch_rms_correction(params.gap_max);
 
-    let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
+    let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider, true)?;
 
     // Draw a single base seed from the caller's RNG.
     // All per-trajectory RNGs are derived from this seed → deterministic
