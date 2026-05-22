@@ -104,11 +104,38 @@ use crate::{
     outfit_errors::OutfitError,
 };
 
+/// Type alias for the result of two-body propagation from equinoctial elements.
+///
+/// The tuple contains:
+/// -   `Vector3<f64>`: Cartesian position vector (AU)
+/// -   `Vector3<f64>`: Cartesian velocity vector (AU/day)
+/// -   `Option<(Matrix6x3<f64>, Matrix6x3<f64>)>`: Optional Jacobian matrices of position and velocity with respect to the six equinoctial elements.
 pub type TwoBodyResult = (
     Vector3<f64>,
     Vector3<f64>,
     Option<(Matrix6x3<f64>, Matrix6x3<f64>)>,
 );
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EquinoctialLimits {
+    pub eccentricity_limit: f64,
+    min_semi_major_axis: f64,
+    max_semi_major_axis: f64,
+    min_periapsis_distance: f64,
+    max_apoapsis_distance: f64,
+}
+
+impl Default for EquinoctialLimits {
+    fn default() -> Self {
+        Self {
+            eccentricity_limit: 1.2, // Allow for some hyperbolic orbits (e > 1) but not extreme ones
+            min_semi_major_axis: 1e-6, // 1e-6 AU ~ 150 km
+            max_semi_major_axis: 1e4, // 10,000 AU
+            min_periapsis_distance: 1e-6, // 1e-6 AU ~ 150 km
+            max_apoapsis_distance: 1e4, // 10,000 AU
+        }
+    }
+}
 
 /// Equinoctial orbital elements.
 /// Units:
@@ -176,6 +203,27 @@ impl EquinoctialElements {
     /// * [`EquinoctialElements::squared_eccentricity`] – Returns `e²` directly.
     pub fn eccentricity(&self) -> f64 {
         self.squared_eccentricity().sqrt()
+    }
+
+    /// Check if the equinoctial elements represent a "bizarre" orbit based on specified limits.
+    ///
+    /// # Arguments
+    ///
+    /// - `limits` - An instance of `EquinoctialLimits` defining thresholds for eccentricity, semi-major axis, periapsis distance, and apoapsis distance.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if the orbit is considered bizarre (e.g., too eccentric, too small/large semi-major axis, or extreme periapsis/apoapsis distances), otherwise `false`.
+    pub fn is_bizarre(&self, limits: &EquinoctialLimits) -> bool {
+        let e = self.eccentricity();
+        let periapsis = self.semi_major_axis * (1. - e); // periapsis distance
+        let apoapsis = self.semi_major_axis * (1. + e); // apoapsis distance
+
+        e > limits.eccentricity_limit
+            || self.semi_major_axis < limits.min_semi_major_axis
+            || self.semi_major_axis > limits.max_semi_major_axis
+            || periapsis < limits.min_periapsis_distance
+            || apoapsis > limits.max_apoapsis_distance
     }
 
     /// Create a new instance of `EquinoctialElements` from Keplerian elements.
@@ -845,6 +893,32 @@ impl fmt::Display for EquinoctialElements {
 #[cfg(test)]
 mod test_equinoctial_element {
     use super::*;
+
+    #[test]
+    fn test_is_bizarre() {
+        let equ = EquinoctialElements {
+            reference_epoch: 0.0,
+            semi_major_axis: 1.8017360713,
+            eccentricity_sin_lon: 0.2693736809404963,
+            eccentricity_cos_lon: 0.08856415260522467,
+            tan_half_incl_sin_node: 0.0008089970142830734,
+            tan_half_incl_cos_node: 0.10168201110394352,
+            mean_longitude: 1.693697008,
+        };
+        let limits = EquinoctialLimits::default();
+        assert!(!equ.is_bizarre(&limits));
+
+        let bad_equ = EquinoctialElements {
+            reference_epoch: 0.0,
+            semi_major_axis: 0.000001, // too small
+            eccentricity_sin_lon: 0.2693736809404963,
+            eccentricity_cos_lon: 0.08856415260522467,
+            tan_half_incl_sin_node: 0.0008089970142830734,
+            tan_half_incl_cos_node: 0.10168201110394352,
+            mean_longitude: 1.693697008 + 2. * std::f64::consts::PI, // out of range
+        };
+        assert!(bad_equ.is_bizarre(&limits));
+    }
 
     #[test]
     fn test_equinoctial_conversion() {
