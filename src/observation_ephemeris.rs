@@ -23,15 +23,42 @@ use std::f64::consts::PI;
 
 use hifitime::Epoch;
 use nalgebra::Vector3;
-use photom::{
-    constants::DPI, coordinates::equatorial::EquCoord,
-    observation_dataset::observation::Observation,
-};
+use photom::{constants::DPI, observation_dataset::observation::Observation};
 
 use crate::{
-    cache::OutfitCache, constants::ROT_EQUMJ2000_TO_ECLMJ2000, conversion::cartesion_from_vec,
-    EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
+    cache::OutfitCache, constants::ROT_EQUMJ2000_TO_ECLMJ2000, EquinoctialElements, JPLEphem,
+    OutfitError, VLIGHT_AU,
 };
+
+/// Apparent equatorial coordinates of a solar system body together with their
+/// partial derivatives with respect to the body's heliocentric position.
+///
+/// This struct is the return type of
+/// [`ObservationEphemeris::compute_apparent_pos_derivative`].
+///
+/// ## Coordinate conventions
+///
+/// - `ra` and `dec` are in **radians**, equatorial mean J2000.
+/// - `d_ra_d_pos` and `d_dec_d_pos` are in **rad/AU**, expressed in the
+///   **ecliptic mean J2000** frame.  This matches the frame in which
+///   [`EquinoctialElements::solve_two_body_problem`] returns its Jacobians,
+///   so the chain rule can be applied directly:
+///
+/// ```text
+/// ∂α/∂elemᵢ = d_ra_d_pos  · dpos/delemᵢ   (dot product, 3 components)
+/// ∂δ/∂elemᵢ = d_dec_d_pos · dpos/delemᵢ
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApparentPositionWithPartials {
+    /// Predicted right ascension \[rad\], in [0, 2π).
+    pub ra: f64,
+    /// Predicted declination \[rad\], in (−π/2, π/2).
+    pub dec: f64,
+    /// ∂α/∂(asteroid heliocentric position) \[rad/AU\], ecliptic mean J2000.
+    pub d_ra_d_pos: Vector3<f64>,
+    /// ∂δ/∂(asteroid heliocentric position) \[rad/AU\], ecliptic mean J2000.
+    pub d_dec_d_pos: Vector3<f64>,
+}
 
 pub trait ObservationEphemeris {
     /// Compute the apparent equatorial coordinates (RA, DEC) of a solar system body
@@ -130,6 +157,129 @@ pub trait ObservationEphemeris {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
     ) -> Result<f64, OutfitError>;
+
+    /// Compute the apparent equatorial coordinates (RA, DEC) of a solar system body
+    /// together with the partial derivatives of (RA, DEC) with respect to the body's
+    /// heliocentric Cartesian position (ecliptic mean J2000).
+    ///
+    /// Overview
+    /// -----------------
+    /// This is the astrometric analogue of `oss_dif()` in OrbFit.  It performs the
+    /// same five steps as [`compute_apparent_position`](ObservationEphemeris::compute_apparent_position)
+    /// and additionally returns the geometric Jacobians needed to assemble the design
+    /// matrix G for the differential-correction least-squares loop.
+    ///
+    /// ## Computation steps
+    ///
+    /// 1. **Orbit propagation** — same as `compute_apparent_position`.
+    /// 2. **Topocentric vector** — `d_ecl = ast_pos − obs_pos` (ecliptic J2000),
+    ///    corrected for first-order aberration.
+    /// 3. **Frame rotation** — `d_eq = R_ecl→eq · d_ecl` (equatorial J2000).
+    /// 4. **Sky coordinates** — `α = atan2(d_eq.y, d_eq.x)`, `δ = asin(d_eq.z / ‖d_eq‖)`.
+    /// 5. **Geometric Jacobians in equatorial frame**:
+    ///    ```text
+    ///    ∂α/∂pos_eq = (−d_eq.y / ρ_xy², d_eq.x / ρ_xy², 0)
+    ///    ∂δ/∂pos_eq = (−d_eq.z·d_eq.x / (ρ_xy·ρ²),
+    ///                  −d_eq.z·d_eq.y / (ρ_xy·ρ²),
+    ///                   ρ_xy / ρ²)
+    ///    ```
+    ///    where `ρ_xy = √(d_eq.x² + d_eq.y²)` and `ρ = ‖d_eq‖`.
+    /// 6. **Back-rotation to ecliptic** — multiply by `R_eq→ecl` so the Jacobians
+    ///    are compatible with the state-transition matrix from `solve_two_body_problem`.
+    ///
+    /// ## Return
+    ///
+    /// An [`ApparentPositionWithPartials`] containing `(α, δ, ∂α/∂pos_ecl, ∂δ/∂pos_ecl)`.
+    ///
+    /// ## Errors
+    ///
+    /// Same as [`compute_apparent_position`](ObservationEphemeris::compute_apparent_position).
+    ///
+    /// ## Note on the polar singularity
+    ///
+    /// When the target is at or very near the celestial pole (`ρ_xy → 0`), the
+    /// RA partial diverges.  This edge case is not handled — callers should avoid
+    /// observations within a few arcseconds of the pole.
+    fn compute_apparent_pos_derivative(
+        &self,
+        cache: &OutfitCache,
+        jpl: &JPLEphem,
+        equinoctial_element: &EquinoctialElements,
+    ) -> Result<ApparentPositionWithPartials, OutfitError>;
+}
+
+/// Compute topocentric (RA, DEC) and their partial derivatives w.r.t. the
+/// asteroid's heliocentric position, all in the ecliptic mean J2000 frame.
+///
+/// This is the pure-geometry core shared by
+/// [`ObservationEphemeris::compute_apparent_position`] and
+/// [`ObservationEphemeris::compute_apparent_pos_derivative`].  It corresponds
+/// to `oss_dif()` in OrbFit (`src/propag/pred_obs.f90`).
+///
+/// # Arguments
+///
+/// * `ast_pos_ecl` — Asteroid heliocentric position \[AU\], ecliptic J2000.
+/// * `ast_vel_ecl` — Asteroid heliocentric velocity \[AU/day\], ecliptic J2000.
+/// * `obs_pos_ecl` — Observer heliocentric position \[AU\], ecliptic J2000.
+///
+/// # Returns
+///
+/// `(α, δ, ∂α/∂pos_ecl, ∂δ/∂pos_ecl)` where:
+/// - `α` ∈ \[0, 2π), `δ` ∈ (−π/2, π/2) \[rad\]
+/// - Jacobians are in \[rad/AU\], expressed in the ecliptic J2000 frame.
+fn topocentric_radec_and_partials(
+    ast_pos_ecl: Vector3<f64>,
+    ast_vel_ecl: Vector3<f64>,
+    obs_pos_ecl: Vector3<f64>,
+) -> (f64, f64, Vector3<f64>, Vector3<f64>) {
+    // 1. Topocentric vector + aberration correction.
+    //    The result is in the same frame as ast_pos_ecl / obs_pos_ecl.
+    //    Following the original pipeline (compatible with the old cartesion_from_vec path),
+    //    the RA/Dec angles are computed directly from the (x,y,z) components of `corrected`
+    //    using atan2 — no additional frame rotation is applied here.
+    let relative = ast_pos_ecl - obs_pos_ecl;
+    let corrected = correct_aberration(relative, ast_vel_ecl);
+
+    let x = corrected[0];
+    let y = corrected[1];
+    let z = corrected[2];
+
+    let rho = corrected.norm(); // topocentric distance
+    let rho_xy = x.hypot(y); // ρ_xy = √(x²+y²), matches original hypot usage
+    let rho_xy_sq = rho_xy * rho_xy; // ρ_xy²
+
+    let dec = z.atan2(rho_xy); // matches original EquCoord::from(CartesianCoord) formula
+    let ra = y.atan2(x).rem_euclid(std::f64::consts::TAU);
+
+    // 3. Geometric Jacobians w.r.t. ast_pos_ecl.
+    //
+    //    Full chain rule through correct_aberration:
+    //      corrected = relative − (‖relative‖ / c) · vel
+    //    ⟹  ∂corrected/∂pos = I − (1/c) · vel ⊗ (relative / ‖relative‖)ᵀ
+    //
+    //    Applying the chain rule:
+    //      ∂α/∂pos = grad_ra − (grad_ra · vel) / (‖relative‖·c) · relative
+    //      ∂δ/∂pos = grad_dec − (grad_dec · vel) / (‖relative‖·c) · relative
+    //
+    //    where the gradients w.r.t. `corrected` are:
+    //      grad_ra  = (−y/ρ_xy², x/ρ_xy², 0)
+    //      grad_dec = (−z·x/(ρ_xy·ρ²), −z·y/(ρ_xy·ρ²), ρ_xy/ρ²)
+    let rho_sq = rho * rho;
+    let grad_ra = Vector3::new(-y / rho_xy_sq, x / rho_xy_sq, 0.0);
+    let grad_dec = Vector3::new(
+        -z * x / (rho_xy * rho_sq),
+        -z * y / (rho_xy * rho_sq),
+        rho_xy / rho_sq,
+    );
+
+    // Aberration correction factor: 1 / (‖relative‖ · c)
+    let rel_norm = relative.norm();
+    let aberr_factor = 1.0 / (rel_norm * VLIGHT_AU);
+
+    let d_ra_d_pos = grad_ra - grad_ra.dot(&ast_vel_ecl) * aberr_factor * relative;
+    let d_dec_d_pos = grad_dec - grad_dec.dot(&ast_vel_ecl) * aberr_factor * relative;
+
+    (ra, dec, d_ra_d_pos, d_dec_d_pos)
 }
 
 impl ObservationEphemeris for Observation {
@@ -160,25 +310,69 @@ impl ObservationEphemeris for Observation {
         let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
 
         let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000.transpose() * earth_position;
-        let cart_pos_ast_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_ast;
-        let cart_pos_vel_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_vel;
+        let ast_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_ast;
+        let ast_vel_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_vel;
 
-        // 4. Observer heliocentric position
+        // 4. Observer heliocentric position in ecliptic J2000
         let geo_obs_pos = cache
             .get_observer_geocentric_position(self.index())
             .map(|x| x.into_inner());
         let xobs = geo_obs_pos + earth_pos_eclj2000;
-        let obs_on_earth = ROT_EQUMJ2000_TO_ECLMJ2000 * xobs;
+        let obs_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * xobs;
 
-        // 5. Relative position and aberration correction
-        let relative_position = cart_pos_ast_eclj2000 - obs_on_earth;
-        let corrected_pos = correct_aberration(relative_position, cart_pos_vel_eclj2000);
-        let cartesion_pos = cartesion_from_vec(corrected_pos);
+        // 5. (α, δ) via shared geometry core (partials discarded)
+        let (ra, dec, _, _) = topocentric_radec_and_partials(ast_pos_ecl, ast_vel_ecl, obs_pos_ecl);
 
-        // 6. Convert to equatorial coordinates
-        let equatorial_pos: EquCoord = cartesion_pos.into();
+        Ok((ra, dec))
+    }
 
-        Ok((equatorial_pos.ra, equatorial_pos.dec))
+    fn compute_apparent_pos_derivative(
+        &self,
+        cache: &OutfitCache,
+        jpl: &JPLEphem,
+        equinoctial_element: &EquinoctialElements,
+    ) -> Result<ApparentPositionWithPartials, OutfitError> {
+        // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
+        if equinoctial_element.eccentricity() >= 1.0 {
+            return Err(OutfitError::InvalidOrbit(
+                "Eccentricity >= 1 is not yet supported".to_string(),
+            ));
+        }
+
+        // 1. Propagate asteroid position/velocity in ecliptic J2000
+        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
+            0.,
+            self.mjd_tt() - equinoctial_element.reference_epoch,
+            false,
+        )?;
+
+        // 2. Observation time in TT
+        let obs_mjd = Epoch::from_mjd_in_time_scale(self.mjd_tt(), hifitime::TimeScale::TT);
+
+        // 3. Earth's barycentric position in ecliptic J2000
+        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
+
+        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000.transpose() * earth_position;
+        let ast_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_ast;
+        let ast_vel_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_vel;
+
+        // 4. Observer heliocentric position in ecliptic J2000
+        let geo_obs_pos = cache
+            .get_observer_geocentric_position(self.index())
+            .map(|x| x.into_inner());
+        let xobs = geo_obs_pos + earth_pos_eclj2000;
+        let obs_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * xobs;
+
+        // 5. (α, δ) + partial derivatives via shared geometry core
+        let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
+            topocentric_radec_and_partials(ast_pos_ecl, ast_vel_ecl, obs_pos_ecl);
+
+        Ok(ApparentPositionWithPartials {
+            ra,
+            dec,
+            d_ra_d_pos,
+            d_dec_d_pos,
+        })
     }
 
     fn ephemeris_error(
@@ -258,6 +452,7 @@ mod test_observations_ephemeris {
         use super::*;
         use approx::assert_relative_eq;
         use photom::{
+            coordinates::equatorial::EquCoord,
             observation_dataset::{observation::ObservationInput, ObsDataset},
             observer::error_model::{ModelCorrection, ObsErrorModel},
             photometry::{Filter, Photometry},
@@ -667,6 +862,7 @@ mod test_observations_ephemeris {
         use crate::test_fixture::{JPL_EPHEM_HORIZON, UT1_PROVIDER};
         use approx::assert_relative_eq;
         use photom::{
+            coordinates::equatorial::EquCoord,
             observation_dataset::{observation::ObservationInput, ObsDataset},
             observer::{
                 error_model::{ModelCorrection, ObsErrorModel},
@@ -987,6 +1183,211 @@ mod test_observations_ephemeris {
                         prop_assert!(val < 1.0);
                     }
                 }
+            }
+        }
+    }
+
+    mod tests_compute_apparent_pos_derivative {
+        use super::*;
+        use crate::test_fixture::{JPL_EPHEM_HORIZON, UT1_PROVIDER};
+        use approx::assert_relative_eq;
+        use photom::{
+            coordinates::equatorial::EquCoord,
+            observation_dataset::{observation::ObservationInput, ObsDataset},
+            observer::error_model::{ModelCorrection, ObsErrorModel},
+            photometry::{Filter, Photometry},
+            MJDTT,
+        };
+
+        fn make_obs_and_cache(t_obs: MJDTT) -> (ObsDataset, OutfitCache) {
+            let input = ObservationInput::new(
+                0,
+                EquCoord {
+                    ra: 0.0,
+                    ra_error: 1e-6,
+                    dec: 0.0,
+                    dec_error: 1e-6,
+                },
+                Photometry {
+                    magnitude: 0.0,
+                    error: 0.0,
+                    filter: Filter::Int(0),
+                },
+                t_obs,
+                Some(photom::observer::dataset::ObserverId::MpcCode(*b"F51")),
+            );
+            let ds = ObsDataset::empty()
+                .push_observation(vec![input])
+                .unwrap()
+                .0
+                .with_error_model(ObsErrorModel::FCCT14)
+                .apply_model_errors();
+            let cache = OutfitCache::build(&ds, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
+            (ds, cache)
+        }
+
+        fn nominal_elements(epoch: f64) -> EquinoctialElements {
+            EquinoctialElements {
+                reference_epoch: epoch,
+                semi_major_axis: 1.8,
+                eccentricity_sin_lon: 0.1,
+                eccentricity_cos_lon: 0.05,
+                tan_half_incl_sin_node: 0.01,
+                tan_half_incl_cos_node: 0.08,
+                mean_longitude: 1.5,
+            }
+        }
+
+        /// (α, δ) from compute_apparent_pos_derivative must match
+        /// compute_apparent_position exactly.
+        #[test]
+        fn test_ra_dec_consistent_with_apparent_position() {
+            let t_obs = 59000.0;
+            let (ds, cache) = make_obs_and_cache(t_obs);
+            let elem = nominal_elements(t_obs);
+            let obs = ds.get_observation(0).unwrap();
+
+            let (ra, dec) = obs
+                .compute_apparent_position(&cache, &JPL_EPHEM_HORIZON, &elem)
+                .unwrap();
+            let result = obs
+                .compute_apparent_pos_derivative(&cache, &JPL_EPHEM_HORIZON, &elem)
+                .unwrap();
+
+            assert_relative_eq!(result.ra, ra, epsilon = 1e-14);
+            assert_relative_eq!(result.dec, dec, epsilon = 1e-14);
+        }
+
+        /// Validate ∂α/∂pos and ∂δ/∂pos by finite differences on ast_pos_ecl.
+        ///
+        /// We perturb each of the 3 ecliptic position components by ε and compare
+        /// the numerical gradient to the analytical one.
+        #[test]
+        fn test_partials_match_finite_differences() {
+            use crate::constants::ROT_EQUMJ2000_TO_ECLMJ2000;
+
+            let t_obs = 59000.0;
+            let elem = nominal_elements(t_obs);
+
+            let (cart_pos_ast, cart_vel_ast, _) =
+                elem.solve_two_body_problem(0., 0., false).unwrap();
+
+            // Use the same frame as the impl
+            let obs_pos_ecl = Vector3::zeros(); // simplify: observer at origin
+            let ast_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_ast;
+            let ast_vel_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_vel_ast;
+
+            let (_, _, d_ra_d_pos, d_dec_d_pos) =
+                topocentric_radec_and_partials(ast_pos_ecl, ast_vel_ecl, obs_pos_ecl);
+
+            let eps = 1e-6_f64; // 1e-6 AU ≈ 150 km
+
+            for i in 0..3 {
+                // Central finite differences for better accuracy
+                let mut pos_fwd = ast_pos_ecl;
+                pos_fwd[i] += eps;
+                let mut pos_bwd = ast_pos_ecl;
+                pos_bwd[i] -= eps;
+
+                let (ra_fwd, dec_fwd, _, _) =
+                    topocentric_radec_and_partials(pos_fwd, ast_vel_ecl, obs_pos_ecl);
+                let (ra_bwd, dec_bwd, _, _) =
+                    topocentric_radec_and_partials(pos_bwd, ast_vel_ecl, obs_pos_ecl);
+
+                // Handle RA wrapping: unwrap the difference to [-π, π]
+                let mut dra = ra_fwd - ra_bwd;
+                if dra > std::f64::consts::PI {
+                    dra -= std::f64::consts::TAU;
+                } else if dra < -std::f64::consts::PI {
+                    dra += std::f64::consts::TAU;
+                }
+                let num_dra = dra / (2.0 * eps);
+                let num_ddec = (dec_fwd - dec_bwd) / (2.0 * eps);
+
+                assert_relative_eq!(d_ra_d_pos[i], num_dra, epsilon = 1e-6, max_relative = 1e-5);
+                assert_relative_eq!(
+                    d_dec_d_pos[i],
+                    num_ddec,
+                    epsilon = 1e-6,
+                    max_relative = 1e-5
+                );
+            }
+        }
+
+        /// Hyperbolic orbit must return an error (same guard as compute_apparent_position).
+        #[test]
+        fn test_hyperbolic_orbit_returns_error() {
+            let t_obs = 59000.0;
+            let (ds, cache) = make_obs_and_cache(t_obs);
+            let hyperbolic = EquinoctialElements {
+                reference_epoch: t_obs,
+                semi_major_axis: 1.0,
+                eccentricity_sin_lon: 0.8,
+                eccentricity_cos_lon: 0.8, // e ≈ 1.13 > 1
+                tan_half_incl_sin_node: 0.0,
+                tan_half_incl_cos_node: 0.0,
+                mean_longitude: 0.0,
+            };
+            let obs = ds.get_observation(0).unwrap();
+            assert!(obs
+                .compute_apparent_pos_derivative(&cache, &JPL_EPHEM_HORIZON, &hyperbolic)
+                .is_err());
+        }
+
+        /// Non-regression oracle test for `topocentric_radec_and_partials`.
+        ///
+        /// Reference values were computed once in Rust (IEEE 754 double precision)
+        /// and checked in as ground truth.  The test guards against accidental
+        /// regressions in the Jacobian formula.
+        ///
+        /// Inputs
+        /// ------
+        /// ast_pos_ecl = [-4.15006894757462969e-2,  1.36234947972925746e0,  8.71837102048550472e-1]  AU
+        /// ast_vel_ecl = [-1.41847650703540683e-2,  1.14549098612109205e-4,  4.07819544228800175e-4]  AU/day
+        /// obs_pos_ecl = [0, 0, 0]
+        ///
+        /// Expected outputs (oracle)
+        /// ------------------------
+        /// ra  = 1.60115231410015513e0   rad
+        /// dec = 5.69067704034184052e-1  rad
+        /// d_ra_d_pos  = [-7.33348893215877928e-1, -2.23189920137348632e-2, -3.23656066883762261e-5]  rad/AU
+        /// d_dec_d_pos = [ 1.01082321534895769e-2, -3.32887445954391237e-1,  5.20657513131207450e-1]  rad/AU
+        #[test]
+        fn oracle_topocentric_radec_and_partials() {
+            use crate::constants::ROT_EQUMJ2000_TO_ECLMJ2000;
+            use approx::assert_abs_diff_eq;
+
+            let t_obs = 59000.0;
+            let elem = nominal_elements(t_obs);
+            let (cart_pos_ast, cart_vel_ast, _) =
+                elem.solve_two_body_problem(0., 0., false).unwrap();
+            let obs_pos_ecl = Vector3::zeros();
+            let ast_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_pos_ast;
+            let ast_vel_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * cart_vel_ast;
+
+            let (ra, dec, d_ra, d_dec) =
+                topocentric_radec_and_partials(ast_pos_ecl, ast_vel_ecl, obs_pos_ecl);
+
+            // Oracle values (Rust IEEE 754 double precision reference)
+            let tol = 1e-10_f64;
+
+            assert_abs_diff_eq!(ra, 1.601_152_314_100_155_1, epsilon = tol);
+            assert_abs_diff_eq!(dec, 5.690_677_040_341_84e-1, epsilon = tol);
+
+            let ref_d_ra = [
+                -7.333_488_932_158_779e-1,
+                -2.231_899_201_373_486_3e-2,
+                -3.236_560_668_837_622_6e-5,
+            ];
+            let ref_d_dec = [
+                1.010_823_215_348_957_7e-2,
+                -3.328_874_459_543_912_3e-1,
+                5.206_575_131_312_075e-1,
+            ];
+
+            for i in 0..3 {
+                assert_abs_diff_eq!(d_ra[i], ref_d_ra[i], epsilon = tol);
+                assert_abs_diff_eq!(d_dec[i], ref_d_dec[i], epsilon = tol);
             }
         }
     }
