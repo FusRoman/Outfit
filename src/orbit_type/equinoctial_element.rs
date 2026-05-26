@@ -594,12 +594,16 @@ impl EquinoctialElements {
     /// - Velocity: **UA/day**  
     /// - Time: **days**  
     /// - Angles: **radians**
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_cartesian_position_and_velocity(
         &self,
         mean_motion: f64,
         eccentric_anomaly: f64,
         eccentricity_pow2: f64,
         compute_derivatives: bool,
+        t0: f64,
+        t1: f64,
+        mean_longitude_t1: f64,
     ) -> TwoBodyResult {
         // -------------------------------------------------------------------------
         // 1. Compute auxiliary parameters
@@ -683,13 +687,13 @@ impl EquinoctialElements {
         // -------------------------------------------------------------------------
         if compute_derivatives {
             let (dxde_pos, dxde_vel) = self.compute_derivative(
-                self.reference_epoch,
-                self.reference_epoch,
+                t0,
+                t1,
                 mean_motion,
-                self.mean_longitude,
+                mean_longitude_t1,
                 eccentric_anomaly,
+                inv_u,
                 beta,
-                beta_ecc_term,
                 sin_ecc_anom,
                 cos_ecc_anom,
                 xe,
@@ -815,6 +819,9 @@ impl EquinoctialElements {
             eccentric_anomaly,
             eccentricity_pow2,
             compute_derivatives,
+            t0,
+            t1,
+            mean_longitude_t1,
         ))
     }
 }

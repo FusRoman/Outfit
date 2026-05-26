@@ -910,7 +910,7 @@ impl GaussObs {
         reference_epoch: f64,
     ) -> Result<OrbitalElements, OutfitError> {
         // Apply the transformation to position and velocity vectors
-        let matrix_elc_transform = ROT_EQUMJ2000_TO_ECLMJ2000.transpose();
+        let matrix_elc_transform = ROT_EQUMJ2000_TO_ECLMJ2000;
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 

@@ -89,33 +89,34 @@ pub const EARTH_ROTATION: Vector3<f64> = Vector3::new(0.0, 0.0, DPI * 1.00273790
 /// Rotation of $-\varepsilon$ around the X-axis, where $\varepsilon$ is the
 /// obliquity of the ecliptic at J2000.
 ///
-/// call rotpn(RefSystem::Equm(RefEpoch::J2000), RefSystem::Eclm(RefEpoch::J2000)) for same computed result
+/// Equivalent to `rotpn(RefSystem::Equm(RefEpoch::J2000), RefSystem::Eclm(RefEpoch::J2000))`.
 pub const ROT_EQUMJ2000_TO_ECLMJ2000: Matrix3<f64> = Matrix3::new(
     1.0e0,
     0.0e0,
     0.0e0,
     0.0e0,
     9.174_820_620_691_818e-1,
-    -3.977_771_559_319_137e-1,
-    0.0e0,
     3.977_771_559_319_137e-1,
+    0.0e0,
+    -3.977_771_559_319_137e-1,
     9.174_820_620_691_818e-1,
 );
 
 /// Rotation matrix from mean ecliptic J2000 to mean equatorial J2000.
 ///
-/// Transpose (inverse) of [`ROT_EQUMJ2000_TO_ECLMJ2000`].
+/// Rotation of $+\varepsilon$ around the X-axis (transpose / inverse of
+/// [`ROT_EQUMJ2000_TO_ECLMJ2000`]).
 ///
-/// call rotpn(RefSystem::Eclm(RefEpoch::J2000), RefSystem::Equm(RefEpoch::J2000)) for same computed result
+/// Equivalent to `rotpn(RefSystem::Eclm(RefEpoch::J2000), RefSystem::Equm(RefEpoch::J2000))`.
 pub const ROT_ECLMJ2000_TO_EQUMJ2000: Matrix3<f64> = Matrix3::new(
     1.0e0,
     0.0e0,
     0.0e0,
     0.0e0,
     9.174_820_620_691_818e-1,
-    3.977_771_559_319_137e-1,
-    0.0e0,
     -3.977_771_559_319_137e-1,
+    0.0e0,
+    3.977_771_559_319_137e-1,
     9.174_820_620_691_818e-1,
 );
 

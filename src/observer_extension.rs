@@ -229,7 +229,7 @@ impl ResolvedObserver for Observer {
         let earth_pos = jpl.earth_ephemeris(epoch, false).0.to_notnan()?;
 
         // Transform observer position from ecliptic to equatorial J2000
-        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?.transpose();
+        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
 
         let helio_pos = earth_pos + rot_matrix * observer_geocentric_position;
 
@@ -248,8 +248,8 @@ impl ResolvedObserver for Observer {
             .expect("Velocity is always available, this should not happen")
             .to_notnan()?;
 
-        // geo_velocity is in equatorial J2000 → rotate to ecliptic (same as helio_position)
-        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?.transpose();
+        // geo_velocity is in ecliptic J2000 → rotate to equatorial (same as helio_position)
+        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
         let helio_vel = earth_vel + rot_matrix * observer_geocentric_velocity;
         Ok(helio_vel)
     }
