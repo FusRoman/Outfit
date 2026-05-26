@@ -204,8 +204,8 @@ pub mod earth_orientation;
 /// Initial Orbit Determination algorithms (Gauss method).
 pub mod initial_orbit_determination;
 
-/// Full orbit determination utilities.
-pub mod full_orbit_determination;
+/// Differential orbit correction utilities.
+pub mod differential_orbit_correction;
 
 /// JPL ephemerides management (Horizon/NAIF kernels).
 pub mod jpl_ephem;

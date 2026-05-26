@@ -1,6 +1,7 @@
 use nalgebra::Matrix2;
 use photom::observation_dataset::observation::Observation;
 
+pub mod least_square;
 pub mod obs_dataset_api;
 
 /// Returns the 2x2 weight matrix for a given observation, based on its reported RA and Dec errors.
