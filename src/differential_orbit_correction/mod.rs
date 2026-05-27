@@ -3,6 +3,11 @@ use photom::observation_dataset::observation::Observation;
 
 pub mod least_square;
 pub mod obs_dataset_api;
+pub mod obs_fit_data;
+pub mod single_iteration;
+
+pub use obs_fit_data::{ObsFitData, ObsSelection};
+pub use single_iteration::{single_iteration, SingleIterationResult};
 
 /// Returns the 2x2 weight matrix for a given observation, based on its reported RA and Dec errors.
 /// If the observation is rejected, returns a zero matrix.
