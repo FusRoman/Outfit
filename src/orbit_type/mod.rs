@@ -41,6 +41,7 @@ use crate::{
         cometary_element::CometaryElements, equinoctial_element::EquinoctialElements,
         keplerian_element::KeplerianElements,
     },
+    OutfitError,
 };
 
 /// Equinoctial orbital elements and related conversions.
@@ -129,7 +130,7 @@ impl OrbitalElements {
     /// Errors
     /// ------
     /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
-    pub fn to_keplerian(&self) -> Result<KeplerianElements, crate::outfit_errors::OutfitError> {
+    pub fn to_keplerian(&self) -> Result<KeplerianElements, OutfitError> {
         match self {
             OrbitalElements::Keplerian(ke) => Ok(ke.clone()),
             OrbitalElements::Equinoctial(ee) => Ok(KeplerianElements::from(ee)),
@@ -146,7 +147,7 @@ impl OrbitalElements {
     /// Errors
     /// ------
     /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
-    pub fn to_equinoctial(&self) -> Result<EquinoctialElements, crate::outfit_errors::OutfitError> {
+    pub fn to_equinoctial(&self) -> Result<EquinoctialElements, OutfitError> {
         match self {
             OrbitalElements::Keplerian(ke) => Ok(EquinoctialElements::from(ke)),
             OrbitalElements::Equinoctial(ee) => Ok(ee.clone()),

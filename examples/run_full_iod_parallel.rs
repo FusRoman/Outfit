@@ -56,6 +56,9 @@ fn outfit_error_label(err: &OutfitError) -> &'static str {
         OutfitError::ObsDatasetErrorRef(_) => "ObsDatasetErrorRef",
         OutfitError::TrajectoryIdNotFound(_) => "TrajectoryIdNotFound",
         OutfitError::NoTrajectoryIndex => "NoTrajectoryIndex",
+        OutfitError::BizarreOrbit => "DiffCorBizarreOrbit",
+        OutfitError::DifferentialCorrectionDiverged => "DiffCorDiverged",
+        OutfitError::DifferentialCorrectionFailed(_) => "DiffCorFailed",
     }
 }
 

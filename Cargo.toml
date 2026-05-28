@@ -67,7 +67,6 @@ proptest = "1.7.0"
 
 photom = { version = "0.4.0", default-features = false, features = [
     "mpc_80_col",
-    "ades",
     "polars",
 ] }
 polars = { version = "0.53.0", features = ["is_in"] }

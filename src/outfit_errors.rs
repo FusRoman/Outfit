@@ -263,6 +263,21 @@ pub enum OutfitError {
 
     #[error("No trajectory index available in the dataset")]
     NoTrajectoryIndex,
+
+    /// The corrected orbital elements fall outside the physical-plausibility
+    /// limits (e.g., eccentricity ≥ 1, negative semi-major axis).
+    #[error("Differential correction produced a physically implausible (bizarre) orbit")]
+    BizarreOrbit,
+
+    /// The normalised RMS increased by more than the configured divergence
+    /// ratio during the Newton–Raphson inner loop.
+    #[error("Differential correction diverged (RMS increased beyond the divergence threshold)")]
+    DifferentialCorrectionDiverged,
+
+    /// The differential-correction pipeline failed for a reason other than
+    /// divergence (e.g., normal-equation inversion failure).
+    #[error("Differential correction failed: {0}")]
+    DifferentialCorrectionFailed(String),
 }
 
 impl From<&ObsDatasetError> for OutfitError {
@@ -346,6 +361,9 @@ impl PartialEq for OutfitError {
             (PolynomialRootFindingFailed, PolynomialRootFindingFailed) => true,
             (SpuriousRootDetected, SpuriousRootDetected) => true,
             (GaussNoRootsFound, GaussNoRootsFound) => true,
+            (BizarreOrbit, BizarreOrbit) => true,
+            (DifferentialCorrectionDiverged, DifferentialCorrectionDiverged) => true,
+            (DifferentialCorrectionFailed(a), DifferentialCorrectionFailed(b)) => a == b,
 
             _ => false,
         }

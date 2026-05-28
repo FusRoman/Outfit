@@ -88,7 +88,7 @@
 //!     let mut rng = StdRng::seed_from_u64(42);
 //!
 //!     // Run Gauss IOD for a single trajectory.
-//!     let (best_orbit, best_rms) = dataset.fit_iod(
+//!     let fit_result = dataset.fit_iod(
 //!         "K09R05F",
 //!         &jpl,
 //!         &ut1,
@@ -97,8 +97,8 @@
 //!         &mut rng,
 //!     )?;
 //!
-//!     println!("Best orbit: {best_orbit}");
-//!     println!("RMS: {best_rms:.6}");
+//!     println!("Best orbit: {}", fit_result.orbital_elements());
+//!     println!("Quality: {:.6}", fit_result.orbit_quality());
 //!     Ok(())
 //! }
 //! ```
@@ -141,7 +141,7 @@
 //!
 //!     for (traj_id, res) in &results {
 //!         match res {
-//!             Ok((gauss, rms)) => println!("{traj_id} → RMS = {rms:.4}\n{gauss}"),
+//!             Ok(fit) => println!("{traj_id} → quality = {:.4}\n{}", fit.orbit_quality(), fit.orbital_elements()),
 //!             Err(e) => eprintln!("{traj_id} → error: {e}"),
 //!         }
 //!     }
@@ -266,6 +266,12 @@ pub use crate::jpl_ephem::JPLEphem;
 
 // IOD entry points and result types
 pub use crate::initial_orbit_determination::obs_dataset_api::FitIOD;
+
+// Differential correction entry points
+pub use crate::differential_orbit_correction::obs_dataset_api::FitLSQ;
+pub use crate::differential_orbit_correction::{
+    DifferentialCorrectionConfig, DifferentialCorrectionOutput,
+};
 
 // A convenient crate-wide Result alias.
 pub type Result<T> = core::result::Result<T, OutfitError>;

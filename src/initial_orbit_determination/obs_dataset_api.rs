@@ -225,6 +225,32 @@ fn fit_single_traj(
     obs_vec_refs.estimate_best_orbit(cache, jpl, params, rng)
 }
 
+/// Run IOD directly on a pre-sorted, pre-corrected slice of observations using
+/// an already-built position cache.
+///
+/// This is the low-level entry point used when the caller has already applied
+/// the error model and built the [`OutfitCache`].  It avoids the cost of
+/// reconstructing an [`ObsDataset`] and rebuilding the cache.
+///
+/// # Arguments
+///
+/// - `observations` — slice of observations, **sorted by MJD** (ascending).
+/// - `cache` — position cache already built for these observations.
+/// - `jpl` — JPL ephemeris.
+/// - `params` — IOD tuning parameters.
+/// - `rng` — random-number generator for noise realisations.
+pub(crate) fn run_iod_on_observations(
+    observations: &[Observation],
+    cache: &OutfitCache,
+    jpl: &JPLEphem,
+    params: &IODParams,
+    rng: &mut impl rand::Rng,
+) -> Result<FitOrbitResult, OutfitError> {
+    let mut refs: Vec<&Observation> = observations.iter().collect();
+    refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
+    refs.estimate_best_orbit(cache, jpl, params, rng)
+}
+
 fn prepare_iod(
     dataset: ObsDataset,
     jpl: &JPLEphem,

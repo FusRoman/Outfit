@@ -52,8 +52,9 @@ use crate::{
 /// Output of a single differential-correction iteration.
 ///
 /// This struct bundles every quantity produced by [`single_iteration`]:
-/// the corrected orbital elements, updated per-observation metadata,
-/// convergence diagnostics, and uncertainty matrices.
+/// the corrected orbital elements, updated per-observation fit data,
+/// the per-observation linearised equations, convergence diagnostics,
+/// and uncertainty matrices.
 ///
 /// ## Correction norm
 ///
@@ -66,17 +67,33 @@ use crate::{
 /// where \\(C = G^\top W G\\) is the normal matrix.  It provides a unit-free
 /// measure of the step size in the parameter space and drives the convergence
 /// check.
+///
+/// ## Observation equations
+///
+/// `observation_equations` mirrors the per-observation linearised system built
+/// during this iteration.  The `i`-th entry contains the partial derivatives
+/// and weights for the `i`-th input observation.  Downstream steps such as
+/// outlier rejection use these to compute the projected residual variance
+/// \\( g \cdot \Gamma \cdot g^\top \\) without rerunning the propagator.
 #[derive(Debug, Clone)]
 pub struct SingleIterationResult {
     /// Orbital elements after applying the correction δx (or unchanged if
     /// `apply_correction` was `false`).
     pub corrected_elements: EquinoctialElements,
-    /// Per-observation fit data with updated residuals and `chi` values.
+    /// Per-observation fit data with updated residuals and chi values.
     ///
     /// The `i`-th entry corresponds to the `i`-th input observation.
     /// Observations that failed to propagate keep their residuals from the
     /// previous iteration (or `0.0` on the first call).
     pub updated_obs_fit_data: Vec<ObsFitData>,
+    /// Per-observation linearised equations built during this iteration.
+    ///
+    /// The `i`-th entry holds the partial derivatives
+    /// \\( \partial\alpha/\partial\text{elem} \\),
+    /// \\( \partial\delta/\partial\text{elem} \\), residuals, and weights for
+    /// the `i`-th input observation.  Inactive observations carry a zero
+    /// placeholder equation.
+    pub observation_equations: Vec<ObservationEquation>,
     /// Dimensionless correction norm \\( \|\delta x\|_C \\).
     pub correction_norm: f64,
     /// Normalised RMS residual \\( \sqrt{\xi^\top W \xi / n} \\).
@@ -262,6 +279,7 @@ pub fn single_iteration(
     Ok(SingleIterationResult {
         corrected_elements,
         updated_obs_fit_data,
+        observation_equations: equations,
         correction_norm,
         normalised_rms: ls_result.normalised_rms,
         uncertainty: ls_result.uncertainty,

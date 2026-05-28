@@ -20,7 +20,7 @@ pub fn approx_equal(current: &OrbitalElements, other: &OrbitalElements, tol: f64
                 && abs_diff_eq!(ke1.mean_anomaly, ke2.mean_anomaly, epsilon = tol)
         }
         (OrbitalElements::Equinoctial(ee1), OrbitalElements::Equinoctial(ee2)) => {
-            abs_diff_eq!(ee1.semi_major_axis, 0.0, epsilon = tol)
+            abs_diff_eq!(ee1.semi_major_axis, ee2.semi_major_axis, epsilon = tol)
                 && abs_diff_eq!(
                     ee1.eccentricity_sin_lon,
                     ee2.eccentricity_sin_lon,
