@@ -72,7 +72,10 @@ use hifitime::Epoch;
 use horizon::{horizon_data::HorizonData, horizon_ids::HorizonID};
 use naif::{
     naif_data::NaifData,
-    naif_ids::{planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary, NaifIds},
+    naif_ids::{
+        planet_bary::PlanetaryBary, satellite_mass::SatelliteMassCenter,
+        solar_system_bary::SolarSystemBary, NaifIds,
+    },
 };
 use nalgebra::Vector3;
 
@@ -187,6 +190,59 @@ impl JPLEphem {
             )),
         }
     }
+
+    /// Return heliocentric position and velocity (AU, AU/day) of `body` at `epoch`.
+    ///
+    /// Works for both backends:
+    /// - **Horizon**: maps `NaifIds` to the corresponding `HorizonID` and queries relative to `Sun`.
+    /// - **NAIF**: queries `(body, SSB)` then subtracts `(Sun, SSB)` to obtain heliocentric state.
+    ///
+    /// # Errors
+    /// Returns [`OutfitError::EphemerisBodyNotSupported`] if the body cannot be mapped to
+    /// the active backend.
+    pub fn body_ephemeris(
+        &self,
+        body: NaifIds,
+        epoch: &Epoch,
+    ) -> Result<(Vector3<f64>, Vector3<f64>), OutfitError> {
+        match self {
+            JPLEphem::HorizonFile(horizon_data) => {
+                let horizon_id = naif_to_horizon_id(body)?;
+                let ephem_res = horizon_data
+                    .ephemeris(
+                        horizon_id,
+                        HorizonID::Sun,
+                        epoch.to_mjd_tt_days(),
+                        true,
+                        false,
+                    )
+                    .to_au();
+                let vel = ephem_res.velocity.unwrap_or_else(Vector3::zeros) * 86400.0; // AU/s → AU/day
+                Ok((ephem_res.position, vel))
+            }
+            JPLEphem::NaifFile(naif_data) => {
+                let et = epoch.to_et_seconds();
+                // Query body w.r.t. SSB
+                let body_res = naif_data
+                    .ephemeris(body, NaifIds::SSB(SolarSystemBary::SSB), et)
+                    .to_au();
+                // Query Sun w.r.t. SSB
+                let sun_res = naif_data
+                    .ephemeris(
+                        NaifIds::SSB(SolarSystemBary::Sun),
+                        NaifIds::SSB(SolarSystemBary::SSB),
+                        et,
+                    )
+                    .to_au();
+                // Heliocentric = body_ssb - sun_ssb; convert AU/s → AU/day
+                let pos = body_res.position - sun_res.position;
+                let vel = (body_res.velocity.unwrap_or_else(Vector3::zeros)
+                    - sun_res.velocity.unwrap_or_else(Vector3::zeros))
+                    / 86400.0;
+                Ok((pos, vel))
+            }
+        }
+    }
 }
 
 impl TryFrom<&str> for JPLEphem {
@@ -201,5 +257,31 @@ impl TryFrom<String> for JPLEphem {
     type Error = OutfitError;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         JPLEphem::try_from(s.as_str())
+    }
+}
+
+/// Map a [`NaifIds`] to the corresponding [`HorizonID`] for the Horizon backend.
+///
+/// Only bodies that are stored in JPL Horizon DE files are supported.
+/// Returns [`OutfitError::EphemerisBodyNotSupported`] for anything else.
+fn naif_to_horizon_id(body: NaifIds) -> Result<HorizonID, OutfitError> {
+    match body {
+        NaifIds::SSB(SolarSystemBary::Sun) => Ok(HorizonID::Sun),
+        NaifIds::SSB(SolarSystemBary::SSB) => Err(OutfitError::EphemerisBodyNotSupported(
+            "Solar System Barycenter is not a physical body".to_string(),
+        )),
+        NaifIds::PB(PlanetaryBary::Mercury) => Ok(HorizonID::Mercury),
+        NaifIds::PB(PlanetaryBary::Venus) => Ok(HorizonID::Venus),
+        NaifIds::PB(PlanetaryBary::EarthMoon) => Ok(HorizonID::Earth),
+        NaifIds::PB(PlanetaryBary::Mars) => Ok(HorizonID::Mars),
+        NaifIds::PB(PlanetaryBary::Jupiter) => Ok(HorizonID::Jupiter),
+        NaifIds::PB(PlanetaryBary::Saturn) => Ok(HorizonID::Saturn),
+        NaifIds::PB(PlanetaryBary::Uranus) => Ok(HorizonID::Uranus),
+        NaifIds::PB(PlanetaryBary::Neptune) => Ok(HorizonID::Neptune),
+        NaifIds::PB(PlanetaryBary::Pluto) => Ok(HorizonID::Pluto),
+        NaifIds::SMC(SatelliteMassCenter::Moon) => Ok(HorizonID::Moon),
+        other => Err(OutfitError::EphemerisBodyNotSupported(format!(
+            "{other} is not available in the Horizon backend"
+        ))),
     }
 }

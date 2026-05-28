@@ -278,6 +278,12 @@ pub enum OutfitError {
     /// divergence (e.g., normal-equation inversion failure).
     #[error("Differential correction failed: {0}")]
     DifferentialCorrectionFailed(String),
+
+    #[error("Ephemeris body not supported by this backend: {0}")]
+    EphemerisBodyNotSupported(String),
+
+    #[error("N-body propagation failed: {0}")]
+    NBodyPropagationFailed(String),
 }
 
 impl From<&ObsDatasetError> for OutfitError {
@@ -364,6 +370,8 @@ impl PartialEq for OutfitError {
             (BizarreOrbit, BizarreOrbit) => true,
             (DifferentialCorrectionDiverged, DifferentialCorrectionDiverged) => true,
             (DifferentialCorrectionFailed(a), DifferentialCorrectionFailed(b)) => a == b,
+            (EphemerisBodyNotSupported(a), EphemerisBodyNotSupported(b)) => a == b,
+            (NBodyPropagationFailed(a), NBodyPropagationFailed(b)) => a == b,
 
             _ => false,
         }

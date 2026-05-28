@@ -237,6 +237,9 @@ pub mod observation_ephemeris;
 /// Ground-observer geometry: body-fixed and heliocentric position routines.
 pub mod observer_extension;
 
+/// Orbit propagation strategies (TwoBody, N-body DOP853).
+pub mod propagator;
+
 /// Core IOD pipeline trait over sorted observation slices.
 pub(crate) mod trajectory;
 

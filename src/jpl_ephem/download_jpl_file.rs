@@ -208,7 +208,6 @@ impl EphemFileSource {
 /// * [`EphemFileSource::get_version_url`] — Compose the URL for a versioned file.
 pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitError> {
     let mut file = File::create(path).await?;
-    println!("Downloading {url}...");
 
     let mut stream = reqwest::get(url).await?.bytes_stream();
 
@@ -219,7 +218,6 @@ pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitE
 
     file.flush().await?;
 
-    println!("Downloaded {url}");
     Ok(())
 }
 

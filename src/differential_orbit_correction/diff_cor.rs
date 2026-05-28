@@ -56,6 +56,7 @@ use crate::{
         single_iteration::single_iteration,
     },
     orbit_type::equinoctial_element::EquinoctialLimits,
+    propagator::PropagatorKind,
     EquinoctialElements, JPLEphem, OutfitError,
 };
 
@@ -159,6 +160,13 @@ pub struct DifferentialCorrectionConfig {
     ///
     /// Default: `[true; 6]` (all elements free).
     pub free_elements: [bool; 6],
+
+    /// Propagator to use for computing predicted observations and partials.
+    ///
+    /// - [`PropagatorKind::TwoBody`] (default): analytic Keplerian propagation.
+    /// - [`PropagatorKind::NBody`]: numerical DOP853 N-body integration with
+    ///   user-specified perturbing bodies.
+    pub propagator: PropagatorKind,
 }
 
 impl Default for DifferentialCorrectionConfig {
@@ -175,6 +183,7 @@ impl Default for DifferentialCorrectionConfig {
             outlier_rejection_config: OutlierRejectionConfig::default(),
             orbital_limits: EquinoctialLimits::default(),
             free_elements: [true; 6],
+            propagator: PropagatorKind::TwoBody,
         }
     }
 }
@@ -300,18 +309,8 @@ pub fn run_differential_correction(
                 cache,
                 jpl,
                 true,
+                &config.propagator,
             )?;
-
-            println!(
-                "Corrected elements after iteration {total_newton_iterations}: {:?}",
-                iter_result.corrected_elements
-            );
-            println!(
-                "IterResult correction norm: {}, normalised RMS: {}, num active measurements: {}\n\n",
-                iter_result.correction_norm,
-                iter_result.normalised_rms,
-                iter_result.num_measurements
-            );
 
             // ── Check inversion ──────────────────────────────────────────────
             if !iter_result.uncertainty.inversion_succeeded {
@@ -395,12 +394,6 @@ pub fn run_differential_correction(
         if num_selection_changes == 0 {
             break;
         }
-
-        println!("last normalised RMS after outer pass {outer_pass}: {last_normalised_rms}");
-        println!("number of selection changes in outlier rejection: {num_selection_changes}");
-        println!("number of active measurements after outlier rejection: {last_num_measurements}");
-        println!("stagnation count after outer pass {outer_pass}: {stagnation_count}");
-        println!("\n ====== End of outer pass {outer_pass} ====== \n");
     }
 
     // ── Final covariance rescaling ────────────────────────────────────────────

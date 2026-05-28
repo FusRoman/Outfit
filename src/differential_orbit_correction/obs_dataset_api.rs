@@ -222,8 +222,6 @@ fn run_differential_correction_for_trajectory(
         }
     };
 
-    println!("\n\nTrajectory {traj_id}: initial equinoctial elements: {initial_equinoctial:?}\n\n");
-
     // ── Build per-observation fit data from the error-model uncertainties ─────
     let obs_fit_data: Vec<ObsFitData> = observations
         .iter()
@@ -239,8 +237,6 @@ fn run_differential_correction_for_trajectory(
         jpl,
         diff_cor_config,
     )?;
-
-    println!("\ndc_output for trajectory {traj_id}: {dc_output:?}\n");
 
     // ── Package the result ────────────────────────────────────────────────────
     let orbital_elements = OrbitalElements::Equinoctial(dc_output.elements);
