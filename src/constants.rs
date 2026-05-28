@@ -25,7 +25,7 @@ use ahash::RandomState;
 use nalgebra::{Matrix3, Vector3};
 use photom::TrajId;
 
-use crate::{GaussResult, OutfitError};
+use crate::{GaussResult, OrbitalElements, OutfitError};
 
 /// 2π, useful for trigonometric conversions
 pub const DPI: f64 = 2. * std::f64::consts::PI;
@@ -127,6 +127,40 @@ pub type MJDET = f64;
 /// This is a single scalar value representing the overall fit quality of the IOD solution.
 pub type IODRMS = f64;
 
+/// Type alias for the chi-squared value of a fit, used in differential correction.
+pub type Chi2 = f64;
+
+pub enum FitOrbitResult {
+    IODGauss((GaussResult, IODRMS)),
+    DifferentialCorrection((OrbitalElements, Chi2)),
+}
+
+impl FitOrbitResult {
+    /// Returns a scalar measure of orbit quality for this fit result.
+    /// For IODGauss, this is the RMS of normalized residuals; for DifferentialCorrection, this is the chi-squared value.
+    ///
+    /// # Returns
+    /// - `f64` — a single scalar representing the fit quality.
+    pub fn orbit_quality(&self) -> f64 {
+        match self {
+            FitOrbitResult::IODGauss((_, rms)) => *rms,
+            FitOrbitResult::DifferentialCorrection((_, chi2)) => *chi2,
+        }
+    }
+
+    /// Returns a reference to the orbital elements associated with this fit result.
+    /// For `IODGauss`, this extracts the orbital elements from the `GaussResult`; for `DifferentialCorrection`, it returns the orbital elements directly.
+    ///
+    /// # Returns
+    /// - `&OrbitalElements` — a reference to the orbital elements of the fitted orbit.
+    pub fn orbital_elements(&self) -> &OrbitalElements {
+        match self {
+            FitOrbitResult::IODGauss((gauss_result, _)) => gauss_result.get_orbit(),
+            FitOrbitResult::DifferentialCorrection((orbital_elements, _)) => orbital_elements,
+        }
+    }
+}
+
 /// Full batch orbit determination results.
 ///
 /// Each entry maps an [`TrajId`] to the outcome of a full
@@ -135,13 +169,14 @@ pub type IODRMS = f64;
 /// Internally, this is implemented as:
 ///
 /// ```ignore
-/// HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>
+/// HashMap<TrajId, Result<FitOrbitResult, OutfitError>, RandomState>
 /// ```
 ///
 /// Return semantics
 /// -----------------
-/// * `Ok((GaussResult, IODRMS))` – a successful IOD with its RMS of normalized residuals.
+/// * `Ok(FitOrbitResult::IODGauss((GaussResult, IODRMS)))` – a successful IOD with its RMS of normalized residuals.
+/// * `Ok(FitOrbitResult::DifferentialCorrection((OrbitalElements, Chi2)))` – a successful differential correction with its chi-squared value.
 /// * `Err(OutfitError)` – a failure isolated to that object.
 ///
 /// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
-pub type FullOrbitResult = HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>;
+pub type FullOrbitResult = HashMap<TrajId, Result<FitOrbitResult, OutfitError>, RandomState>;

@@ -26,8 +26,8 @@ use rand::{rngs::SmallRng, SeedableRng};
 use std::collections::HashMap;
 
 use crate::{
-    cache::OutfitCache, trajectory::TrajectoryFit, FullOrbitResult, GaussResult, IODParams,
-    JPLEphem, OutfitError, IODRMS,
+    cache::OutfitCache, constants::FitOrbitResult, trajectory::TrajectoryFit, FullOrbitResult,
+    IODParams, JPLEphem, OutfitError,
 };
 
 #[cfg(feature = "parallel")]
@@ -123,7 +123,7 @@ pub trait FitIOD {
         params: &IODParams,
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError>;
+    ) -> Result<FitOrbitResult, OutfitError>;
 }
 
 impl FitIOD for ObsDataset {
@@ -135,7 +135,7 @@ impl FitIOD for ObsDataset {
         params: &IODParams,
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError> {
+    ) -> Result<FitOrbitResult, OutfitError> {
         let (corrected_dataset, cache, _) =
             prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
 
@@ -214,7 +214,7 @@ fn fit_single_traj(
     jpl: &JPLEphem,
     params: &IODParams,
     rng: &mut impl rand::Rng,
-) -> Result<(GaussResult, IODRMS), OutfitError> {
+) -> Result<FitOrbitResult, OutfitError> {
     let materialized_traj = corrected_dataset
         .materialize_trajectory(traj)
         .ok_or_else(|| OutfitError::TrajectoryIdNotFound(traj.clone()))?;
@@ -255,7 +255,7 @@ fn process_traj(
     jpl: &JPLEphem,
     params: &IODParams,
     base_seed: u64,
-) -> (TrajId, Result<(GaussResult, IODRMS), OutfitError>) {
+) -> (TrajId, Result<FitOrbitResult, OutfitError>) {
     let traj_seed = base_seed ^ traj_id.stable_hash();
     let mut local_rng = SmallRng::seed_from_u64(traj_seed);
     let result = fit_single_traj(

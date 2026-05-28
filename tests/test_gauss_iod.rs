@@ -93,14 +93,14 @@ fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
 fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_max_relative: f64) {
     // K09R05F
     let expected = &expected_results()[0];
-    let (best_orbit, best_rms) = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative
@@ -108,14 +108,14 @@ fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_m
 
     // 8467
     let expected = &expected_results()[1];
-    let (best_orbit, best_rms) = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative
@@ -123,14 +123,14 @@ fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_m
 
     // 33803
     let expected = &expected_results()[2];
-    let (best_orbit, best_rms) = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative

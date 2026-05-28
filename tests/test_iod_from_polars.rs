@@ -75,8 +75,8 @@ fn test_iod_from_polars() {
         .unwrap();
 
     // --- traj 14226 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"14226".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"14226".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60894.372896385554,
@@ -90,15 +90,15 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.02704195897369085,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     // --- traj 29757 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"29757".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"29757".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60835.25573266984,
@@ -112,15 +112,15 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.025397381294328548,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     // --- traj 95777 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"95777".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"95777".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60894.252965553926,
@@ -134,7 +134,7 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.010284390096535293,
         epsilon = test_epsilon,
         max_relative = test_max_relative
