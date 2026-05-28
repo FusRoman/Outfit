@@ -105,6 +105,7 @@ pub trait FitLSQ {
     /// Returns [`OutfitError`] if the shared observer cache cannot be built.
     /// Individual trajectory failures are stored as `Err(…)` entries inside
     /// the returned [`FullOrbitResult`].
+    #[allow(clippy::too_many_arguments)]
     fn fit_lsq(
         self,
         jpl: &JPLEphem,
