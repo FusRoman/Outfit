@@ -24,6 +24,7 @@ use crate::{
     cache::{
         observer_centric_cache::{
             ObserverGeocentricPosition, ObserverGeocentricVelocity, ObserverHeliocentricPosition,
+            ObserverHeliocentricVelocity,
         },
         observer_fixed_cache::{ObserverFixedCache, ObserverFixedPosition, ObserverFixedVelocity},
     },
@@ -63,6 +64,7 @@ pub trait ResolvedObserver {
     /// * `observer`: a reference to an [`Observer`] containing the site longitude and parallax parameters.
     /// * `tmjd`: observation epoch as a [`hifitime::Epoch`] in TT.
     /// * `ut1_provider`: a reference to a [`hifitime::ut1::Ut1Provider`] for accurate UT1 conversion.
+    /// * `compute_velocity`: whether to compute and return the observer's velocity due to Earth's rotation (true) or return a zero vector (false).
     ///
     /// Returns
     /// --------
@@ -89,6 +91,7 @@ pub trait ResolvedObserver {
         tmjd: &Epoch,
         ut1_provider: &Ut1Provider,
         observer_fixed_vectors: &ObserverFixedCache,
+        compute_velocity: bool,
     ) -> Result<(ObserverGeocentricPosition, ObserverGeocentricVelocity), OutfitError>;
 
     /// Compute the observer’s heliocentric position in the **equatorial mean J2000** frame.
@@ -129,6 +132,27 @@ pub trait ResolvedObserver {
         epoch: &Epoch,
         observer_geocentric_position: &ObserverGeocentricPosition,
     ) -> Result<ObserverHeliocentricPosition, OutfitError>;
+
+    /// Compute the observer’s heliocentric velocity in the **equatorial mean J2000** frame.
+    ///
+    /// This method forms the full heliocentric velocity of the observing site by combining:
+    /// - the site **geocentric** velocity vector at `epoch`, and
+    /// - the Earth’s **heliocentric** velocity from the JPL ephemerides.
+    ///
+    /// # Arguments
+    ///
+    /// * `jpl` – [`JPLEphem`] providing Earth's heliocentric state.
+    /// * `epoch` – Observation epoch in the **TT** time scale.
+    /// * `observer_geocentric_velocity` – Geocentric site velocity **in ecliptic mean J2000** (AU/day).
+    ///
+    /// Return
+    ///
+    /// * `Result<ObserverHeliocentricVelocity, OutfitError>` – Observer’s **heliocentric** velocity at `epoch` in **AU/day**, expressed in **equatorial mean J2000**.
+    fn helio_velocity(
+        jpl: &JPLEphem,
+        epoch: &Epoch,
+        observer_geocentric_velocity: &ObserverGeocentricVelocity,
+    ) -> Result<ObserverHeliocentricVelocity, OutfitError>;
 }
 
 impl ResolvedObserver for Observer {
@@ -157,10 +181,10 @@ impl ResolvedObserver for Observer {
         tmjd: &Epoch,
         ut1_provider: &Ut1Provider,
         observer_fixed_vectors: &ObserverFixedCache,
+        compute_velocity: bool,
     ) -> Result<(ObserverGeocentricPosition, ObserverGeocentricVelocity), OutfitError> {
         // Get observer position and velocity in the Earth-fixed frame
         let dxbf = observer_fixed_vectors.position();
-        let dvbf = observer_fixed_vectors.velocity();
 
         // deviation from Orbfit, use of another conversion from MJD UTC (ET scale) to UT1 scale
         // based on the hifitime crate
@@ -185,7 +209,13 @@ impl ResolvedObserver for Observer {
 
         // Apply transformation to the observer position and velocity
         let dx = rotmat * dxbf;
-        let dv = rotmat * dvbf;
+
+        let dv = if compute_velocity {
+            let dvbf = observer_fixed_vectors.velocity();
+            rotmat * dvbf
+        } else {
+            Vector3::zeros()
+        };
 
         Ok((dx, dv))
     }
@@ -199,10 +229,28 @@ impl ResolvedObserver for Observer {
         let earth_pos = jpl.earth_ephemeris(epoch, false).0.to_notnan()?;
 
         // Transform observer position from ecliptic to equatorial J2000
-        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?.transpose();
+        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
 
         let helio_pos = earth_pos + rot_matrix * observer_geocentric_position;
 
         Ok(helio_pos)
+    }
+
+    fn helio_velocity(
+        jpl: &JPLEphem,
+        epoch: &Epoch,
+        observer_geocentric_velocity: &ObserverGeocentricVelocity,
+    ) -> Result<ObserverHeliocentricVelocity, OutfitError> {
+        // Earth's heliocentric velocity — already in ecliptic J2000, AU/day
+        let earth_vel = jpl
+            .earth_ephemeris(epoch, true)
+            .1
+            .expect("Velocity is always available, this should not happen")
+            .to_notnan()?;
+
+        // geo_velocity is in ecliptic J2000 → rotate to equatorial (same as helio_position)
+        let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
+        let helio_vel = earth_vel + rot_matrix * observer_geocentric_velocity;
+        Ok(helio_vel)
     }
 }

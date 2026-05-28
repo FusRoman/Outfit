@@ -54,6 +54,9 @@ fn outfit_error_label(err: &OutfitError) -> &'static str {
         OutfitError::ObsDatasetErrorRef(_) => "ObsDatasetErrorRef",
         OutfitError::TrajectoryIdNotFound(_) => "TrajectoryIdNotFound",
         OutfitError::NoTrajectoryIndex => "NoTrajectoryIndex",
+        OutfitError::BizarreOrbit => "BizarreOrbit",
+        OutfitError::DifferentialCorrectionDiverged => "DifferentialCorrectionDiverged",
+        OutfitError::DifferentialCorrectionFailed(_) => "DifferentialCorrectionFailed",
     }
 }
 
@@ -139,7 +142,7 @@ fn main() -> Result<(), OutfitError> {
 
     let all_rms = full_orbit
         .iter()
-        .filter_map(|(_, res)| res.as_ref().ok().map(|(_, rms)| *rms))
+        .filter_map(|(_, res)| res.as_ref().ok().map(|orbit| orbit.orbit_quality()))
         .collect::<Vec<_>>();
 
     let mean_rms = all_rms.iter().sum::<f64>() / (all_rms.len() as f64);

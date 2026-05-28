@@ -3,10 +3,9 @@ mod common;
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::initial_orbit_determination::IODParams;
-use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
-use outfit::obs_dataset::FitIOD;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
+use outfit::FitIOD;
 use outfit::{FullOrbitResult, JPLEphem};
 use photom::observation_dataset::ObsDataset;
 use photom::observer::error_model::ObsErrorModel;
@@ -65,10 +64,9 @@ fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_file: EphemFileSource = "horizon:DE440"
+    let jpl_ephem: JPLEphem = "horizon:DE440"
         .try_into()
-        .expect("Failed to parse JPL ephemeris source");
-    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
+        .expect("Failed to load JPL ephemeris");
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
@@ -93,14 +91,14 @@ fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
 fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_max_relative: f64) {
     // K09R05F
     let expected = &expected_results()[0];
-    let (best_orbit, best_rms) = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative
@@ -108,14 +106,14 @@ fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_m
 
     // 8467
     let expected = &expected_results()[1];
-    let (best_orbit, best_rms) = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative
@@ -123,14 +121,14 @@ fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_m
 
     // 33803
     let expected = &expected_results()[2];
-    let (best_orbit, best_rms) = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
+    let best_orbit = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
     assert!(approx_equal(
         &expected.orbit,
-        best_orbit.get_orbit(),
+        best_orbit.orbital_elements(),
         test_epsilon
     ));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         expected.rms,
         epsilon = test_epsilon,
         max_relative = test_max_relative

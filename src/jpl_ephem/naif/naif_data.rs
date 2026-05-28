@@ -209,7 +209,7 @@ impl NaifData {
     /// Interpolate **position** and **velocity** for a `(target, center)` at an ET epoch.
     ///
     /// This fetches the covering record and evaluates Chebyshev polynomials to
-    /// return a Cartesian state vector in the J2000 frame.
+    /// return a Cartesian state vector in the Ecliptic J2000 frame.
     ///
     /// Arguments
     /// -----------------

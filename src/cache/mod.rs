@@ -131,6 +131,7 @@ impl OutfitCache {
     ///   Earth positions.
     /// - `ut1_provider` — UT1 time scale data for computing Earth's sidereal angle
     ///   at each observation epoch.
+    /// - `cache_velocity` — whether to compute and cache the velocity components in the resulting `ObserverCentricCache`. If `false`, the velocity fields will be set to `None` to save computation time and memory.
     ///
     /// # Errors
     ///
@@ -143,13 +144,19 @@ impl OutfitCache {
         obs_dataset: &ObsDataset,
         jpl: &JPLEphem,
         ut1_provider: &Ut1Provider,
+        cache_velocity: bool,
     ) -> Result<Self, OutfitError> {
         let observer_iter = obs_dataset.iter_observer()?;
 
         let observer_fixed_cache = build_fixed_observer_cache(observer_iter)?;
 
-        let observer_centric_cache =
-            build_centric_observer_cache(jpl, ut1_provider, obs_dataset, &observer_fixed_cache)?;
+        let observer_centric_cache = build_centric_observer_cache(
+            jpl,
+            ut1_provider,
+            obs_dataset,
+            &observer_fixed_cache,
+            cache_velocity,
+        )?;
 
         Ok(Self {
             observer_centric: observer_centric_cache,
@@ -183,7 +190,10 @@ impl OutfitCache {
     /// # Panics
     ///
     /// Panics if `idx` is out of bounds.
-    pub fn get_observer_geocentric_velocity(&self, idx: ObsIndex) -> &ObserverGeocentricVelocity {
+    pub fn get_observer_geocentric_velocity(
+        &self,
+        idx: ObsIndex,
+    ) -> &Option<ObserverGeocentricVelocity> {
         &self.get_centric(idx).geo_velocity
     }
 

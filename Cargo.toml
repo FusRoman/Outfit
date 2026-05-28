@@ -67,7 +67,6 @@ proptest = "1.7.0"
 
 photom = { version = "0.4.0", default-features = false, features = [
     "mpc_80_col",
-    "ades",
     "polars",
 ] }
 polars = { version = "0.53.0", features = ["is_in"] }
@@ -83,6 +82,9 @@ path = "examples/run_full_iod.rs"
 name = "fit_full_iod_parallel"
 path = "examples/run_full_iod_parallel.rs"
 required-features = ["parallel"]
+
+#[profile.test]
+#debug = false
 
 [profile.bench]
 opt-level = 3

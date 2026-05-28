@@ -4,9 +4,9 @@
 //! initial orbit determination (IOD) using three optical astrometric observations
 //! acquired from the same observing site.
 //!
-//! ## Core structure: [`GaussObs`]
+//! ## Core structure: [`crate::initial_orbit_determination::gauss::GaussObs`]
 //!
-//! The [`GaussObs`] struct encapsulates all the data required to apply the Gauss algorithm:
+//! The [`crate::initial_orbit_determination::gauss::GaussObs`] struct encapsulates all the data required to apply the Gauss algorithm:
 //!
 //! * Indices of the three selected observations,
 //! * Right ascension and declination angles `[rad]`,
@@ -19,7 +19,7 @@
 //! ## Main functionalities
 //!
 //! - **Construction**
-//!   * [`GaussObs::with_observer_position`] – Build from RA/DEC/epochs with explicit observer positions.
+//!   * [`crate::initial_orbit_determination::gauss::GaussObs::with_observer_position`] – Build from RA/DEC/epochs with explicit observer positions.
 //!
 //! - **Geometry preparation**
 //!   * Assemble the `3×3` matrix of line-of-sight unit vectors,
@@ -29,14 +29,14 @@
 //!   * Solve the 8th-degree Gauss polynomial for the central topocentric distance,
 //!   * Reconstruct heliocentric positions,
 //!   * Estimate velocity via **Gibbs’ method**,
-//!   * Return a [`GaussResult`] containing preliminary [`OrbitalElements`] (not necessarily Keplerian).
+//!   * Return a [`crate::initial_orbit_determination::gauss_result::GaussResult`] containing preliminary [`crate::orbit_type::OrbitalElements`] (not necessarily Keplerian).
 //!
 //! - **Orbit refinement**
-//!   * [`GaussObs::pos_and_vel_correction`] – Iterative update of positions and velocities,
-//!   * Apply filters on eccentricity and perihelion distance via [`eccentricity_control`].
+//!   * [`crate::initial_orbit_determination::gauss::GaussObs::pos_and_vel_correction`] – Iterative update of positions and velocities,
+//!   * Apply filters on eccentricity and perihelion distance via [`crate::orb_elem::eccentricity_control`].
 //!
 //! - **Monte Carlo perturbations**
-//!   * [`GaussObs::generate_noisy_realizations`] – Generate perturbed triplets by adding Gaussian noise
+//!   * [`crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations`] – Generate perturbed triplets by adding Gaussian noise
 //!     to RA/DEC, useful for uncertainty propagation and robustness analysis.
 //!
 //! ## Algorithm outline
@@ -50,8 +50,8 @@
 //!
 //! ## Output
 //!
-//! The primary result is a [`GaussResult`] which stores the computed orbit as
-//! a generic [`OrbitalElements`] value.  
+//! The primary result is a [`crate::initial_orbit_determination::gauss_result::GaussResult`] which stores the computed orbit as
+//! a generic [`crate::orbit_type::OrbitalElements`] value.  
 //! Depending on refinement, this may represent either:
 //! * a **Preliminary orbit** (direct Gauss solution), or
 //! * a **Corrected orbit** (after iteration).
@@ -96,10 +96,10 @@
 //!
 //! ## See also
 //!
-//! - [`GaussObs`]
-//! - [`GaussResult`]
-//! - [`OrbitalElements`]
-//! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
+//! - [`crate::initial_orbit_determination::gauss::GaussObs`]
+//! - [`crate::initial_orbit_determination::gauss_result::GaussResult`]
+//! - [`crate::orbit_type::OrbitalElements`]
+//! - [`crate::orbit_type::keplerian_element::KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
 use std::ops::ControlFlow;
 
 use aberth::StopReason;
@@ -319,7 +319,7 @@ impl GaussObs {
     /// ------------
     /// * [`generate_noisy_realizations`](crate::initial_orbit_determination::gauss::GaussObs::generate_noisy_realizations) – Eager version collecting all realizations into a `Vec`.
     /// * [`GaussObs::prelim_orbit`] – Consumes each realization to compute a Gauss preliminary orbit.
-    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – High-level search loop that leverages this iterator with early pruning.
+    /// * [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) – High-level search loop that leverages this iterator with early pruning.
     pub fn realizations_iter<'a, R: Rng + 'a>(
         self,
         errors_ra: &Vector3<f64>,
@@ -422,7 +422,7 @@ impl GaussObs {
     /// * [`realizations_iter`](crate::initial_orbit_determination::gauss::GaussObs::realizations_iter) – Lazy version that yields realizations on demand and
     ///   supports early-stop pruning.
     /// * [`GaussObs::prelim_orbit`] – Compute a preliminary Gauss solution from each realization.
-    /// * [`FitIOD::fit_iod`](crate::obs_dataset::FitIOD::fit_iod) – End-to-end search that consumes realizations.
+    /// * [`FitIOD::fit_iod`](crate::FitIOD::fit_iod) – End-to-end search that consumes realizations.
     pub fn generate_noisy_realizations(
         self,
         errors_ra: &Vector3<f64>,
@@ -910,7 +910,7 @@ impl GaussObs {
         reference_epoch: f64,
     ) -> Result<OrbitalElements, OutfitError> {
         // Apply the transformation to position and velocity vectors
-        let matrix_elc_transform = ROT_EQUMJ2000_TO_ECLMJ2000.transpose();
+        let matrix_elc_transform = ROT_EQUMJ2000_TO_ECLMJ2000;
         let ecl_pos = matrix_elc_transform * asteroid_position;
         let ecl_vel = matrix_elc_transform * asteroid_velocity;
 

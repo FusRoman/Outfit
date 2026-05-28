@@ -6,32 +6,10 @@ on:
   pull_request:
 
 jobs:
-  test:
-    name: Test Outfit
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run tests
-        run: cargo test --locked --all-targets
-
   fmt:
     name: Check formatting
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,8 +29,12 @@ jobs:
         run: cargo fmt --all -- --check
 
   clippy:
-    name: Clippy lint
+    name: Clippy lint (${{ matrix.features }})
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        features: [default, parallel]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -67,17 +49,42 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
       - name: check version
         run: |
           rustc --version
           cargo clippy --version
       - name: Run cargo clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: |
+          if [ "${{ matrix.features }}" = "default" ]; then
+            cargo clippy --all-targets -- -D warnings
+          else
+            cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
+          fi
+
+  semver-pr:
+    name: SemVer (PR vs base)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check semver (baseline = crates.io)
+        uses: obi1kenobi/cargo-semver-checks-action@v2
 
   coverage:
-    name: Coverage (stable, cargo-llvm-cov → Codecov)
+    name: Coverage (${{ matrix.features }})
     runs-on: ubuntu-latest
+    needs: [fmt, clippy, semver-pr]
+    if: |
+      always() &&
+      (needs.fmt.result == 'success' || needs.fmt.result == 'skipped') &&
+      (needs.clippy.result == 'success' || needs.clippy.result == 'skipped') &&
+      (needs.semver-pr.result == 'success' || needs.semver-pr.result == 'skipped')
+    strategy:
+      matrix:
+        features: [default, parallel]
 
     steps:
       - name: Checkout repository
@@ -95,7 +102,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-llvmcov-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-llvmcov-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
@@ -105,31 +112,21 @@ jobs:
 
       - name: Generate coverage (lcov)
         run: |
-          cargo llvm-cov \
-            --workspace \
-            --lcov --output-path lcov.info
+          if [ "${{ matrix.features }}" = "default" ]; then
+            cargo llvm-cov \
+              --workspace \
+              --lcov --output-path lcov.info
+          else
+            cargo llvm-cov \
+              --workspace \
+              --features ${{ matrix.features }} \
+              --lcov --output-path lcov.info
+          fi
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: lcov.info
-          flags: rust
+          flags: ${{ matrix.features }}
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
-
-  semver-pr:
-    name: SemVer (PR vs base)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        # IMPORTANT: full history so the base SHA exists locally
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Check semver (baseline = PR base)
-        uses: obi1kenobi/cargo-semver-checks-action@v2
-        with:
-          baseline-rev: ${{ github.event.pull_request.base.sha }}

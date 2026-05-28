@@ -1,22 +1,21 @@
 //! IOD entry points that operate on [`ObsDataset`](photom::observation_dataset::ObsDataset).
 //!
-//! This module exposes the [`FitIOD`] trait, which adds Initial Orbit
+//! This module exposes the [`crate::FitIOD`] trait, which adds Initial Orbit
 //! Determination methods directly to
 //! [`photom::observation_dataset::ObsDataset`]. Two entry points are provided:
 //!
-//! - [`FitIOD::fit_iod`] — run IOD for a **single** named trajectory.
-//! - [`FitIOD::fit_full_iod`] — run IOD for **every** trajectory in the
-//!   dataset and collect the results in a [`FullOrbitResult`] map.
+//! - [`crate::FitIOD::fit_iod`] — run IOD for a **single** named trajectory.
+//! - [`crate::FitIOD::fit_full_iod`] — run IOD for **every** trajectory in the
+//!   dataset and collect the results in a [`crate::FullOrbitResult`] map.
 //!
 //! Both methods apply an astrometric error model, batch-RMS corrections, and
 //! build a per-observation position cache before invoking the Gauss method.
 //!
 //! # Type aliases
 //!
-//! - [`IODRMS`] — scalar quality metric (RMS of normalised residuals).
-//! - [`FullOrbitResult`] — batch result map keyed by trajectory ID.
+//! - [`crate::IODRMS`] — scalar quality metric (RMS of normalised residuals).
+//! - [`crate::FullOrbitResult`] — batch result map keyed by trajectory ID.
 
-use ahash::RandomState;
 use hifitime::ut1::Ut1Provider;
 use photom::{
     observation_dataset::{observation::Observation, ObsDataset},
@@ -27,34 +26,12 @@ use rand::{rngs::SmallRng, SeedableRng};
 use std::collections::HashMap;
 
 use crate::{
-    cache::OutfitCache, trajectory::TrajectoryFit, GaussResult, IODParams, JPLEphem, OutfitError,
+    cache::OutfitCache, constants::FitOrbitResult, trajectory::TrajectoryFit, FullOrbitResult,
+    IODParams, JPLEphem, OutfitError,
 };
 
 #[cfg(feature = "parallel")]
 use rayon::iter::ParallelIterator;
-
-/// Type alias for the RMS of normalized residuals from an IOD fit.
-/// This is a single scalar value representing the overall fit quality of the IOD solution.
-pub type IODRMS = f64;
-
-/// Full batch orbit determination results.
-///
-/// Each entry maps an [`TrajId`] to the outcome of a full
-/// Initial Orbit Determination (IOD) attempt on its set of observations.
-///
-/// Internally, this is implemented as:
-///
-/// ```ignore
-/// HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>
-/// ```
-///
-/// Return semantics
-/// -----------------
-/// * `Ok((GaussResult, IODRMS))` – a successful IOD with its RMS of normalized residuals.
-/// * `Err(OutfitError)` – a failure isolated to that object.
-///
-/// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
-pub type FullOrbitResult = HashMap<TrajId, Result<(GaussResult, IODRMS), OutfitError>, RandomState>;
 
 /// Extension trait that adds Initial Orbit Determination methods to
 /// [`ObsDataset`].
@@ -146,7 +123,7 @@ pub trait FitIOD {
         params: &IODParams,
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError>;
+    ) -> Result<FitOrbitResult, OutfitError>;
 }
 
 impl FitIOD for ObsDataset {
@@ -158,7 +135,7 @@ impl FitIOD for ObsDataset {
         params: &IODParams,
         error_model: ObsErrorModel,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError> {
+    ) -> Result<FitOrbitResult, OutfitError> {
         let (corrected_dataset, cache, _) =
             prepare_iod(self, jpl, ut1_provider, params, error_model, rng)?;
 
@@ -237,7 +214,7 @@ fn fit_single_traj(
     jpl: &JPLEphem,
     params: &IODParams,
     rng: &mut impl rand::Rng,
-) -> Result<(GaussResult, IODRMS), OutfitError> {
+) -> Result<FitOrbitResult, OutfitError> {
     let materialized_traj = corrected_dataset
         .materialize_trajectory(traj)
         .ok_or_else(|| OutfitError::TrajectoryIdNotFound(traj.clone()))?;
@@ -246,6 +223,32 @@ fn fit_single_traj(
     obs_vec_refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
 
     obs_vec_refs.estimate_best_orbit(cache, jpl, params, rng)
+}
+
+/// Run IOD directly on a pre-sorted, pre-corrected slice of observations using
+/// an already-built position cache.
+///
+/// This is the low-level entry point used when the caller has already applied
+/// the error model and built the [`OutfitCache`].  It avoids the cost of
+/// reconstructing an [`ObsDataset`] and rebuilding the cache.
+///
+/// # Arguments
+///
+/// - `observations` — slice of observations, **sorted by MJD** (ascending).
+/// - `cache` — position cache already built for these observations.
+/// - `jpl` — JPL ephemeris.
+/// - `params` — IOD tuning parameters.
+/// - `rng` — random-number generator for noise realisations.
+pub(crate) fn run_iod_on_observations(
+    observations: &[Observation],
+    cache: &OutfitCache,
+    jpl: &JPLEphem,
+    params: &IODParams,
+    rng: &mut impl rand::Rng,
+) -> Result<FitOrbitResult, OutfitError> {
+    let mut refs: Vec<&Observation> = observations.iter().collect();
+    refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
+    refs.estimate_best_orbit(cache, jpl, params, rng)
 }
 
 fn prepare_iod(
@@ -261,7 +264,7 @@ fn prepare_iod(
         .apply_model_errors()
         .apply_batch_rms_correction(params.gap_max);
 
-    let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider)?;
+    let cache = OutfitCache::build(&corrected_dataset, jpl, ut1_provider, true)?;
 
     // Draw a single base seed from the caller's RNG.
     // All per-trajectory RNGs are derived from this seed → deterministic
@@ -278,7 +281,7 @@ fn process_traj(
     jpl: &JPLEphem,
     params: &IODParams,
     base_seed: u64,
-) -> (TrajId, Result<(GaussResult, IODRMS), OutfitError>) {
+) -> (TrajId, Result<FitOrbitResult, OutfitError>) {
     let traj_seed = base_seed ^ traj_id.stable_hash();
     let mut local_rng = SmallRng::seed_from_u64(traj_seed);
     let result = fit_single_traj(

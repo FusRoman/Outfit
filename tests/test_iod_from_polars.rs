@@ -3,9 +3,7 @@ mod common;
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::orbit_type::{keplerian_element::KeplerianElements, OrbitalElements};
-use outfit::{
-    jpl_ephem::download_jpl_file::EphemFileSource, obs_dataset::FitIOD, IODParams, JPLEphem,
-};
+use outfit::{FitIOD, IODParams, JPLEphem};
 use photom::io::polars::ContiguousChoice;
 use photom::{
     io::polars::FromPolarsArgs, observation_dataset::ObsDataset,
@@ -61,10 +59,9 @@ fn test_iod_from_polars() {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_file: EphemFileSource = "horizon:DE440"
+    let jpl_ephem: JPLEphem = "horizon:DE440"
         .try_into()
-        .expect("Failed to parse JPL ephemeris source");
-    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
+        .expect("Failed to load JPL ephemeris");
 
     let mut full_orbit = obs_dataset
         .fit_full_iod(
@@ -77,8 +74,8 @@ fn test_iod_from_polars() {
         .unwrap();
 
     // --- traj 14226 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"14226".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"14226".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60894.372896385554,
@@ -92,15 +89,15 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.02704195897369085,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     // --- traj 29757 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"29757".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"29757".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60835.25573266984,
@@ -114,15 +111,15 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.025397381294328548,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
 
     // --- traj 95777 ---
-    let (best_orbit, best_rms) = full_orbit.remove(&"95777".into()).unwrap().unwrap();
-    let orbit = best_orbit.get_orbit();
+    let best_orbit = full_orbit.remove(&"95777".into()).unwrap().unwrap();
+    let orbit = best_orbit.orbital_elements();
 
     let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
         reference_epoch: 60894.252965553926,
@@ -136,7 +133,7 @@ fn test_iod_from_polars() {
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
-        best_rms,
+        best_orbit.orbit_quality(),
         0.010284390096535293,
         epsilon = test_epsilon,
         max_relative = test_max_relative

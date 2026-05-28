@@ -27,8 +27,8 @@ use photom::{observation_dataset::observation::Observation, Radians};
 
 use crate::{
     cache::OutfitCache,
+    constants::FitOrbitResult,
     initial_orbit_determination::{gauss::GaussObs, triplet_generation::generate_triplets},
-    obs_dataset::IODRMS,
     observation_ephemeris::ObservationEphemeris,
     EquinoctialElements, GaussResult, IODParams, JPLEphem, OutfitError,
 };
@@ -270,7 +270,7 @@ pub(crate) trait TrajectoryFit {
         jpl: &JPLEphem,
         params: &IODParams,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError>;
+    ) -> Result<FitOrbitResult, OutfitError>;
 }
 
 impl TrajectoryFit for Vec<&Observation> {
@@ -432,7 +432,7 @@ impl TrajectoryFit for Vec<&Observation> {
         jpl: &JPLEphem,
         params: &IODParams,
         rng: &mut impl rand::Rng,
-    ) -> Result<(GaussResult, IODRMS), OutfitError> {
+    ) -> Result<FitOrbitResult, OutfitError> {
         // Compute candidate triplets for preliminary orbit estimation, sorted by geometric spacing.
         let triplets = self.compute_triplets(cache, params);
 
@@ -523,7 +523,7 @@ impl TrajectoryFit for Vec<&Observation> {
 
         // If at least one candidate succeeded, return the best; otherwise, propagate an error.
         if let Some(orbit) = best_orbit {
-            Ok((orbit, best_rms))
+            Ok(FitOrbitResult::IODGauss((orbit, best_rms)))
         } else {
             // If nothing succeeded, propagate a structured error with the last underlying cause.
             // Fallback to a domain-specific unit error if we never captured any (e.g., no attempts).
@@ -570,7 +570,8 @@ mod test_obs_ext {
         let traj_len = traj.len();
 
         let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                .unwrap();
 
         let iod_params = IODParams {
             dt_min: 0.03,
@@ -636,7 +637,8 @@ mod test_obs_ext {
             .collect_into_vec();
 
         let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false)
+                .unwrap();
 
         let triplets = GaussObs {
             idx_obs: Vector3::new(34, 35, 36),
@@ -806,15 +808,14 @@ mod test_obs_ext {
             .build()
             .unwrap();
 
-        let cache =
-            OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER).unwrap();
+        let cache = OutfitCache::build(&corrected_dataset, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, true)
+            .unwrap();
 
-        let (best_orbit, best_rms) = traj
+        let best_orbit = traj
             .estimate_best_orbit(&cache, &JPL_EPHEM_HORIZON, &iod_params, &mut rng)
             .unwrap();
 
-        let binding = best_orbit;
-        let orbit = binding.get_orbit();
+        let orbit = best_orbit.orbital_elements();
 
         let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
             reference_epoch: 57049.22904475403,
@@ -827,6 +828,10 @@ mod test_obs_ext {
         });
 
         assert!(approx_equal(orbit, &expected_orbit, 1e-14));
-        assert_relative_eq!(best_rms, 222.16583195747745, epsilon = 1e-14);
+        assert_relative_eq!(
+            best_orbit.orbit_quality(),
+            222.16583195747745,
+            epsilon = 1e-14
+        );
     }
 }

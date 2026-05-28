@@ -35,11 +35,6 @@
 //! - **Nutation**: IAU 1980, via [`rnut80`](crate::earth_orientation::rnut80) (true ↔ mean equator/equinox).
 //! - **Mean obliquity**: via [`obleq`](crate::earth_orientation::obleq) (ecliptic ↔ equatorial).
 //!
-//! The composition strategy used by [`rotpn`](crate::ref_system::rotpn) is intentionally explicit and
-//! mirror‑friendly to classic astrometry codes (e.g., OrbFit): whenever helpful,
-//! transformations are routed through **Equatorial Mean J2000** as an intermediate,
-//! ensuring determinism and easing verification against reference implementations.
-//!
 //! ## Typical usage
 //!
 //! ```rust, no_run
