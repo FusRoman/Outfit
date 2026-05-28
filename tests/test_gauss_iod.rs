@@ -3,7 +3,6 @@ mod common;
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::initial_orbit_determination::IODParams;
-use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
 use outfit::FitIOD;
@@ -65,10 +64,9 @@ fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_file: EphemFileSource = "horizon:DE440"
+    let jpl_ephem: JPLEphem = "horizon:DE440"
         .try_into()
-        .expect("Failed to parse JPL ephemeris source");
-    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
+        .expect("Failed to load JPL ephemeris");
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",

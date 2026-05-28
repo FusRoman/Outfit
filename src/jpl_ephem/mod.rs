@@ -107,8 +107,8 @@ impl JPLEphem {
     /// * [`download_jpl_file::EphemFilePath::get_ephemeris_file`]
     /// * [`horizon::HorizonData::read_horizon_file`](crate::jpl_ephem::horizon::horizon_data::HorizonData::read_horizon_file)
     /// * [`naif::NaifData::read_naif_file`](crate::jpl_ephem::naif::naif_data::NaifData::read_naif_file)
-    pub fn new(file_source: &EphemFileSource) -> Result<Self, OutfitError> {
-        let file_path = EphemFilePath::get_ephemeris_file(file_source)?;
+    pub fn new(source: impl Into<EphemFileSource>) -> Result<Self, OutfitError> {
+        let file_path = EphemFilePath::get_ephemeris_file(&source.into())?;
         match file_path {
             EphemFilePath::JPLHorizon(..) => {
                 let horizon_data = HorizonData::read_horizon_file(&file_path);
@@ -186,5 +186,20 @@ impl JPLEphem {
                 "Expected a NAIF source".to_string(),
             )),
         }
+    }
+}
+
+impl TryFrom<&str> for JPLEphem {
+    type Error = OutfitError;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let source = EphemFileSource::try_from(s)?;
+        JPLEphem::new(source)
+    }
+}
+
+impl TryFrom<String> for JPLEphem {
+    type Error = OutfitError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        JPLEphem::try_from(s.as_str())
     }
 }

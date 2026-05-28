@@ -380,3 +380,10 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
         }
     }
 }
+
+/// Allow cloning the source for multiple resolution attempts without forcing the caller to clone.
+impl From<&EphemFileSource> for EphemFileSource {
+    fn from(s: &EphemFileSource) -> Self {
+        s.clone()
+    }
+}

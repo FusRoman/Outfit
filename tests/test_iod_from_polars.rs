@@ -3,7 +3,7 @@ mod common;
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::orbit_type::{keplerian_element::KeplerianElements, OrbitalElements};
-use outfit::{jpl_ephem::download_jpl_file::EphemFileSource, FitIOD, IODParams, JPLEphem};
+use outfit::{FitIOD, IODParams, JPLEphem};
 use photom::io::polars::ContiguousChoice;
 use photom::{
     io::polars::FromPolarsArgs, observation_dataset::ObsDataset,
@@ -59,10 +59,9 @@ fn test_iod_from_polars() {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_file: EphemFileSource = "horizon:DE440"
+    let jpl_ephem: JPLEphem = "horizon:DE440"
         .try_into()
-        .expect("Failed to parse JPL ephemeris source");
-    let jpl_ephem = JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon");
+        .expect("Failed to load JPL ephemeris");
 
     let mut full_orbit = obs_dataset
         .fit_full_iod(
