@@ -75,7 +75,7 @@ pub fn gm_au3_day2(body: NaifIds) -> Option<f64> {
 }
 
 #[cfg(test)]
-mod tests {
+mod planet_gm_tests {
     use super::*;
 
     #[test]
