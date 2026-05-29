@@ -10,7 +10,7 @@
 //!   normalised astrometric residuals between the measured and predicted
 //!   (RA, DEC), suitable as a χ² contribution.
 //!
-//! A stand-alone helper function [`correct_aberration`](crate::observation_ephemeris::correct_aberration) is also exported for
+//! A stand-alone helper function `correct_aberration_first_order` is also available for
 //! direct use when only the first-order aberration shift is needed.
 //!
 //! # Coordinate conventions
@@ -22,13 +22,14 @@
 use std::f64::consts::PI;
 
 use hifitime::Epoch;
-use nalgebra::{Vector3, Vector6};
+use nalgebra::{Matrix6x3, Vector3, Vector6};
 use photom::{constants::DPI, observation_dataset::observation::Observation};
 
 use crate::{
     cache::OutfitCache,
     constants::{ROT_ECLMJ2000_TO_EQUMJ2000, ROT_EQUMJ2000_TO_ECLMJ2000},
-    propagator::{nbody::propagate_nbody, NBodyConfig},
+    ephemeris::aberration::correct_aberration_first_order,
+    propagator::NBodyConfig,
     EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
 };
 
@@ -43,7 +44,7 @@ use crate::{
 /// - `ra` and `dec` are in **radians**, equatorial mean J2000.
 /// - `d_ra_d_pos` and `d_dec_d_pos` are in **rad/AU**, expressed in the
 ///   **ecliptic mean J2000** frame.  This matches the frame in which
-///   [`EquinoctialElements::solve_two_body_problem`] returns its Jacobians,
+///   `PropagatorKind::propagate_to_epoch` returns its Jacobians,
 ///   so the chain rule can be applied directly:
 ///
 /// ```text
@@ -127,9 +128,9 @@ pub trait ObservationEphemeris {
     ///
     /// See also
     /// ------------
-    /// * [`EquinoctialElements::solve_two_body_problem`] – Orbit propagation.
+    /// * `PropagatorKind::propagate_to_epoch` – Orbit propagation.
     /// * [`ResolvedObserver::pvobs`](crate::observer_extension::ResolvedObserver::pvobs) – Computes observer's geocentric position.
-    /// * [`correct_aberration`] – Aberration correction.
+    /// * `correct_aberration_first_order` – Aberration correction.
     /// * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Convert Cartesian vectors to (RA, DEC).
     fn compute_apparent_position(
         &self,
@@ -173,9 +174,9 @@ pub trait ObservationEphemeris {
     /// ------------
     /// * [`compute_apparent_position`](crate::observation_ephemeris::ObservationEphemeris::compute_apparent_position) – Used internally to obtain predicted RA/DEC.
     /// * [`ResolvedObserver::pvobs`](crate::observer_extension::ResolvedObserver::pvobs) – Computes observer's geocentric position.
-    /// * [`correct_aberration`] – Applies aberration correction.
+    /// * `correct_aberration_first_order` – Applies aberration correction.
     /// * [`cartesian_to_radec`](crate::conversion::cartesian_to_radec) – Converts 3D vectors to (RA, DEC).
-    /// * [`EquinoctialElements::solve_two_body_problem`] – Two-body propagation.
+    /// * `PropagatorKind::propagate_to_epoch` – Two-body propagation.
     fn ephemeris_error(
         &self,
         cache: &OutfitCache,
@@ -247,7 +248,7 @@ pub trait ObservationEphemeris {
     ///    ∂δ/∂elemⱼ = ∂δ/∂pos_ecl · (R_eq→ecl · ∂pos_eq/∂elemⱼ)
     ///    ```
     ///    where the 6×3 position Jacobian `∂pos_eq/∂elem` is returned by
-    ///    [`EquinoctialElements::solve_two_body_problem`].
+    ///    `PropagatorKind::propagate_to_epoch`.
     ///
     /// ## Return
     ///
@@ -307,7 +308,7 @@ fn topocentric_radec_and_partials(
     //    the RA/Dec angles are computed directly from the (x,y,z) components of `corrected`
     //    using atan2 — no additional frame rotation is applied here.
     let relative = ast_pos_ecl - obs_pos_ecl;
-    let corrected = correct_aberration(relative, ast_vel_ecl);
+    let corrected = correct_aberration_first_order(relative, ast_vel_ecl);
 
     let x = corrected[0];
     let y = corrected[1];
@@ -351,6 +352,97 @@ fn topocentric_radec_and_partials(
     (ra, dec, d_ra_d_pos, d_dec_d_pos)
 }
 
+/// Holds the resolved observer and asteroid state needed for topocentric geometry.
+struct TopocentricGeometryInputs {
+    /// Asteroid heliocentric position [AU], equatorial J2000.
+    ast_pos_equ: Vector3<f64>,
+    /// Asteroid heliocentric velocity [AU/day], equatorial J2000.
+    ast_vel_equ: Vector3<f64>,
+    /// Observer heliocentric position [AU], equatorial J2000.
+    obs_pos_equ: Vector3<f64>,
+}
+
+/// Guards against hyperbolic/parabolic orbits (e ≥ 1), which are not yet supported.
+pub(crate) fn check_elliptical_orbit(elements: &EquinoctialElements) -> Result<(), OutfitError> {
+    if elements.eccentricity() >= 1.0 {
+        Err(OutfitError::InvalidOrbit(
+            "Eccentricity >= 1 is not yet supported".to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Intermediate result holding only the observer position (before asteroid state is known).
+type TopocentricGeometryInputsWithoutAsteroid = Vector3<f64>;
+
+/// Resolves Earth's heliocentric position and the observer's heliocentric position
+/// for a given observation epoch, both in equatorial J2000.
+fn resolve_observer_geometry(
+    observation: &Observation,
+    cache: &OutfitCache,
+    jpl: &JPLEphem,
+    obs_epoch: &Epoch,
+) -> TopocentricGeometryInputsWithoutAsteroid {
+    let (earth_position_equ, _) = jpl.earth_ephemeris(obs_epoch, false);
+    let earth_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position_equ;
+
+    let geo_obs_pos = cache
+        .get_observer_geocentric_position(observation.index())
+        .map(|x| x.into_inner());
+
+    let obs_pos_ecl = geo_obs_pos + earth_pos_ecl;
+    ROT_ECLMJ2000_TO_EQUMJ2000 * obs_pos_ecl
+}
+
+/// Propagates the asteroid to the observation epoch (two-body, no derivatives)
+/// and combines with observer geometry into [`TopocentricGeometryInputs`].
+fn resolve_2body_geometry(
+    observation: &Observation,
+    cache: &OutfitCache,
+    jpl: &JPLEphem,
+    elements: &EquinoctialElements,
+) -> Result<TopocentricGeometryInputs, OutfitError> {
+    let dt = observation.mjd_tt() - elements.reference_epoch;
+    let (pos_ecl, vel_ecl, _) = elements.propagate_twobody(0.0, dt, false)?;
+
+    let obs_epoch = Epoch::from_mjd_in_time_scale(observation.mjd_tt(), hifitime::TimeScale::TT);
+    let obs_pos_equ = resolve_observer_geometry(observation, cache, jpl, &obs_epoch);
+
+    Ok(TopocentricGeometryInputs {
+        ast_pos_equ: ROT_ECLMJ2000_TO_EQUMJ2000 * pos_ecl,
+        ast_vel_equ: ROT_ECLMJ2000_TO_EQUMJ2000 * vel_ecl,
+        obs_pos_equ,
+    })
+}
+
+/// Applies the chain rule to convert `dpos_delem` (ecliptic J2000, 6×3) to
+/// `(d_ra_d_elem, d_dec_d_elem)` using the positional partials returned by
+/// [`topocentric_radec_and_partials`] (equatorial J2000).
+///
+/// The element-to-position Jacobian is rotated from ecliptic to equatorial
+/// before dotting with the sky-coordinate gradients.
+fn element_partials_from_position_partials(
+    d_ra_d_pos_equ: Vector3<f64>,
+    d_dec_d_pos_equ: Vector3<f64>,
+    dpos_delem_ecl: &Matrix6x3<f64>,
+) -> (Vector6<f64>, Vector6<f64>) {
+    (0..6).fold(
+        (Vector6::zeros(), Vector6::zeros()),
+        |(mut d_ra, mut d_dec), j| {
+            let dpos_ecl_j = Vector3::new(
+                dpos_delem_ecl[(j, 0)],
+                dpos_delem_ecl[(j, 1)],
+                dpos_delem_ecl[(j, 2)],
+            );
+            let dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_ecl_j;
+            d_ra[j] = d_ra_d_pos_equ.dot(&dpos_equ_j);
+            d_dec[j] = d_dec_d_pos_equ.dot(&dpos_equ_j);
+            (d_ra, d_dec)
+        },
+    )
+}
+
 impl ObservationEphemeris for Observation {
     fn compute_apparent_position(
         &self,
@@ -358,38 +450,14 @@ impl ObservationEphemeris for Observation {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
     ) -> Result<(f64, f64), OutfitError> {
-        // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
-        if equinoctial_element.eccentricity() >= 1.0 {
-            return Err(OutfitError::InvalidOrbit(
-                "Eccentricity >= 1 is not yet supported".to_string(),
-            ));
-        }
+        check_elliptical_orbit(equinoctial_element)?;
 
-        // 1. Propagate asteroid position/velocity in ecliptic J2000
-        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
-            0.,
-            self.mjd_tt() - equinoctial_element.reference_epoch,
-            false,
-        )?;
+        let TopocentricGeometryInputs {
+            ast_pos_equ,
+            ast_vel_equ,
+            obs_pos_equ,
+        } = resolve_2body_geometry(self, cache, jpl, equinoctial_element)?;
 
-        // 2. Observation time in TT
-        let obs_mjd = Epoch::from_mjd_in_time_scale(self.mjd_tt(), hifitime::TimeScale::TT);
-
-        // 3. Earth's barycentric position in ecliptic J2000
-        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
-
-        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position;
-        let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_ast;
-        let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_vel;
-
-        // 4. Observer heliocentric position in ecliptic J2000
-        let geo_obs_pos = cache
-            .get_observer_geocentric_position(self.index())
-            .map(|x| x.into_inner());
-        let xobs = geo_obs_pos + earth_pos_eclj2000;
-        let obs_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * xobs;
-
-        // 5. (α, δ) via shared geometry core (partials discarded)
         let (ra, dec, _, _) = topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
 
         Ok((ra, dec))
@@ -401,38 +469,14 @@ impl ObservationEphemeris for Observation {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
     ) -> Result<ApparentPositionWithPartials, OutfitError> {
-        // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
-        if equinoctial_element.eccentricity() >= 1.0 {
-            return Err(OutfitError::InvalidOrbit(
-                "Eccentricity >= 1 is not yet supported".to_string(),
-            ));
-        }
+        check_elliptical_orbit(equinoctial_element)?;
 
-        // 1. Propagate asteroid position/velocity in ecliptic J2000
-        let (cart_pos_ast, cart_pos_vel, _) = equinoctial_element.solve_two_body_problem(
-            0.,
-            self.mjd_tt() - equinoctial_element.reference_epoch,
-            false,
-        )?;
+        let TopocentricGeometryInputs {
+            ast_pos_equ,
+            ast_vel_equ,
+            obs_pos_equ,
+        } = resolve_2body_geometry(self, cache, jpl, equinoctial_element)?;
 
-        // 2. Observation time in TT
-        let obs_mjd = Epoch::from_mjd_in_time_scale(self.mjd_tt(), hifitime::TimeScale::TT);
-
-        // 3. Earth's barycentric position in ecliptic J2000
-        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
-
-        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position;
-        let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_ast;
-        let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_vel;
-
-        // 4. Observer heliocentric position in ecliptic J2000
-        let geo_obs_pos = cache
-            .get_observer_geocentric_position(self.index())
-            .map(|x| x.into_inner());
-        let xobs = geo_obs_pos + earth_pos_eclj2000;
-        let obs_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * xobs;
-
-        // 5. (α, δ) + partial derivatives via shared geometry core
         let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
             topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
 
@@ -480,59 +524,25 @@ impl ObservationEphemeris for Observation {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
     ) -> Result<ObsAndElementPartials, OutfitError> {
-        // Hyperbolic/parabolic orbits (e >= 1) are not yet supported
-        if equinoctial_element.eccentricity() >= 1.0 {
-            return Err(OutfitError::InvalidOrbit(
-                "Eccentricity >= 1 is not yet supported".to_string(),
-            ));
-        }
+        check_elliptical_orbit(equinoctial_element)?;
 
-        // 1. Propagate asteroid with derivatives enabled.
+        // Propagate with derivatives enabled.
         let dt = self.mjd_tt() - equinoctial_element.reference_epoch;
-        let (cart_pos_ast, cart_vel_ast, jacobians) =
-            equinoctial_element.solve_two_body_problem(0., dt, true)?;
+        let (pos_ecl, vel_ecl, jacobians) = equinoctial_element.propagate_twobody(0.0, dt, true)?;
+        let (dpos_delem_ecl, _) = jacobians
+            .expect("propagate_twobody with compute_derivatives=true must return jacobians");
 
-        let (dpos_delem_eq, _dvel_delem_eq) = jacobians
-            .expect("solve_two_body_problem with compute_derivatives=true must return jacobians");
+        let obs_epoch = Epoch::from_mjd_in_time_scale(self.mjd_tt(), hifitime::TimeScale::TT);
+        let obs_pos_equ = resolve_observer_geometry(self, cache, jpl, &obs_epoch);
 
-        // 2. Observation time in TT
-        let obs_mjd = Epoch::from_mjd_in_time_scale(self.mjd_tt(), hifitime::TimeScale::TT);
+        let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * pos_ecl;
+        let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * vel_ecl;
 
-        // 3. Earth's barycentric position in ecliptic J2000
-        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
-        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position;
-        let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_ast;
-        let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_vel_ast;
-
-        // 4. Observer heliocentric position in ecliptic J2000
-        let geo_obs_pos = cache
-            .get_observer_geocentric_position(self.index())
-            .map(|x| x.into_inner());
-        let xobs = geo_obs_pos + earth_pos_eclj2000;
-        let obs_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * xobs;
-
-        // 5. (α, δ) and ∂(α,δ)/∂pos (equatorial J2000)
         let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
             topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
 
-        // 6. Chain rule: ∂(α,δ)/∂elemⱼ = ∂(α,δ)/∂pos_equ · R_ecl→equ · (∂pos_ecl/∂elemⱼ)
-        //
-        //    dpos_delem_eq is Matrix6x3: row j = ∂pos_ecl/∂elemⱼ  (3 components, ecliptic J2000).
-        //    Rotate each row to equatorial (same frame as d_ra_d_pos):
-        //      dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_delem_ecl.row(j)ᵀ
-        //    Then dot with d_ra_d_pos.
-        let mut d_ra_d_elem = Vector6::zeros();
-        let mut d_dec_d_elem = Vector6::zeros();
-        for j in 0..6 {
-            let dpos_ecl_j = Vector3::new(
-                dpos_delem_eq[(j, 0)],
-                dpos_delem_eq[(j, 1)],
-                dpos_delem_eq[(j, 2)],
-            );
-            let dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_ecl_j;
-            d_ra_d_elem[j] = d_ra_d_pos.dot(&dpos_equ_j);
-            d_dec_d_elem[j] = d_dec_d_pos.dot(&dpos_equ_j);
-        }
+        let (d_ra_d_elem, d_dec_d_elem) =
+            element_partials_from_position_partials(d_ra_d_pos, d_dec_d_pos, &dpos_delem_ecl);
 
         Ok(ObsAndElementPartials {
             ra,
@@ -549,52 +559,26 @@ impl ObservationEphemeris for Observation {
         equinoctial_element: &EquinoctialElements,
         config: &NBodyConfig,
     ) -> Result<ObsAndElementPartials, OutfitError> {
-        // Hyperbolic/parabolic orbits are not yet supported
-        if equinoctial_element.eccentricity() >= 1.0 {
-            return Err(OutfitError::InvalidOrbit(
-                "Eccentricity >= 1 is not yet supported".to_string(),
-            ));
-        }
+        // Hyperbolic orbits are not yet supported
+        check_elliptical_orbit(equinoctial_element)?;
 
-        // 1. N-body propagation to observation epoch
         let t1_mjd_tt = self.mjd_tt();
-        let nbody_result = propagate_nbody(equinoctial_element, t1_mjd_tt, jpl, config)?;
+        let nbody_result = equinoctial_element.propagate_nbody(t1_mjd_tt, jpl, config)?;
 
-        // 2. Observation time in TT
-        let obs_mjd = Epoch::from_mjd_in_time_scale(t1_mjd_tt, hifitime::TimeScale::TT);
+        let obs_epoch = Epoch::from_mjd_in_time_scale(t1_mjd_tt, hifitime::TimeScale::TT);
+        let obs_pos_equ = resolve_observer_geometry(self, cache, jpl, &obs_epoch);
 
-        // 3. Earth's barycentric position in ecliptic J2000
-        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
-        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position;
         let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * nbody_result.position;
         let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * nbody_result.velocity;
 
-        // 4. Observer heliocentric position in ecliptic J2000
-        let geo_obs_pos = cache
-            .get_observer_geocentric_position(self.index())
-            .map(|x| x.into_inner());
-        let xobs = geo_obs_pos + earth_pos_eclj2000;
-        let obs_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * xobs;
-
-        // 5. (α, δ) and ∂(α,δ)/∂pos (equatorial J2000)
         let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
             topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
 
-        // 6. Chain rule: same as two-body but using the STM-based Jacobian
-        let dpos_delem_eq = nbody_result.dpos_delem; // Matrix6x3, rows=elem, cols=ecl_cart
-
-        let mut d_ra_d_elem = Vector6::zeros();
-        let mut d_dec_d_elem = Vector6::zeros();
-        for j in 0..6 {
-            let dpos_ecl_j = Vector3::new(
-                dpos_delem_eq[(j, 0)],
-                dpos_delem_eq[(j, 1)],
-                dpos_delem_eq[(j, 2)],
-            );
-            let dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_ecl_j;
-            d_ra_d_elem[j] = d_ra_d_pos.dot(&dpos_equ_j);
-            d_dec_d_elem[j] = d_dec_d_pos.dot(&dpos_equ_j);
-        }
+        let (d_ra_d_elem, d_dec_d_elem) = element_partials_from_position_partials(
+            d_ra_d_pos,
+            d_dec_d_pos,
+            &nbody_result.dpos_delem,
+        );
 
         Ok(ObsAndElementPartials {
             ra,
@@ -603,41 +587,6 @@ impl ObservationEphemeris for Observation {
             d_dec_d_elem,
         })
     }
-}
-
-/// Apply stellar aberration correction to a relative position vector.
-///
-/// This function computes the apparent position of a target object by applying
-/// the first-order correction for stellar aberration due to the observer's velocity.
-/// It assumes the classical limit (v ≪ c), using a linear time-delay model.
-///
-/// Arguments
-/// ---------
-/// * `xrel`: relative position vector from observer to object \[AU\].
-/// * `vrel`: velocity of the observer relative to the barycenter \[AU/day\].
-///
-/// Returns
-/// --------
-/// * Corrected position vector (same units and directionality as `xrel`),
-///   shifted by the aberration effect.
-///
-/// Formula
-/// -------
-/// The corrected position is given by:
-/// ```text
-/// x_corr = xrel − (‖xrel‖ / c) · vrel
-/// ```
-/// where `c` is the speed of light in AU/day (`VLIGHT_AU`).
-///
-/// Remarks
-/// -------
-/// * This function does **not** normalize the output.
-/// * Suitable for use in astrometric modeling or when computing apparent direction
-///   of celestial objects as seen from a moving observer.
-pub fn correct_aberration(xrel: Vector3<f64>, vrel: Vector3<f64>) -> Vector3<f64> {
-    let norm_vector = xrel.norm();
-    let dt = norm_vector / VLIGHT_AU;
-    xrel - dt * vrel
 }
 
 #[cfg(test)]
@@ -1468,8 +1417,7 @@ mod test_observations_ephemeris {
             let t_obs = 59000.0;
             let elem = nominal_elements(t_obs);
 
-            let (cart_pos_ast, cart_vel_ast, _) =
-                elem.solve_two_body_problem(0., 0., false).unwrap();
+            let (cart_pos_ast, cart_vel_ast, _) = elem.propagate_twobody(0., 0., false).unwrap();
 
             // solve_two_body_problem returns ecliptic J2000 — convert to equatorial
             // before passing to topocentric_radec_and_partials (which expects equatorial).
@@ -1559,10 +1507,9 @@ mod test_observations_ephemeris {
 
             let t_obs = 59000.0;
             let elem = nominal_elements(t_obs);
-            let (cart_pos_ast, cart_vel_ast, _) =
-                elem.solve_two_body_problem(0., 0., false).unwrap();
+            let (cart_pos_ast, cart_vel_ast, _) = elem.propagate_twobody(0., 0., false).unwrap();
             let obs_pos_ecl = Vector3::zeros();
-            // solve_two_body_problem returns ecliptic J2000 — convert to equatorial
+            // propagate_twobody returns ecliptic J2000 — convert to equatorial
             let ast_pos_ecl = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_pos_ast;
             let ast_vel_ecl = ROT_ECLMJ2000_TO_EQUMJ2000 * cart_vel_ast;
 

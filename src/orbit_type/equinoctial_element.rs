@@ -40,7 +40,7 @@
 //! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_kepler_equation`]  
 //!   Solve the generalized Kepler equation in equinoctial form.
 //!
-//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_two_body_problem`]  
+//! - `EquinoctialElements::propagate_to_epoch` (via [`crate::propagator::PropagatorKind`])  
 //!   Propagate an orbit from `t0` to `t1` using the two-body approximation,
 //!   returning position, velocity, and optionally Jacobians.
 //!
@@ -81,7 +81,7 @@
 //! };
 //!
 //! // Propagate 10 days ahead using the two-body model
-//! let (pos, vel, _) = equ.solve_two_body_problem(59000.0, 59010.0, false).unwrap();
+//! let (pos, vel, _) = equ.propagate_twobody(59000.0, 59010.0, false).unwrap();
 //!
 //! // Convert to classical Keplerian elements
 //! let kep: KeplerianElements = equ.into();
@@ -94,7 +94,7 @@
 use core::f64;
 use std::{f64::consts::PI, fmt};
 
-use nalgebra::{Matrix3x6, Matrix6x3, Vector3};
+use nalgebra::{Matrix3x6, Matrix6, Matrix6x3, Vector3};
 use roots::{find_root_newton_raphson, SimpleConvergency};
 
 use crate::{
@@ -102,6 +102,14 @@ use crate::{
     kepler::principal_angle,
     orbit_type::keplerian_element::KeplerianElements,
     outfit_errors::OutfitError,
+    propagator::{
+        nbody::{
+            build_augmented_initial_state, build_initial_state_jacobian, build_perturber_snapshots,
+            integrate_augmented_state, split_propagated_jacobian, NBodyOde, NBodyResult,
+        },
+        NBodyConfig,
+    },
+    JPLEphem,
 };
 
 /// Type alias for the result of two-body propagation from equinoctial elements.
@@ -765,7 +773,7 @@ impl EquinoctialElements {
     /// * [`EquinoctialElements::compute_cartesian_position_and_velocity`] – projects equinoctial elements to 3D
     /// * [`EquinoctialElements::solve_kepler_equation`] – solves the generalized Kepler equation
     /// * [`principal_angle`] – normalizes an angle to [0, 2π)
-    pub fn solve_two_body_problem(
+    pub fn propagate_twobody(
         &self,
         t0: f64,
         t1: f64,
@@ -823,6 +831,107 @@ impl EquinoctialElements {
             t1,
             mean_longitude_t1,
         ))
+    }
+
+    /// Propagates `elements` from their reference epoch to `t1_mjd_tt` using
+    /// numerical N-body integration.
+    ///
+    /// Converts the equinoctial elements to a Cartesian initial state at t0, then
+    /// integrates the augmented state (position, velocity, and 6×6 STM) forward (or
+    /// backward) from t0 to t1 using the DOP853 integrator under the gravitational
+    /// influence of all bodies listed in `config.perturbing_bodies`.  On completion,
+    /// the propagated STM is combined with the initial element Jacobians to yield
+    /// `dpos_delem` and `dvel_delem` at t1.
+    ///
+    /// If `|t1 − t0| < 1 × 10⁻¹⁴` days the integration is skipped and the t0
+    /// Cartesian state and Jacobians are returned directly.
+    ///
+    /// # Arguments
+    ///
+    /// * `elements` – Equinoctial orbital elements of the small body, with
+    ///   `reference_epoch` (MJD-TT) acting as t0. Units: AU, radians.
+    /// * `t1_mjd_tt` – Target epoch expressed as Modified Julian Date in the
+    ///   Terrestrial Time (TT) scale. Units: days (MJD-TT).
+    /// * `jpl` – Opened JPL ephemeris file used to query the heliocentric positions
+    ///   of the perturbing bodies at t0.
+    /// * `config` – N-body configuration specifying the perturbing bodies and the
+    ///   DOP853 absolute/relative tolerances.
+    ///
+    /// # Returns
+    ///
+    /// An [`NBodyResult`] containing:
+    /// - `position`: heliocentric position at t1 (AU, ecliptic J2000),
+    /// - `velocity`: heliocentric velocity at t1 (AU/day, ecliptic J2000),
+    /// - `dpos_delem`: 6×3 Jacobian ∂pos(t1)/∂elem (rows = elements, cols = Cartesian),
+    /// - `dvel_delem`: 6×3 Jacobian ∂vel(t1)/∂elem (rows = elements, cols = Cartesian).
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`OutfitError::NBodyPropagationFailed`] if the DOP853 integrator
+    ///   fails or produces no output steps.
+    /// - Returns [`OutfitError::EphemerisBodyNotSupported`] if a perturbing body
+    ///   listed in `config` cannot be found in the JPL ephemeris or has no GM entry
+    ///   in the static table.
+    pub fn propagate_nbody(
+        &self,
+        t1_mjd_tt: f64,
+        jpl: &JPLEphem,
+        config: &NBodyConfig,
+    ) -> Result<NBodyResult, OutfitError> {
+        let t0_mjd_tt = self.reference_epoch;
+        let time_span_days = t1_mjd_tt - t0_mjd_tt;
+
+        // Initial cartesian state and element Jacobian J0 = ∂(x0,v0)/∂elem
+        let (initial_position, initial_velocity, initial_jacobians) =
+            self.propagate_twobody(0.0, 0.0, true)?;
+        let (dpos_delem_at_t0, dvel_delem_at_t0) =
+            initial_jacobians.expect("propagate_twobody(0,0,true) must return jacobians");
+
+        // If dt ≈ 0 skip integration
+        if time_span_days.abs() < 1e-14 {
+            return Ok(NBodyResult {
+                position: initial_position,
+                velocity: initial_velocity,
+                dpos_delem: dpos_delem_at_t0,
+                dvel_delem: dvel_delem_at_t0,
+            });
+        }
+
+        let augmented_initial_state =
+            build_augmented_initial_state(initial_position, initial_velocity);
+
+        let epoch_t0 = hifitime::Epoch::from_mjd_in_time_scale(t0_mjd_tt, hifitime::TimeScale::TT);
+        let perturbers = build_perturber_snapshots(config, jpl, &epoch_t0)?;
+
+        let ode = NBodyOde { perturbers };
+
+        let augmented_final_state =
+            integrate_augmented_state(&ode, augmented_initial_state, time_span_days, config)?;
+
+        let final_position = Vector3::new(
+            augmented_final_state[0],
+            augmented_final_state[1],
+            augmented_final_state[2],
+        );
+        let final_velocity = Vector3::new(
+            augmented_final_state[3],
+            augmented_final_state[4],
+            augmented_final_state[5],
+        );
+        let stm_at_t1 = Matrix6::<f64>::from_column_slice(&augmented_final_state[6..42]);
+
+        let initial_state_jacobian =
+            build_initial_state_jacobian(&dpos_delem_at_t0, &dvel_delem_at_t0);
+        let propagated_state_jacobian = stm_at_t1 * initial_state_jacobian;
+        let (dpos_delem_at_t1, dvel_delem_at_t1) =
+            split_propagated_jacobian(propagated_state_jacobian);
+
+        Ok(NBodyResult {
+            position: final_position,
+            velocity: final_velocity,
+            dpos_delem: dpos_delem_at_t1,
+            dvel_delem: dvel_delem_at_t1,
+        })
     }
 }
 
@@ -988,7 +1097,7 @@ mod test_equinoctial_element {
         };
 
         let (pos, vel, _) = equ
-            .solve_two_body_problem(0., 21.019733018845727, false)
+            .propagate_twobody(0., 21.019733018845727, false)
             .unwrap();
         assert_eq!(
             pos,

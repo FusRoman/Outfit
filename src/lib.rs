@@ -210,6 +210,9 @@ pub mod differential_orbit_correction;
 /// JPL ephemerides management (Horizon/NAIF kernels).
 pub mod jpl_ephem;
 
+/// Ephemeris interpolation and access.
+pub mod ephemeris;
+
 /// Keplerian solver for propagation.
 pub mod kepler;
 
@@ -266,6 +269,12 @@ pub use crate::constants::{
 
 // JPL ephemeris enum for runtime inspection (optional but convenient)
 pub use crate::jpl_ephem::JPLEphem;
+
+// Ephemeris façade
+pub use crate::ephemeris::{
+    AberrationOrder, ApparentPosition, ApparentPositionAndGeometryTable, ApparentPositionTable,
+    BodyGeometry, EphemerisConfig, EphemerisTable, GeometryTable,
+};
 
 // IOD entry points and result types
 pub use crate::initial_orbit_determination::obs_dataset_api::FitIOD;

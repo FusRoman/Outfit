@@ -57,10 +57,7 @@ use differential_equations::ode::ODE;
 use differential_equations::prelude::*;
 use nalgebra::{Matrix3, Matrix6, Matrix6x3, Vector3};
 
-use crate::{
-    jpl_ephem::JPLEphem, orbit_type::equinoctial_element::EquinoctialElements,
-    outfit_errors::OutfitError,
-};
+use crate::{jpl_ephem::JPLEphem, outfit_errors::OutfitError};
 
 use super::{planet_gm::gm_au3_day2, NBodyConfig};
 
@@ -77,7 +74,7 @@ use super::{planet_gm::gm_au3_day2, NBodyConfig};
 ///
 /// The snapshot is taken at t0 and held constant over the integration arc.
 /// This is accurate for short arcs (≲ 30 days) where planetary motion is slow.
-struct PerturberSnapshot {
+pub(crate) struct PerturberSnapshot {
     /// Heliocentric position of the perturber at t0, in the ecliptic J2000 frame.
     ///
     /// Units: AU.
@@ -94,14 +91,14 @@ struct PerturberSnapshot {
 /// Implements [`ODE<f64, [f64; 42]>`] so that it can be driven by the DOP853
 /// integrator.  The dynamics are frozen at t0: perturber positions are sampled
 /// once and held constant throughout the integration arc.
-struct NBodyOde {
+pub(crate) struct NBodyOde {
     /// Perturber snapshots evaluated at t0.
     ///
     /// Each entry holds the heliocentric position and GM of one perturbing body.
     /// These values are used on every call to [`ODE::diff`] to compute the total
     /// heliocentric acceleration and the gravity-gradient matrix required by the
     /// variational equations.
-    perturbers: Vec<PerturberSnapshot>,
+    pub(crate) perturbers: Vec<PerturberSnapshot>,
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +406,7 @@ pub struct NBodyResult {
 /// - indices 0–2: position components (AU),
 /// - indices 3–5: velocity components (AU/day),
 /// - indices 6–41: column-major entries of Φ₀ = I₆ (dimensionless).
-fn build_augmented_initial_state(
+pub(crate) fn build_augmented_initial_state(
     initial_position: Vector3<f64>,
     initial_velocity: Vector3<f64>,
 ) -> [f64; 42] {
@@ -453,7 +450,7 @@ fn build_augmented_initial_state(
 /// - Returns [`OutfitError::EphemerisBodyNotSupported`] if a perturbing body
 ///   has no GM entry in the static table or cannot be resolved by the JPL
 ///   ephemeris file.
-fn build_perturber_snapshots(
+pub(crate) fn build_perturber_snapshots(
     config: &NBodyConfig,
     jpl: &JPLEphem,
     epoch: &hifitime::Epoch,
@@ -505,7 +502,7 @@ fn build_perturber_snapshots(
 ///
 /// - Returns [`OutfitError::NBodyPropagationFailed`] if the DOP853 solver
 ///   returns an error or if the solution contains no steps.
-fn integrate_augmented_state(
+pub(crate) fn integrate_augmented_state(
     ode: &NBodyOde,
     augmented_initial_state: [f64; 42],
     time_span_days: f64,
@@ -552,7 +549,7 @@ fn integrate_augmented_state(
 ///
 /// This layout is compatible with the STM Φ so that the product `Φ(t1) · J0`
 /// propagates the element Jacobian to t1.
-fn build_initial_state_jacobian(
+pub(crate) fn build_initial_state_jacobian(
     dpos_delem_at_t0: &Matrix6x3<f64>,
     dvel_delem_at_t0: &Matrix6x3<f64>,
 ) -> Matrix6<f64> {
@@ -590,7 +587,7 @@ fn build_initial_state_jacobian(
 /// 6×3 (rows = equinoctial elements, cols = ecliptic Cartesian components):
 /// - `dpos_delem_at_t1`: ∂pos(t1)/∂elem. Units: AU / (element unit).
 /// - `dvel_delem_at_t1`: ∂vel(t1)/∂elem. Units: (AU/day) / (element unit).
-fn split_propagated_jacobian(
+pub(crate) fn split_propagated_jacobian(
     propagated_state_jacobian: Matrix6<f64>,
 ) -> (Matrix6x3<f64>, Matrix6x3<f64>) {
     let mut dpos_delem_at_t1 = Matrix6x3::<f64>::zeros();
@@ -604,102 +601,4 @@ fn split_propagated_jacobian(
         }
     }
     (dpos_delem_at_t1, dvel_delem_at_t1)
-}
-
-/// Propagates `elements` from their reference epoch to `t1_mjd_tt` using
-/// numerical N-body integration.
-///
-/// Converts the equinoctial elements to a Cartesian initial state at t0, then
-/// integrates the augmented state (position, velocity, and 6×6 STM) forward (or
-/// backward) from t0 to t1 using the DOP853 integrator under the gravitational
-/// influence of all bodies listed in `config.perturbing_bodies`.  On completion,
-/// the propagated STM is combined with the initial element Jacobians to yield
-/// `dpos_delem` and `dvel_delem` at t1.
-///
-/// If `|t1 − t0| < 1 × 10⁻¹⁴` days the integration is skipped and the t0
-/// Cartesian state and Jacobians are returned directly.
-///
-/// # Arguments
-///
-/// * `elements` – Equinoctial orbital elements of the small body, with
-///   `reference_epoch` (MJD-TT) acting as t0. Units: AU, radians.
-/// * `t1_mjd_tt` – Target epoch expressed as Modified Julian Date in the
-///   Terrestrial Time (TT) scale. Units: days (MJD-TT).
-/// * `jpl` – Opened JPL ephemeris file used to query the heliocentric positions
-///   of the perturbing bodies at t0.
-/// * `config` – N-body configuration specifying the perturbing bodies and the
-///   DOP853 absolute/relative tolerances.
-///
-/// # Returns
-///
-/// An [`NBodyResult`] containing:
-/// - `position`: heliocentric position at t1 (AU, ecliptic J2000),
-/// - `velocity`: heliocentric velocity at t1 (AU/day, ecliptic J2000),
-/// - `dpos_delem`: 6×3 Jacobian ∂pos(t1)/∂elem (rows = elements, cols = Cartesian),
-/// - `dvel_delem`: 6×3 Jacobian ∂vel(t1)/∂elem (rows = elements, cols = Cartesian).
-///
-/// # Errors
-///
-/// - Returns [`OutfitError::NBodyPropagationFailed`] if the DOP853 integrator
-///   fails or produces no output steps.
-/// - Returns [`OutfitError::EphemerisBodyNotSupported`] if a perturbing body
-///   listed in `config` cannot be found in the JPL ephemeris or has no GM entry
-///   in the static table.
-pub fn propagate_nbody(
-    elements: &EquinoctialElements,
-    t1_mjd_tt: f64,
-    jpl: &JPLEphem,
-    config: &NBodyConfig,
-) -> Result<NBodyResult, OutfitError> {
-    let t0_mjd_tt = elements.reference_epoch;
-    let time_span_days = t1_mjd_tt - t0_mjd_tt;
-
-    // Initial cartesian state and element Jacobian J0 = ∂(x0,v0)/∂elem
-    let (initial_position, initial_velocity, initial_jacobians) =
-        elements.solve_two_body_problem(0.0, 0.0, true)?;
-    let (dpos_delem_at_t0, dvel_delem_at_t0) =
-        initial_jacobians.expect("solve_two_body_problem(0,0,true) must return jacobians");
-
-    // If dt ≈ 0 skip integration
-    if time_span_days.abs() < 1e-14 {
-        return Ok(NBodyResult {
-            position: initial_position,
-            velocity: initial_velocity,
-            dpos_delem: dpos_delem_at_t0,
-            dvel_delem: dvel_delem_at_t0,
-        });
-    }
-
-    let augmented_initial_state = build_augmented_initial_state(initial_position, initial_velocity);
-
-    let epoch_t0 = hifitime::Epoch::from_mjd_in_time_scale(t0_mjd_tt, hifitime::TimeScale::TT);
-    let perturbers = build_perturber_snapshots(config, jpl, &epoch_t0)?;
-
-    let ode = NBodyOde { perturbers };
-
-    let augmented_final_state =
-        integrate_augmented_state(&ode, augmented_initial_state, time_span_days, config)?;
-
-    let final_position = Vector3::new(
-        augmented_final_state[0],
-        augmented_final_state[1],
-        augmented_final_state[2],
-    );
-    let final_velocity = Vector3::new(
-        augmented_final_state[3],
-        augmented_final_state[4],
-        augmented_final_state[5],
-    );
-    let stm_at_t1 = Matrix6::<f64>::from_column_slice(&augmented_final_state[6..42]);
-
-    let initial_state_jacobian = build_initial_state_jacobian(&dpos_delem_at_t0, &dvel_delem_at_t0);
-    let propagated_state_jacobian = stm_at_t1 * initial_state_jacobian;
-    let (dpos_delem_at_t1, dvel_delem_at_t1) = split_propagated_jacobian(propagated_state_jacobian);
-
-    Ok(NBodyResult {
-        position: final_position,
-        velocity: final_velocity,
-        dpos_delem: dpos_delem_at_t1,
-        dvel_delem: dvel_delem_at_t1,
-    })
 }

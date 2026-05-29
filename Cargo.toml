@@ -103,6 +103,10 @@ strip = true
 inherits = "release"
 opt-level = 3
 debug = false
-lto = "thin"        
-codegen-units = 16  
+lto = "thin"
+codegen-units = 16
 strip = false
+
+[package.metadata.docs.rs]
+features = ["parallel"]
+rustdoc-args = ["--cfg", "docsrs"]
