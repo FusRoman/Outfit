@@ -1,18 +1,33 @@
 //! Ephemeris request builder and output-kind trait.
 //!
-//! The central entry point for ephemeris generation is [`EphemerisRequest`],
-//! a typed builder that collects any number of `(observer, mode)` pairs and
-//! carries the desired output kind as a type parameter.
+//! This module contains everything needed to describe *what* to compute and
+//! *when* to compute it.  The typical workflow is:
+//!
+//! 1. **Build a request** — create an [`EphemerisRequest`] with the desired
+//!    output kind as a type parameter, then chain [`EphemerisRequest::add`]
+//!    calls to attach `(observer, mode)` pairs.
+//! 2. **Call compute** — pass the request to
+//!    [`OrbitalElements::compute`](crate::OrbitalElements::compute) together
+//!    with a [`JPLEphem`] and a UT1 provider.
+//! 3. **Consume the result** — iterate over the returned
+//!    [`EphemerisResult`](super::result::EphemerisResult) using
+//!    [`successes`](super::result::EphemerisResult::successes),
+//!    [`errors`](super::result::EphemerisResult::errors), or
+//!    [`by_observer`](super::result::EphemerisResult::by_observer).
+//!
+//! Errors that occur at individual epochs are recorded inside the result
+//! rather than short-circuiting the whole computation: every requested
+//! `(epoch, observer)` pair always produces an entry, either `Ok` or `Err`.
 //!
 //! # Output kinds
 //!
 //! Three zero-sized marker types select what is computed at each epoch:
 //!
-//! | Marker | Output type per epoch |
-//! |---|---|
-//! | [`Position`]  | [`ApparentPosition`] |
-//! | [`Geometry`]  | [`BodyGeometry`] |
-//! | [`Combined`]  | `(`[`ApparentPosition`]`, `[`BodyGeometry`]`)` |
+//! | Marker | Physical quantities | Output type per epoch |
+//! |---|---|---|
+//! | [`Position`]  | Apparent sky coordinates (RA, Dec), geocentric and heliocentric distances | [`ApparentPosition`] |
+//! | [`Geometry`]  | Phase angle, solar elongation, radial velocity, apparent angular rates | [`BodyGeometry`] |
+//! | [`Combined`]  | All of the above from a single orbit propagation | `(`[`ApparentPosition`]`, `[`BodyGeometry`]`)` |
 //!
 //! # Generation modes
 //!
@@ -67,8 +82,10 @@ mod sealed {
 
 /// Trait implemented by [`Position`], [`Geometry`], and [`Combined`].
 ///
-/// It is sealed so that no external crate can implement it.  Use one of the
-/// three provided marker types to select what an [`EphemerisRequest`] computes.
+/// This uses the *sealed trait* pattern: because `Sealed` is private, no
+/// external crate can implement `EphemerisOutputKind` for its own types.
+/// Use one of the three provided marker types to select what an
+/// [`EphemerisRequest`] computes.
 pub trait EphemerisOutputKind: sealed::Sealed {
     /// The value produced for each epoch.
     type Output;
@@ -108,7 +125,9 @@ pub struct Geometry;
 /// Output-kind marker: compute both apparent position and geometric quantities
 /// from a **single orbit propagation** per epoch.
 ///
-/// More efficient than computing [`Position`] and [`Geometry`] separately.
+/// More efficient than computing [`Position`] and [`Geometry`] separately:
+/// the orbit is propagated once and the results are split into the two output
+/// types.
 ///
 /// Produces `(`[`ApparentPosition`]`, `[`BodyGeometry`]`)` per epoch.
 pub struct Combined;
@@ -178,7 +197,11 @@ impl EphemerisOutputKind for Combined {
 /// Describes *when* to compute ephemerides for one observer.
 ///
 /// Different observers in the same [`EphemerisRequest`] may use different
-/// modes.
+/// modes freely — for instance, a topocentric site can use [`Single`] while a
+/// geocentric site uses [`Range`].
+///
+/// [`Single`]: EphemerisMode::Single
+/// [`Range`]: EphemerisMode::Range
 #[derive(Debug, Clone)]
 pub enum EphemerisMode {
     /// Compute at exactly one epoch.
@@ -187,18 +210,25 @@ pub enum EphemerisMode {
     /// Compute over a uniformly-spaced time range.
     ///
     /// Generates epochs `start, start + step, start + 2·step, …` for as long
-    /// as the current epoch is ≤ `end`.  If `step ≤ 0` or `start > end` the
-    /// observer produces no entries.
+    /// as the current epoch is ≤ `end`.
+    ///
+    /// > **Note:** a non-positive `step` or `start > end` yields **zero
+    /// > epochs** for this observer; no entries are added to the result.
     Range {
         /// First epoch (inclusive).
         start: Epoch,
         /// Last epoch (inclusive if reachable by an exact multiple of `step`).
         end: Epoch,
         /// Time step between consecutive epochs.
+        ///
+        /// Must be strictly positive; a zero or negative value produces no
+        /// epochs.
         step: Duration,
     },
 
-    /// Compute at an arbitrary list of epochs.
+    /// Compute at an arbitrary, caller-provided list of epochs.
+    ///
+    /// Epochs are used in the order given; duplicates are allowed.
     At(Vec<Epoch>),
 }
 
@@ -247,13 +277,17 @@ pub struct ObserverRequest {
 ///
 /// Collects any number of `(`[`Observer`]`, `[`EphemerisMode`]`)` pairs and
 /// carries the desired output kind `O` as a compile-time type parameter.
+/// `O` is encoded via [`PhantomData`] — it is a zero-cost, zero-size
+/// compile-time marker with no runtime overhead.
 ///
 /// Build the request with [`new`](Self::new) and chain [`add`](Self::add)
 /// calls, then pass it to [`crate::OrbitalElements::compute`].
 ///
 /// # Type parameter
 ///
-/// `O` must be one of [`Position`], [`Geometry`], or [`Combined`].
+/// `O` must be one of [`Position`], [`Geometry`], or [`Combined`].  The
+/// choice is enforced at compile time: it is impossible to mix output kinds
+/// within one request.
 ///
 /// # Example
 ///
@@ -274,6 +308,8 @@ pub struct EphemerisRequest<O: EphemerisOutputKind> {
 
 impl<O: EphemerisOutputKind> EphemerisRequest<O> {
     /// Create a new empty request with the given [`EphemerisConfig`].
+    ///
+    /// The request contains no observers until [`add`](Self::add) is called.
     pub fn new(config: EphemerisConfig) -> Self {
         Self {
             observers: Vec::new(),
@@ -284,7 +320,8 @@ impl<O: EphemerisOutputKind> EphemerisRequest<O> {
 
     /// Add an `(observer, mode)` pair to the request.
     ///
-    /// Returns `self` to allow builder-style chaining.
+    /// Returns `self` to allow builder-style chaining.  The same observer may
+    /// be added multiple times with different modes if needed.
     pub fn add(mut self, observer: Observer, mode: EphemerisMode) -> Self {
         self.observers.push(ObserverRequest { observer, mode });
         self
