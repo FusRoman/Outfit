@@ -41,7 +41,7 @@ use crate::{
         },
         obs_fit_data::ObsFitData,
     },
-    observation_ephemeris::ObservationEphemeris,
+    ephemeris::observation_ephemeris::ObservationEphemeris,
     propagator::PropagatorKind,
     EquinoctialElements, JPLEphem, OutfitError,
 };

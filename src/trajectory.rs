@@ -28,8 +28,8 @@ use photom::{observation_dataset::observation::Observation, Radians};
 use crate::{
     cache::OutfitCache,
     constants::FitOrbitResult,
+    ephemeris::observation_ephemeris::ObservationEphemeris,
     initial_orbit_determination::{gauss::GaussObs, triplet_generation::generate_triplets},
-    observation_ephemeris::ObservationEphemeris,
     EquinoctialElements, GaussResult, IODParams, JPLEphem, OutfitError,
 };
 

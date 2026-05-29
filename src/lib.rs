@@ -187,7 +187,7 @@
 //! - [`outfit_errors`] — Unified error enum for the whole crate.
 //! - [`time`] — Time scale conversions and sidereal time.
 //! - [`cache`] — Precomputed observer position cache.
-//! - [`observation_ephemeris`] — Apparent position computation and ephemeris residuals.
+//! - [`ephemeris`] — Apparent position computation and ephemeris residuals.
 //! - [`observer_extension`] — Geocentric and heliocentric observer position routines.
 
 // === Modules (internals). Keep public modules as they are; the facade is built via `pub use` below.
@@ -233,9 +233,6 @@ pub mod time;
 
 /// Precomputed observer position cache used throughout the fitting pipeline.
 pub mod cache;
-
-/// Apparent position computation and astrometric residuals for individual observations.
-pub mod observation_ephemeris;
 
 /// Ground-observer geometry: body-fixed and heliocentric position routines.
 pub mod observer_extension;

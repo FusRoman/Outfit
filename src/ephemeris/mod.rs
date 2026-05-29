@@ -80,6 +80,7 @@
 pub(crate) mod aberration;
 pub(crate) mod apparent_position;
 pub(crate) mod geometry;
+pub(crate) mod observation_ephemeris;
 mod table;
 
 pub use aberration::AberrationOrder;

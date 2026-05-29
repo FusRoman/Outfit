@@ -42,8 +42,9 @@ use photom::{
 };
 
 use crate::{
-    cache::observer_fixed_cache::ObserverFixedCache, observation_ephemeris::check_elliptical_orbit,
-    observer_extension::ResolvedObserver, EquinoctialElements, JPLEphem, OutfitError,
+    cache::observer_fixed_cache::ObserverFixedCache,
+    ephemeris::observation_ephemeris::check_elliptical_orbit, observer_extension::ResolvedObserver,
+    EquinoctialElements, JPLEphem, OutfitError,
 };
 
 use super::{AberrationOrder, EphemerisConfig};

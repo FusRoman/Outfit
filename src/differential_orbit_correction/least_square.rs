@@ -68,7 +68,7 @@ pub struct OrbitalUncertainty {
 /// Per-observation input for assembling the normal equations.
 ///
 /// Groups the partial derivatives (from
-/// [`crate::observation_ephemeris::ObsAndElementPartials`]), the astrometric
+/// `ObsAndElementPartials`), the astrometric
 /// residuals, and the statistical weights for a single optical observation.
 #[derive(Debug, Clone)]
 pub struct ObservationEquation {
@@ -108,7 +108,7 @@ impl ObservationEquation {
     /// # Arguments
     ///
     /// - `d_ra_d_elem` — partial derivatives \\( \partial\alpha/\partial\text{elem} \\)
-    ///   from [`crate::observation_ephemeris::ObsAndElementPartials`].
+    ///   from `ObsAndElementPartials`.
     /// - `d_dec_d_elem` — partial derivatives \\( \partial\delta/\partial\text{elem} \\).
     /// - `residual_ra` — angular difference \\( \alpha_{\text{obs}} - \alpha_{\text{calc}} \\);
     ///   compute with [`angular_diff`].

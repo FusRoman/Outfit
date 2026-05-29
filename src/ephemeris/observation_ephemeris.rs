@@ -33,36 +33,6 @@ use crate::{
     EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
 };
 
-/// Apparent equatorial coordinates of a solar system body together with their
-/// partial derivatives with respect to the body's heliocentric position.
-///
-/// This struct is the return type of
-/// [`ObservationEphemeris::compute_apparent_pos_derivative`].
-///
-/// ## Coordinate conventions
-///
-/// - `ra` and `dec` are in **radians**, equatorial mean J2000.
-/// - `d_ra_d_pos` and `d_dec_d_pos` are in **rad/AU**, expressed in the
-///   **ecliptic mean J2000** frame.  This matches the frame in which
-///   `PropagatorKind::propagate_to_epoch` returns its Jacobians,
-///   so the chain rule can be applied directly:
-///
-/// ```text
-/// ∂α/∂elemᵢ = d_ra_d_pos  · dpos/delemᵢ   (dot product, 3 components)
-/// ∂δ/∂elemᵢ = d_dec_d_pos · dpos/delemᵢ
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct ApparentPositionWithPartials {
-    /// Predicted right ascension \[rad\], in [0, 2π).
-    pub ra: f64,
-    /// Predicted declination \[rad\], in (−π/2, π/2).
-    pub dec: f64,
-    /// ∂α/∂(asteroid heliocentric position) \[rad/AU\], ecliptic mean J2000.
-    pub d_ra_d_pos: Vector3<f64>,
-    /// ∂δ/∂(asteroid heliocentric position) \[rad/AU\], ecliptic mean J2000.
-    pub d_dec_d_pos: Vector3<f64>,
-}
-
 /// Apparent equatorial coordinates together with their partial derivatives
 /// with respect to the six equinoctial orbital elements.
 ///
@@ -183,54 +153,6 @@ pub trait ObservationEphemeris {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
     ) -> Result<f64, OutfitError>;
-
-    /// Compute the apparent equatorial coordinates (RA, DEC) of a solar system body
-    /// together with the partial derivatives of (RA, DEC) with respect to the body's
-    /// heliocentric Cartesian position (ecliptic mean J2000).
-    ///
-    /// Overview
-    /// -----------------
-    /// This method performs the same five steps as [`compute_apparent_position`](ObservationEphemeris::compute_apparent_position)
-    /// and additionally returns the geometric Jacobians needed to assemble the design
-    /// matrix G for the differential-correction least-squares loop.
-    ///
-    /// ## Computation steps
-    ///
-    /// 1. **Orbit propagation** — same as `compute_apparent_position`.
-    /// 2. **Topocentric vector** — `d_ecl = ast_pos − obs_pos` (ecliptic J2000),
-    ///    corrected for first-order aberration.
-    /// 3. **Frame rotation** — `d_eq = R_ecl→eq · d_ecl` (equatorial J2000).
-    /// 4. **Sky coordinates** — `α = atan2(d_eq.y, d_eq.x)`, `δ = asin(d_eq.z / ‖d_eq‖)`.
-    /// 5. **Geometric Jacobians in equatorial frame**:
-    ///    ```text
-    ///    ∂α/∂pos_eq = (−d_eq.y / ρ_xy², d_eq.x / ρ_xy², 0)
-    ///    ∂δ/∂pos_eq = (−d_eq.z·d_eq.x / (ρ_xy·ρ²),
-    ///                  −d_eq.z·d_eq.y / (ρ_xy·ρ²),
-    ///                   ρ_xy / ρ²)
-    ///    ```
-    ///    where `ρ_xy = √(d_eq.x² + d_eq.y²)` and `ρ = ‖d_eq‖`.
-    /// 6. **Back-rotation to ecliptic** — multiply by `R_eq→ecl` so the Jacobians
-    ///    are compatible with the state-transition matrix from `solve_two_body_problem`.
-    ///
-    /// ## Return
-    ///
-    /// An [`ApparentPositionWithPartials`] containing `(α, δ, ∂α/∂pos_ecl, ∂δ/∂pos_ecl)`.
-    ///
-    /// ## Errors
-    ///
-    /// Same as [`compute_apparent_position`](ObservationEphemeris::compute_apparent_position).
-    ///
-    /// ## Note on the polar singularity
-    ///
-    /// When the target is at or very near the celestial pole (`ρ_xy → 0`), the
-    /// RA partial diverges.  This edge case is not handled — callers should avoid
-    /// observations within a few arcseconds of the pole.
-    fn compute_apparent_pos_derivative(
-        &self,
-        cache: &OutfitCache,
-        jpl: &JPLEphem,
-        equinoctial_element: &EquinoctialElements,
-    ) -> Result<ApparentPositionWithPartials, OutfitError>;
 
     /// Compute apparent (RA, DEC) **and** their partial derivatives with
     /// respect to the six equinoctial orbital elements, using the two-body
@@ -461,31 +383,6 @@ impl ObservationEphemeris for Observation {
         let (ra, dec, _, _) = topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
 
         Ok((ra, dec))
-    }
-
-    fn compute_apparent_pos_derivative(
-        &self,
-        cache: &OutfitCache,
-        jpl: &JPLEphem,
-        equinoctial_element: &EquinoctialElements,
-    ) -> Result<ApparentPositionWithPartials, OutfitError> {
-        check_elliptical_orbit(equinoctial_element)?;
-
-        let TopocentricGeometryInputs {
-            ast_pos_equ,
-            ast_vel_equ,
-            obs_pos_equ,
-        } = resolve_2body_geometry(self, cache, jpl, equinoctial_element)?;
-
-        let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
-            topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
-
-        Ok(ApparentPositionWithPartials {
-            ra,
-            dec,
-            d_ra_d_pos,
-            d_dec_d_pos,
-        })
     }
 
     fn ephemeris_error(
@@ -1336,43 +1233,9 @@ mod test_observations_ephemeris {
     }
 
     mod tests_compute_apparent_pos_derivative {
-        use super::*;
-        use crate::test_fixture::{JPL_EPHEM_HORIZON, UT1_PROVIDER};
         use approx::assert_relative_eq;
-        use photom::{
-            coordinates::equatorial::EquCoord,
-            observation_dataset::{observation::ObservationInput, ObsDataset},
-            observer::error_model::{ModelCorrection, ObsErrorModel},
-            photometry::{Filter, Photometry},
-            MJDTT,
-        };
 
-        fn make_obs_and_cache(t_obs: MJDTT) -> (ObsDataset, OutfitCache) {
-            let input = ObservationInput::new(
-                0,
-                EquCoord {
-                    ra: 0.0,
-                    ra_error: 1e-6,
-                    dec: 0.0,
-                    dec_error: 1e-6,
-                },
-                Photometry {
-                    magnitude: 0.0,
-                    error: 0.0,
-                    filter: Filter::Int(0),
-                },
-                t_obs,
-                Some(photom::observer::dataset::ObserverId::MpcCode(*b"F51")),
-            );
-            let ds = ObsDataset::empty()
-                .push_observation(vec![input])
-                .unwrap()
-                .0
-                .with_error_model(ObsErrorModel::FCCT14)
-                .apply_model_errors();
-            let cache = OutfitCache::build(&ds, &JPL_EPHEM_HORIZON, &UT1_PROVIDER, false).unwrap();
-            (ds, cache)
-        }
+        use super::*;
 
         fn nominal_elements(epoch: f64) -> EquinoctialElements {
             EquinoctialElements {
@@ -1384,26 +1247,6 @@ mod test_observations_ephemeris {
                 tan_half_incl_cos_node: 0.08,
                 mean_longitude: 1.5,
             }
-        }
-
-        /// (α, δ) from compute_apparent_pos_derivative must match
-        /// compute_apparent_position exactly.
-        #[test]
-        fn test_ra_dec_consistent_with_apparent_position() {
-            let t_obs = 59000.0;
-            let (ds, cache) = make_obs_and_cache(t_obs);
-            let elem = nominal_elements(t_obs);
-            let obs = ds.get_observation(0).unwrap();
-
-            let (ra, dec) = obs
-                .compute_apparent_position(&cache, &JPL_EPHEM_HORIZON, &elem)
-                .unwrap();
-            let result = obs
-                .compute_apparent_pos_derivative(&cache, &JPL_EPHEM_HORIZON, &elem)
-                .unwrap();
-
-            assert_relative_eq!(result.ra, ra, epsilon = 1e-14);
-            assert_relative_eq!(result.dec, dec, epsilon = 1e-14);
         }
 
         /// Validate ∂α/∂pos and ∂δ/∂pos by finite differences on ast_pos_ecl.
@@ -1460,26 +1303,6 @@ mod test_observations_ephemeris {
                     max_relative = 1e-5
                 );
             }
-        }
-
-        /// Hyperbolic orbit must return an error (same guard as compute_apparent_position).
-        #[test]
-        fn test_hyperbolic_orbit_returns_error() {
-            let t_obs = 59000.0;
-            let (ds, cache) = make_obs_and_cache(t_obs);
-            let hyperbolic = EquinoctialElements {
-                reference_epoch: t_obs,
-                semi_major_axis: 1.0,
-                eccentricity_sin_lon: 0.8,
-                eccentricity_cos_lon: 0.8, // e ≈ 1.13 > 1
-                tan_half_incl_sin_node: 0.0,
-                tan_half_incl_cos_node: 0.0,
-                mean_longitude: 0.0,
-            };
-            let obs = ds.get_observation(0).unwrap();
-            assert!(obs
-                .compute_apparent_pos_derivative(&cache, &JPL_EPHEM_HORIZON, &hyperbolic)
-                .is_err());
         }
 
         /// Non-regression oracle test for `topocentric_radec_and_partials`.
