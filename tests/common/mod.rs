@@ -1,6 +1,7 @@
 use approx::abs_diff_eq;
 use outfit::orbit_type::OrbitalElements;
 
+#[allow(dead_code)]
 pub fn approx_equal(current: &OrbitalElements, other: &OrbitalElements, tol: f64) -> bool {
     match (current, other) {
         (OrbitalElements::Keplerian(ke1), OrbitalElements::Keplerian(ke2)) => {
