@@ -49,19 +49,6 @@ fn build_test_fixtures() -> (
     // NOTE: rms_divergence_ratio is raised above the default (1.5) to allow
     // the 2-body differential corrector to handle objects whose osculating
     // 2-body elements differ noticeably from the N-body solution (e.g. 8467).
-    //
-    // Root cause: Outfit uses pure 2-body (Keplerian) propagation during
-    // differential correction.  For well-observed main-belt asteroids the
-    // best-fit 2-body elements differ from the best-fit N-body elements. When
-    // the IOD starting point happens to be close to the N-body solution, the
-    // first Newton step moves the orbit toward the 2-body minimum — which is
-    // further from the data in N-body residuals — causing the RMS to jump by
-    // more than the default 1.5× threshold before the iteration has a chance
-    // to settle.  Setting the ratio to 10 lets the iteration continue through
-    // that transient increase.
-    //
-    // Long-term fix: implement N-body propagation + variational equations in
-    // the differential corrector (tracked separately).
     let diff_cor_config = DifferentialCorrectionConfig {
         rms_divergence_ratio: 10.0,
         ..DifferentialCorrectionConfig::default()
