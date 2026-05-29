@@ -37,19 +37,10 @@
 //! [`OrbitalElements::apparent_position`] or
 //! [`OrbitalElements::body_geometry`] respectively.
 //!
-//! # Bulk API
+//! # API
 //!
-//! Four methods on [`OrbitalElements`] expose this module at the public level:
-//!
-//! | Method | Time input | Returns |
-//! |---|---|---|
-//! | [`body_geometry_range`](OrbitalElements::body_geometry_range) | uniform range | [`GeometryTable`] |
-//! | [`body_geometry_at`](OrbitalElements::body_geometry_at) | arbitrary epochs | [`GeometryTable`] |
-//! | [`apparent_position_and_geometry_range`](OrbitalElements::apparent_position_and_geometry_range) | uniform range | [`ApparentPositionAndGeometryTable`] |
-//! | [`apparent_position_and_geometry_at`](OrbitalElements::apparent_position_and_geometry_at) | arbitrary epochs | [`ApparentPositionAndGeometryTable`] |
-//!
-//! Errors are collected per epoch — a failure at one instant does not abort
-//! computation for the remaining epochs.
+//! Use [`crate::OrbitalElements::compute`] with [`crate::Geometry`] or
+//! [`crate::Combined`] to obtain [`BodyGeometry`] values.
 
 use nalgebra::Vector3;
 
@@ -63,8 +54,8 @@ use super::{apparent_position::PropagatedState, AberrationOrder};
 
 /// Geometric quantities for a solar system body at a given epoch.
 ///
-/// Returned by [`crate::OrbitalElements::body_geometry`] and as the second element of
-/// the tuple from [`crate::OrbitalElements::apparent_position_and_geometry`].
+/// Returned as the payload of [`crate::EphemerisResult`] when using
+/// [`crate::Geometry`] or [`crate::Combined`] as the output marker.
 ///
 /// All angles are in **radians**, velocities in **AU/day**.
 ///
@@ -80,63 +71,38 @@ use super::{apparent_position::PropagatedState, AberrationOrder};
 ///
 /// # Usage
 ///
-/// The example below uses [`crate::OrbitalElements::body_geometry_at`] to compute
-/// geometry at a set of discrete epochs and then reads all five fields:
-///
 /// ```rust,ignore
+/// use outfit::{Combined, EphemerisConfig, EphemerisMode, EphemerisRequest};
 /// use hifitime::Epoch;
 ///
-/// // `elements`, `observer`, `jpl`, `ut1`, `config` are assumed to be
-/// // already constructed.
 /// let times = vec![
 ///     Epoch::from_mjd_tt(60310.0),
 ///     Epoch::from_mjd_tt(60320.0),
 ///     Epoch::from_mjd_tt(60330.0),
 /// ];
 ///
-/// let table = elements.body_geometry_at(times, &observer, &jpl, &ut1, &config);
-///
-/// for (epoch, result) in table {
-///     if let Ok(geo) = result {
-///         println!(
-///             "{epoch}: \
-///              phase = {:.4} rad, \
-///              elong = {:.4} rad, \
-///              rv = {:.6} AU/day, \
-///              dRA/dt = {:.6} rad/day, \
-///              dDec/dt = {:.6} rad/day",
-///             geo.phase_angle,
-///             geo.solar_elongation,
-///             geo.radial_velocity,
-///             geo.d_ra_dt,
-///             geo.d_dec_dt,
-///         );
-///     }
-/// }
-/// ```
-///
-/// When both sky coordinates and geometry are needed for the same epochs,
-/// prefer [`crate::OrbitalElements::apparent_position_and_geometry_at`] to avoid
-/// propagating the orbit twice:
-///
-/// ```rust,ignore
-/// let table = elements.apparent_position_and_geometry_at(
-///     times, &observer, &jpl, &ut1, &config,
+/// let result = elements.compute(
+///     &EphemerisRequest::<Combined>::new(EphemerisConfig::default())
+///         .add(observer, EphemerisMode::At(times)),
+///     &jpl,
+///     &ut1,
 /// );
-/// for (epoch, result) in table {
-///     if let Ok((pos, geo)) = result {
-///         println!("{epoch}: RA = {:.4}, phase = {:.4}", pos.coord.ra, geo.phase_angle);
-///     }
+///
+/// for entry in result.successes() {
+///     let (pos, geo) = entry.result.as_ref().unwrap();
+///     println!(
+///         "{}: phase={:.4} elong={:.4} rv={:.6} dRA={:.6} dDec={:.6}",
+///         entry.epoch,
+///         geo.phase_angle, geo.solar_elongation,
+///         geo.radial_velocity, geo.d_ra_dt, geo.d_dec_dt,
+///     );
 /// }
 /// ```
 ///
 /// # See also
 ///
-/// - [`crate::OrbitalElements::body_geometry`] — single-epoch entry point.
-/// - [`crate::OrbitalElements::apparent_position_and_geometry`] — combined single-epoch
-///   entry point (one propagation, two outputs).
-/// - [`crate::ephemeris::GeometryTable`] — bulk return type for geometry-only queries.
-/// - [`crate::ephemeris::ApparentPositionAndGeometryTable`] — bulk return type for combined queries.
+/// - [`crate::Geometry`] — output marker for geometry-only requests.
+/// - [`crate::Combined`] — output marker to get both position and geometry in one pass.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BodyGeometry {
     /// Phase angle — Sun–body–observer \[rad\], $\phi \in [0, \pi]$.
