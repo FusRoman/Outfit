@@ -31,7 +31,7 @@ hifitime = { version = "4.2.0", default-features = false, features = [
     "ut1",
     "std",
 ] }
-nalgebra = { version = "0.33.2" }
+nalgebra = { version = "0.34.2" }
 ordered-float = { version = "5.0.0", default-features = false }
 smallvec = { version = "1.14.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
@@ -58,6 +58,7 @@ tokio = { version = "1.44.1", default-features = false, features = [
 ] }
 tokio-stream = { version = "0.1.17", default-features = false }
 rayon = { version = "1.12.0", default-features = false, optional = true }
+differential-equations = { version = "0.6.1", default-features = false }
 
 [dev-dependencies]
 approx = { version = "0.5.1", default-features = false }

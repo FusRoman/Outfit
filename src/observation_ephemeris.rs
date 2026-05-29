@@ -28,6 +28,7 @@ use photom::{constants::DPI, observation_dataset::observation::Observation};
 use crate::{
     cache::OutfitCache,
     constants::{ROT_ECLMJ2000_TO_EQUMJ2000, ROT_EQUMJ2000_TO_ECLMJ2000},
+    propagator::{nbody::propagate_nbody, NBodyConfig},
     EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
 };
 
@@ -261,6 +262,19 @@ pub trait ObservationEphemeris {
         cache: &OutfitCache,
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
+    ) -> Result<ObsAndElementPartials, OutfitError>;
+
+    /// Same as [`Self::compute_obs_and_partials_2body`] but uses a numerical N-body
+    /// propagator (DOP853) instead of the analytic Keplerian solution.
+    ///
+    /// The STM-based element Jacobian is computed via the variational equations
+    /// integrated alongside the state.
+    fn compute_obs_and_partials_nbody(
+        &self,
+        cache: &OutfitCache,
+        jpl: &JPLEphem,
+        equinoctial_element: &EquinoctialElements,
+        config: &NBodyConfig,
     ) -> Result<ObsAndElementPartials, OutfitError>;
 }
 
@@ -507,6 +521,68 @@ impl ObservationEphemeris for Observation {
         //    Rotate each row to equatorial (same frame as d_ra_d_pos):
         //      dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_delem_ecl.row(j)ᵀ
         //    Then dot with d_ra_d_pos.
+        let mut d_ra_d_elem = Vector6::zeros();
+        let mut d_dec_d_elem = Vector6::zeros();
+        for j in 0..6 {
+            let dpos_ecl_j = Vector3::new(
+                dpos_delem_eq[(j, 0)],
+                dpos_delem_eq[(j, 1)],
+                dpos_delem_eq[(j, 2)],
+            );
+            let dpos_equ_j = ROT_ECLMJ2000_TO_EQUMJ2000 * dpos_ecl_j;
+            d_ra_d_elem[j] = d_ra_d_pos.dot(&dpos_equ_j);
+            d_dec_d_elem[j] = d_dec_d_pos.dot(&dpos_equ_j);
+        }
+
+        Ok(ObsAndElementPartials {
+            ra,
+            dec,
+            d_ra_d_elem,
+            d_dec_d_elem,
+        })
+    }
+
+    fn compute_obs_and_partials_nbody(
+        &self,
+        cache: &OutfitCache,
+        jpl: &JPLEphem,
+        equinoctial_element: &EquinoctialElements,
+        config: &NBodyConfig,
+    ) -> Result<ObsAndElementPartials, OutfitError> {
+        // Hyperbolic/parabolic orbits are not yet supported
+        if equinoctial_element.eccentricity() >= 1.0 {
+            return Err(OutfitError::InvalidOrbit(
+                "Eccentricity >= 1 is not yet supported".to_string(),
+            ));
+        }
+
+        // 1. N-body propagation to observation epoch
+        let t1_mjd_tt = self.mjd_tt();
+        let nbody_result = propagate_nbody(equinoctial_element, t1_mjd_tt, jpl, config)?;
+
+        // 2. Observation time in TT
+        let obs_mjd = Epoch::from_mjd_in_time_scale(t1_mjd_tt, hifitime::TimeScale::TT);
+
+        // 3. Earth's barycentric position in ecliptic J2000
+        let (earth_position, _) = jpl.earth_ephemeris(&obs_mjd, false);
+        let earth_pos_eclj2000 = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position;
+        let ast_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * nbody_result.position;
+        let ast_vel_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * nbody_result.velocity;
+
+        // 4. Observer heliocentric position in ecliptic J2000
+        let geo_obs_pos = cache
+            .get_observer_geocentric_position(self.index())
+            .map(|x| x.into_inner());
+        let xobs = geo_obs_pos + earth_pos_eclj2000;
+        let obs_pos_equ = ROT_ECLMJ2000_TO_EQUMJ2000 * xobs;
+
+        // 5. (α, δ) and ∂(α,δ)/∂pos (equatorial J2000)
+        let (ra, dec, d_ra_d_pos, d_dec_d_pos) =
+            topocentric_radec_and_partials(ast_pos_equ, ast_vel_equ, obs_pos_equ);
+
+        // 6. Chain rule: same as two-body but using the STM-based Jacobian
+        let dpos_delem_eq = nbody_result.dpos_delem; // Matrix6x3, rows=elem, cols=ecl_cart
+
         let mut d_ra_d_elem = Vector6::zeros();
         let mut d_dec_d_elem = Vector6::zeros();
         for j in 0..6 {

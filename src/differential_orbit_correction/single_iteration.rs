@@ -42,6 +42,7 @@ use crate::{
         obs_fit_data::ObsFitData,
     },
     observation_ephemeris::ObservationEphemeris,
+    propagator::PropagatorKind,
     EquinoctialElements, JPLEphem, OutfitError,
 };
 
@@ -135,6 +136,7 @@ pub struct SingleIterationResult {
 /// # Panics
 ///
 /// Panics if `observations.len() != obs_fit_data.len()`.
+#[allow(clippy::too_many_arguments)]
 pub fn single_iteration(
     observations: &[Observation],
     obs_fit_data: &[ObsFitData],
@@ -143,6 +145,7 @@ pub fn single_iteration(
     cache: &OutfitCache,
     jpl: &JPLEphem,
     apply_correction: bool,
+    propagator: &PropagatorKind,
 ) -> Result<SingleIterationResult, OutfitError> {
     assert_eq!(
         observations.len(),
@@ -179,7 +182,15 @@ pub fn single_iteration(
                 }
 
                 // Propagate orbit and compute predicted position + element partials.
-                match obs.compute_obs_and_partials_2body(cache, jpl, elements) {
+                let partials_result = match propagator {
+                    PropagatorKind::TwoBody => {
+                        obs.compute_obs_and_partials_2body(cache, jpl, elements)
+                    }
+                    PropagatorKind::NBody(nbody_config) => {
+                        obs.compute_obs_and_partials_nbody(cache, jpl, elements, nbody_config)
+                    }
+                };
+                match partials_result {
                     Ok(partials) => {
                         // Residual RA: angular difference in (−π, π] accounting for wrapping.
                         // The observed RA is corrected for the catalogue bias before differencing.
@@ -409,6 +420,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             true,
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
@@ -450,6 +462,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             false, // matonly
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
@@ -489,6 +502,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             true,
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
@@ -524,6 +538,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             true,
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
@@ -563,6 +578,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             true,
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
@@ -600,6 +616,7 @@ mod single_iteration_tests {
             &cache,
             &JPL_EPHEM_HORIZON,
             true,
+            &PropagatorKind::TwoBody,
         )
         .unwrap();
 
