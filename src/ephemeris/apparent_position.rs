@@ -42,9 +42,9 @@ use photom::{
 };
 
 use crate::{
-    cache::observer_fixed_cache::ObserverFixedCache,
-    ephemeris::observation_ephemeris::check_elliptical_orbit, observer_extension::ResolvedObserver,
-    EquinoctialElements, JPLEphem, OutfitError,
+    cache::observer_fixed_cache::ObserverFixedCache, constants::ROT_ECLMJ2000_TO_EQUMJ2000,
+    conversion::ToNotNan, observer_extension::ResolvedObserver, EquinoctialElements, JPLEphem,
+    OutfitError,
 };
 
 use super::{AberrationOrder, EphemerisConfig};
@@ -113,29 +113,39 @@ pub(crate) struct PropagatedState {
 ///
 /// This is the shared kernel called by [`compute`] and [`compute_with_geometry`].
 ///
+/// # Arguments
+///
+/// - `elements`     – Equinoctial orbital elements.
+/// - `obs_time_mjd` – Observation epoch \[MJD TT\].
+/// - `fixed_cache`  – Pre-built body-fixed observer cache (epoch-invariant).
+///   Must have been constructed from the same [`Observer`] that owns this
+///   request slot.  Building it once per observer slot and reusing it across
+///   all epochs avoids redundant trigonometric conversions.
+/// - `observer`     – Observing site, used only to attach to the result.
+/// - `jpl`          – JPL planetary ephemeris.
+/// - `ut1`          – UT1 time-scale provider.
+/// - `config`       – Ephemeris configuration (propagator, aberration).
+///
 /// # Errors
 ///
 /// Returns [`OutfitError`] if:
-/// - The orbit is hyperbolic or parabolic (eccentricity ≥ 1).
 /// - Orbit propagation fails.
 /// - The JPL ephemeris data is unavailable for the requested epoch.
 /// - The observer geometry cannot be resolved.
 pub(crate) fn propagate(
     elements: &EquinoctialElements,
     obs_time_mjd: f64,
-    observer: &Observer,
+    fixed_cache: &ObserverFixedCache,
     jpl: &JPLEphem,
     ut1: &Ut1Provider,
     config: &EphemerisConfig,
 ) -> Result<PropagatedState, OutfitError> {
-    check_elliptical_orbit(elements)?;
-
     let epoch = obs_time_to_epoch(obs_time_mjd);
     let (ast_pos_equ, ast_vel_equ) =
         config
             .propagator
             .propagate_to_epoch(elements, obs_time_mjd, jpl)?;
-    let (obs_pos_equ, obs_vel_equ, earth_pos_equ) = observer_pv(observer, jpl, ut1, &epoch)?;
+    let (obs_pos_equ, obs_vel_equ, earth_pos_equ) = observer_pv(fixed_cache, jpl, ut1, &epoch)?;
 
     Ok(PropagatedState {
         ast_pos_equ,
@@ -158,18 +168,27 @@ pub(crate) fn propagate(
 /// It propagates the orbit, resolves observer geometry, applies the aberration
 /// correction and converts to equatorial coordinates.
 ///
+/// # Arguments
+///
+/// - `elements`    – Equinoctial orbital elements.
+/// - `obs_time_mjd`– Observation epoch \[MJD TT\].
+/// - `fixed_cache` – Pre-built body-fixed observer cache (epoch-invariant).
+/// - `jpl`         – JPL planetary ephemeris.
+/// - `ut1`         – UT1 time-scale provider.
+/// - `config`      – Ephemeris configuration.
+///
 /// # Errors
 ///
 /// Returns [`OutfitError`] if propagation or observer geometry fails.
 pub(crate) fn compute(
     elements: &EquinoctialElements,
     obs_time_mjd: f64,
-    observer: &Observer,
+    fixed_cache: &ObserverFixedCache,
     jpl: &JPLEphem,
     ut1: &Ut1Provider,
     config: &EphemerisConfig,
 ) -> Result<ApparentPosition, OutfitError> {
-    let state = propagate(elements, obs_time_mjd, observer, jpl, ut1, config)?;
+    let state = propagate(elements, obs_time_mjd, fixed_cache, jpl, ut1, config)?;
     assemble_apparent_position(&state, elements, &config.aberration)
 }
 
@@ -183,18 +202,27 @@ pub(crate) fn compute(
 /// [`assemble_apparent_position`] and
 /// [`super::geometry::compute_geometry`].
 ///
+/// # Arguments
+///
+/// - `elements`    – Equinoctial orbital elements.
+/// - `obs_time_mjd`– Observation epoch \[MJD TT\].
+/// - `fixed_cache` – Pre-built body-fixed observer cache (epoch-invariant).
+/// - `jpl`         – JPL planetary ephemeris.
+/// - `ut1`         – UT1 time-scale provider.
+/// - `config`      – Ephemeris configuration.
+///
 /// # Errors
 ///
 /// Returns [`OutfitError`] if propagation or either assembly step fails.
 pub(crate) fn compute_with_geometry(
     elements: &EquinoctialElements,
     obs_time_mjd: f64,
-    observer: &Observer,
+    fixed_cache: &ObserverFixedCache,
     jpl: &JPLEphem,
     ut1: &Ut1Provider,
     config: &EphemerisConfig,
 ) -> Result<(ApparentPosition, super::geometry::BodyGeometry), OutfitError> {
-    let state = propagate(elements, obs_time_mjd, observer, jpl, ut1, config)?;
+    let state = propagate(elements, obs_time_mjd, fixed_cache, jpl, ut1, config)?;
     let position = assemble_apparent_position(&state, elements, &config.aberration)?;
     let geometry = super::geometry::compute_geometry(&state, elements, &config.aberration)?;
     Ok((position, geometry))
@@ -221,9 +249,12 @@ fn obs_time_to_epoch(obs_time_mjd: f64) -> Epoch {
 /// Compute the observer's heliocentric position **and velocity**, the Earth's
 /// heliocentric position, all in the equatorial mean J2000 frame.
 ///
-/// Uses [`Observer::pvobs`] which returns both the geocentric position and
-/// velocity of the observing site (needed for the true topocentric velocity
-/// used in angular-rate computation).
+/// # Pre-condition — `fixed_cache` is epoch-invariant
+///
+/// `fixed_cache` must have been constructed once per observer slot (before the
+/// epoch loop) via [`ObserverFixedCache::try_from`].  Passing it in avoids
+/// rebuilding the body-fixed geocentric coordinates (sin/cos of longitude, ρ
+/// factors) for every epoch.
 ///
 /// # Returns
 ///
@@ -231,37 +262,44 @@ fn obs_time_to_epoch(obs_time_mjd: f64) -> Epoch {
 ///
 /// # Errors
 ///
-/// Returns [`OutfitError`] if the observer data cannot be parsed or the
-/// geocentric position computation fails.
-/// `(obs_pos_equ, obs_vel_equ, earth_pos_equ)` returned by [`observer_pv`].
+/// Returns [`OutfitError`] if the geocentric position computation
+/// (`pvobs`) fails or a NaN conversion fails.
 type ObserverPv = (Vector3<f64>, Vector3<f64>, Vector3<f64>);
 
 fn observer_pv(
-    observer: &Observer,
+    fixed_cache: &ObserverFixedCache,
     jpl: &JPLEphem,
     ut1: &Ut1Provider,
     epoch: &Epoch,
 ) -> Result<ObserverPv, OutfitError> {
-    let fixed_cache = ObserverFixedCache::try_from(observer)?;
-    let (geo_pos_ecl, geo_vel_ecl) = Observer::pvobs(epoch, ut1, &fixed_cache, false)?;
+    // Geocentric position in ecliptic J2000 (velocity not needed here — site
+    // rotation is accounted for via earth_vel from JPL in the velocity path).
+    let (geo_pos_ecl, _) = Observer::pvobs(epoch, ut1, fixed_cache, false)?;
 
-    let obs_pos_equ = Observer::helio_position(jpl, epoch, &geo_pos_ecl)?.map(|x| x.into_inner());
-    let earth_pos_equ = earth_heliocentric_position(jpl, epoch);
+    // Single JPL Chebyshev evaluation for Earth's heliocentric state.
+    let (earth_pos_equ_raw, earth_vel_opt) = jpl.earth_ephemeris(epoch, true);
+    let earth_vel_equ_raw = earth_vel_opt
+        .expect("JPL earth_ephemeris with compute_velocity=true must return a velocity");
 
-    // Observer heliocentric velocity = Earth velocity + geocentric site velocity,
-    // both in equatorial J2000.  Delegate to helio_velocity which handles the
-    // ECL→EQU rotation and the NotNan conversion.
-    let obs_vel_equ = Observer::helio_velocity(jpl, epoch, &geo_vel_ecl)?.map(|x| x.into_inner());
+    // Rotation matrix ecliptic → equatorial J2000 (static const, evaluated once).
+    let rot = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
+
+    // obs_pos_equ = earth_pos + ROT_ecl→equ * geo_pos_ecl
+    // (replaces Observer::helio_position)
+    let obs_pos_equ: Vector3<f64> = (earth_pos_equ_raw.to_notnan()? + rot * geo_pos_ecl)
+        .map(|x: ordered_float::NotNan<f64>| x.into_inner());
+
+    // earth_pos_equ: used in assemble_apparent_position for geocentric distance.
+    // (replaces earth_heliocentric_position)
+    let earth_pos_equ = earth_pos_equ_raw;
+
+    // obs_vel_equ = earth_vel + ROT_ecl→equ * geo_vel_ecl
+    // Since pvobs was called with compute_velocity=false, geo_vel_ecl = 0,
+    // so obs_vel_equ = Earth's heliocentric velocity only.
+    // (replaces Observer::helio_velocity with a zero geocentric contribution)
+    let obs_vel_equ = earth_vel_equ_raw.to_notnan()?.map(|x| x.into_inner());
 
     Ok((obs_pos_equ, obs_vel_equ, earth_pos_equ))
-}
-
-/// Retrieve Earth's heliocentric position vector in the equatorial mean J2000
-/// frame from the JPL ephemeris \[AU\].
-///
-/// Wraps [`JPLEphem::earth_ephemeris`] and discards the velocity component.
-fn earth_heliocentric_position(jpl: &JPLEphem, epoch: &Epoch) -> Vector3<f64> {
-    jpl.earth_ephemeris(epoch, false).0
 }
 
 // ---------------------------------------------------------------------------

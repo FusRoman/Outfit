@@ -69,7 +69,9 @@ use photom::observer::Observer;
 use std::marker::PhantomData;
 
 use super::{ApparentPosition, BodyGeometry, EphemerisConfig};
-use crate::{EquinoctialElements, JPLEphem, OutfitError};
+use crate::{
+    cache::observer_fixed_cache::ObserverFixedCache, EquinoctialElements, JPLEphem, OutfitError,
+};
 use hifitime::ut1::Ut1Provider;
 
 // ---------------------------------------------------------------------------
@@ -91,11 +93,17 @@ pub trait EphemerisOutputKind: sealed::Sealed {
     type Output;
 
     /// Compute the output for a single `(epoch, observer)` pair.
+    ///
+    /// `fixed_cache` must have been built once per observer slot (before the
+    /// epoch loop) from the same [`Observer`] that owns this request slot,
+    /// via [`ObserverFixedCache::try_from`].  It is passed in here to avoid
+    /// rebuilding the epoch-invariant body-fixed coordinates on every epoch.
     #[doc(hidden)]
     fn compute_one(
         equi: &EquinoctialElements,
         obs_time_mjd: f64,
         observer: &Observer,
+        fixed_cache: &ObserverFixedCache,
         jpl: &JPLEphem,
         ut1: &Ut1Provider,
         config: &EphemerisConfig,
@@ -142,12 +150,13 @@ impl EphemerisOutputKind for Position {
     fn compute_one(
         equi: &EquinoctialElements,
         obs_time_mjd: f64,
-        observer: &Observer,
+        _observer: &Observer,
+        fixed_cache: &ObserverFixedCache,
         jpl: &JPLEphem,
         ut1: &Ut1Provider,
         config: &EphemerisConfig,
     ) -> Result<Self::Output, OutfitError> {
-        super::apparent_position::compute(equi, obs_time_mjd, observer, jpl, ut1, config)
+        super::apparent_position::compute(equi, obs_time_mjd, fixed_cache, jpl, ut1, config)
     }
 }
 
@@ -157,13 +166,14 @@ impl EphemerisOutputKind for Geometry {
     fn compute_one(
         equi: &EquinoctialElements,
         obs_time_mjd: f64,
-        observer: &Observer,
+        _observer: &Observer,
+        fixed_cache: &ObserverFixedCache,
         jpl: &JPLEphem,
         ut1: &Ut1Provider,
         config: &EphemerisConfig,
     ) -> Result<Self::Output, OutfitError> {
         let state =
-            super::apparent_position::propagate(equi, obs_time_mjd, observer, jpl, ut1, config)?;
+            super::apparent_position::propagate(equi, obs_time_mjd, fixed_cache, jpl, ut1, config)?;
         super::geometry::compute_geometry(&state, equi, &config.aberration)
     }
 }
@@ -174,7 +184,8 @@ impl EphemerisOutputKind for Combined {
     fn compute_one(
         equi: &EquinoctialElements,
         obs_time_mjd: f64,
-        observer: &Observer,
+        _observer: &Observer,
+        fixed_cache: &ObserverFixedCache,
         jpl: &JPLEphem,
         ut1: &Ut1Provider,
         config: &EphemerisConfig,
@@ -182,7 +193,7 @@ impl EphemerisOutputKind for Combined {
         super::apparent_position::compute_with_geometry(
             equi,
             obs_time_mjd,
-            observer,
+            fixed_cache,
             jpl,
             ut1,
             config,

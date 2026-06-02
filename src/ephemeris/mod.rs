@@ -109,7 +109,11 @@ pub use result::{EphemerisEntry, EphemerisResult};
 
 use hifitime::ut1::Ut1Provider;
 
-use crate::{propagator::PropagatorKind, JPLEphem, OrbitalElements, OutfitError};
+use crate::{
+    cache::observer_fixed_cache::ObserverFixedCache,
+    ephemeris::observation_ephemeris::check_elliptical_orbit, propagator::PropagatorKind, JPLEphem,
+    OrbitalElements, OutfitError,
+};
 
 // ---------------------------------------------------------------------------
 // EphemerisConfig
@@ -201,7 +205,6 @@ impl OrbitalElements {
                 let mut result = EphemerisResult::with_capacity(total);
                 for obs_req in &request.observers {
                     for epoch in obs_req.mode.epochs() {
-                        // We need an owned error per entry — clone via Display.
                         result.push(
                             epoch,
                             obs_req.observer.clone(),
@@ -213,6 +216,29 @@ impl OrbitalElements {
             }
         };
 
+        // Optim 3 — check eccentricity once before any epoch loop.
+        // Avoids recomputing sqrt(h²+k²) for every (epoch, observer) pair.
+        // If the orbit is hyperbolic/parabolic every entry would fail anyway,
+        // so we short-circuit immediately with a uniform error result.
+        if let Err(err) = check_elliptical_orbit(&equi) {
+            let total: usize = request
+                .observers
+                .iter()
+                .map(|r| r.mode.epochs().len())
+                .sum();
+            let mut result = EphemerisResult::with_capacity(total);
+            for obs_req in &request.observers {
+                for epoch in obs_req.mode.epochs() {
+                    result.push(
+                        epoch,
+                        obs_req.observer.clone(),
+                        Err(OutfitError::InvalidConversion(err.to_string())),
+                    );
+                }
+            }
+            return result;
+        }
+
         let total: usize = request
             .observers
             .iter()
@@ -221,12 +247,37 @@ impl OrbitalElements {
         let mut result = EphemerisResult::with_capacity(total);
 
         for obs_req in &request.observers {
+            // Optim — build ObserverFixedCache once per observer slot.
+            //fixed_cache
+            // ObserverFixedCache holds the body-fixed position and velocity of
+            // the observing site (sin/cos of longitude, ρ factors, cross-product
+            // for sidereal rotation).  These quantities are epoch-invariant: they
+            // depend only on the observer's geodetic coordinates.  Building the
+            // cache here — once per observer, outside the epoch loop — avoids
+            // repeating the trig conversion for every epoch.
+            let fixed_cache = match ObserverFixedCache::try_from(&obs_req.observer) {
+                Ok(c) => c,
+                Err(err) => {
+                    // If the observer geometry is invalid, mark every epoch of
+                    // this observer as failed and move on to the next observer.
+                    for epoch in obs_req.mode.epochs() {
+                        result.push(
+                            epoch,
+                            obs_req.observer.clone(),
+                            Err(OutfitError::InvalidConversion(err.to_string())),
+                        );
+                    }
+                    continue;
+                }
+            };
+
             for epoch in obs_req.mode.epochs() {
                 let obs_time_mjd = epoch.to_mjd_tt_days();
                 let value = O::compute_one(
                     &equi,
                     obs_time_mjd,
                     &obs_req.observer,
+                    &fixed_cache,
                     jpl,
                     ut1,
                     &request.config,
