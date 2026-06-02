@@ -426,7 +426,7 @@ pub fn dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64) {
 /// * This function is used when converting inertial position vectors to observable angles.
 ///
 /// # See also
-/// * [`correct_aberration`](crate::observation_ephemeris::correct_aberration) – apply aberration correction before calling this if needed
+/// * `correct_aberration_first_order` – apply aberration correction before calling this if needed
 pub fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let pos_norm = cartesian_position.norm();
     if pos_norm == 0. {

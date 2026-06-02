@@ -187,7 +187,7 @@
 //! - [`outfit_errors`] — Unified error enum for the whole crate.
 //! - [`time`] — Time scale conversions and sidereal time.
 //! - [`cache`] — Precomputed observer position cache.
-//! - [`observation_ephemeris`] — Apparent position computation and ephemeris residuals.
+//! - [`ephemeris`] — Apparent position computation and ephemeris residuals.
 //! - [`observer_extension`] — Geocentric and heliocentric observer position routines.
 
 // === Modules (internals). Keep public modules as they are; the facade is built via `pub use` below.
@@ -210,6 +210,9 @@ pub mod differential_orbit_correction;
 /// JPL ephemerides management (Horizon/NAIF kernels).
 pub mod jpl_ephem;
 
+/// Ephemeris interpolation and access.
+pub mod ephemeris;
+
 /// Keplerian solver for propagation.
 pub mod kepler;
 
@@ -230,9 +233,6 @@ pub mod time;
 
 /// Precomputed observer position cache used throughout the fitting pipeline.
 pub mod cache;
-
-/// Apparent position computation and astrometric residuals for individual observations.
-pub mod observation_ephemeris;
 
 /// Ground-observer geometry: body-fixed and heliocentric position routines.
 pub mod observer_extension;
@@ -266,6 +266,13 @@ pub use crate::constants::{
 
 // JPL ephemeris enum for runtime inspection (optional but convenient)
 pub use crate::jpl_ephem::JPLEphem;
+
+// Ephemeris façade
+pub use crate::ephemeris::{
+    AberrationOrder, ApparentPosition, BodyGeometry, Combined, EphemerisConfig, EphemerisEntry,
+    EphemerisMode, EphemerisOutputKind, EphemerisRequest, EphemerisResult, FullOrbitResultExt,
+    Geometry, ObserverRequest, Position,
+};
 
 // IOD entry points and result types
 pub use crate::initial_orbit_determination::obs_dataset_api::FitIOD;

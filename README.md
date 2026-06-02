@@ -231,6 +231,16 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ---
 
+
+## Documentation
+
+To compile the documentation locally, run the following command in the terminal:
+```bash
+RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html" cargo doc --no-deps --all-features
+```
+
+---
+
 ## Roadmap
 
 - **Full least-squares orbit fitting** across full arcs

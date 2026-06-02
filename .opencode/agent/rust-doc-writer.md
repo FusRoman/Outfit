@@ -105,18 +105,19 @@ Always follow this section order when applicable:
 - Never use HTML directly in doc comments unless absolutely necessary and always prefer Markdown equivalents.
 
 ### KaTeX Mathematical Formulas
-- The project provides a KaTeX HTML header at `$(pwd)/katex-header.html` in the project root, which enables LaTeX math rendering in documentation.
-- Use inline math with single dollar signs: `$formula$`
-- Use display (block) math with double dollar signs: `$$formula$$`
-- Example inline: `The complexity is $O(n \log n)$`
-- Example block:
-  ```
-  $$
-  \sum_{i=0}^{n} i = \frac{n(n+1)}{2}
-  $$
-  ```
+- The project provides a KaTeX HTML header at `$(pwd)/katex-header.html` in the project root, which enables LaTeX math rendering in documentation. **Always read this file before writing math** to confirm which delimiters are configured.
+- The katex-header in this project configures **only** `$...$` and `$$...$$` as delimiters. `\\(...\\)` and `\\[...\\]` are NOT configured and will render as raw escaped text.
+- Use inline math with single dollar signs: `$formula$` (e.g. `$\phi \in [0, \pi]$`)
+- Use display (block) math with double dollar signs on their own line: `$$formula$$`
+- `$...$` and `$$...$$` work in **all** doc comment positions: module docs, struct docs, field docs, function docs, enum variant docs. There is no restriction based on comment position.
 - Always use proper LaTeX syntax. Common pitfalls: escape backslashes properly in Rust string context, use `\\` for newlines in aligned environments.
 - Verify KaTeX formulas are syntactically correct LaTeX before finalizing.
+
+#### KaTeX commands NOT supported by rustdoc's KaTeX renderer
+
+| Command | Problem | Replacement |
+|---|---|---|
+| `\!` (negative thin space) | Not rendered — produces literal `\!` in output | Remove it: write `\arccos\left(` not `\arccos\!\left(` |
 
 ## Compilation Verification
 
@@ -135,7 +136,9 @@ RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html" cargo doc --no-deps
    - Malformed KaTeX syntax causing HTML rendering issues
 3. If errors or warnings are found, diagnose the root cause, fix the documentation, and re-run the command.
 4. Only confirm documentation is complete when the command exits with zero warnings and zero errors.
-5. Pay special attention to KaTeX-related issues: unclosed braces, invalid commands, and unsupported LaTeX features.
+5. Pay special attention to KaTeX-related issues: unclosed braces, invalid commands, unsupported LaTeX features, and:
+   - `\!` anywhere in a formula — must be removed
+   - `\\(...\\)` or `\\[...\\]` delimiters — only valid if the `katex-header.html` configures them; in this project they produce raw text, use `$...$` / `$$...$$` instead
 
 ## Quality Standards
 
@@ -164,4 +167,6 @@ RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html" cargo doc --no-deps
 - Do NOT use GitHub Flavored Markdown features not in CommonMark (e.g., `~~strikethrough~~` is GFM but may not render — prefer CommonMark-safe alternatives).
 - Do NOT forget to escape backslashes in KaTeX formulas: `\frac` in a doc comment needs to be written as `\frac` (single backslash is fine in doc comments, but be mindful of raw strings).
 - Do NOT mix inline and block math syntax incorrectly.
+- Do NOT use `\\(...\\)` or `\\[...\\]` as math delimiters unless the `katex-header.html` explicitly configures them. In this project, only `$...$` and `$$...$$` are configured — using `\\(...\\)` produces raw escaped text, not rendered math.
+- Do NOT use `\!` (negative thin space) in KaTeX formulas — it is not supported by rustdoc's KaTeX renderer and will appear as literal text. Write `\arccos\left(` not `\arccos\!\left(`.
 - Always verify the `katex-header.html` file exists at the project root before running the doc command; if missing, alert the user.
