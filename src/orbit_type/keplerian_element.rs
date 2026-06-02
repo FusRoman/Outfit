@@ -84,6 +84,8 @@
 //! - [`principal_angle`](crate::kepler::principal_angle) – helper to normalize angular elements.
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
 
+use nalgebra::{Matrix6, Vector6};
+
 use crate::{kepler::principal_angle, orbit_type::equinoctial_element::EquinoctialElements};
 use std::fmt;
 
@@ -199,6 +201,75 @@ impl KeplerianElements {
             periapsis_argument: periapsis_arg,
             mean_anomaly,
         }
+    }
+
+    pub fn jacobian_to_equinoctial(&self) -> Matrix6<f64> {
+        let e = self.eccentricity;
+        let i = self.inclination;
+        let varpi = self.ascending_node_longitude + self.periapsis_argument;
+        let big_omega = self.ascending_node_longitude;
+
+        let sin_varpi = varpi.sin();
+        let cos_varpi = varpi.cos();
+        let sin_omega = big_omega.sin();
+        let cos_omega = big_omega.cos();
+
+        let half_i = i / 2.0;
+        let tan_half_i = half_i.tan();
+        let d_tan_half_i_d_i = 0.5 / half_i.cos().powi(2);
+
+        // Each Vector6 is one column: ∂y/∂x_j for source variable x_j.
+        // Row ordering (target):    [a, h, k, p, q, λ]
+        // Column ordering (source): [a, e, i, Ω, ω, M]
+
+        let col_a = Vector6::new(1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+        let col_e = Vector6::new(
+            0.0,       // ∂a/∂e
+            sin_varpi, // ∂h/∂e
+            cos_varpi, // ∂k/∂e
+            0.0,       // ∂p/∂e
+            0.0,       // ∂q/∂e
+            0.0,       // ∂λ/∂e
+        );
+
+        let col_i = Vector6::new(
+            0.0,                          // ∂a/∂i
+            0.0,                          // ∂h/∂i
+            0.0,                          // ∂k/∂i
+            d_tan_half_i_d_i * sin_omega, // ∂p/∂i
+            d_tan_half_i_d_i * cos_omega, // ∂q/∂i
+            0.0,                          // ∂λ/∂i
+        );
+
+        let col_big_omega = Vector6::new(
+            0.0,                     // ∂a/∂Ω
+            e * cos_varpi,           // ∂h/∂Ω
+            -e * sin_varpi,          // ∂k/∂Ω
+            tan_half_i * cos_omega,  // ∂p/∂Ω
+            -tan_half_i * sin_omega, // ∂q/∂Ω
+            1.0,                     // ∂λ/∂Ω
+        );
+
+        let col_omega = Vector6::new(
+            0.0,            // ∂a/∂ω
+            e * cos_varpi,  // ∂h/∂ω
+            -e * sin_varpi, // ∂k/∂ω
+            0.0,            // ∂p/∂ω
+            0.0,            // ∂q/∂ω
+            1.0,            // ∂λ/∂ω
+        );
+
+        let col_m = Vector6::new(
+            0.0, // ∂a/∂M
+            0.0, // ∂h/∂M
+            0.0, // ∂k/∂M
+            0.0, // ∂p/∂M
+            0.0, // ∂q/∂M
+            1.0, // ∂λ/∂M
+        );
+
+        Matrix6::from_columns(&[col_a, col_e, col_i, col_big_omega, col_omega, col_m])
     }
 }
 
@@ -322,5 +393,111 @@ pub(crate) mod test_keplerian_element {
                 mean_longitude: 1.693697008,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_jacobian_keplerian {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    /// Finite-difference Jacobian for reference.
+    fn fd_jacobian_kep_to_eq(kep: &KeplerianElements, eps: f64) -> Matrix6<f64> {
+        let fields: [f64; 6] = [
+            kep.semi_major_axis,
+            kep.eccentricity,
+            kep.inclination,
+            kep.ascending_node_longitude,
+            kep.periapsis_argument,
+            kep.mean_anomaly,
+        ];
+
+        let eq_to_arr = |e: &EquinoctialElements| -> [f64; 6] {
+            [
+                e.semi_major_axis,
+                e.eccentricity_sin_lon,
+                e.eccentricity_cos_lon,
+                e.tan_half_incl_sin_node,
+                e.tan_half_incl_cos_node,
+                e.mean_longitude,
+            ]
+        };
+
+        let mut columns = [[0.0f64; 6]; 6];
+
+        for col in 0..6 {
+            let mut fwd = fields;
+            let mut bwd = fields;
+            fwd[col] += eps;
+            bwd[col] -= eps;
+
+            let make_kep = |f: [f64; 6]| KeplerianElements {
+                reference_epoch: kep.reference_epoch,
+                semi_major_axis: f[0],
+                eccentricity: f[1],
+                inclination: f[2],
+                ascending_node_longitude: f[3],
+                periapsis_argument: f[4],
+                mean_anomaly: f[5],
+            };
+
+            let eq_fwd = eq_to_arr(&EquinoctialElements::from(&make_kep(fwd)));
+            let eq_bwd = eq_to_arr(&EquinoctialElements::from(&make_kep(bwd)));
+
+            for row in 0..6 {
+                columns[col][row] = (eq_fwd[row] - eq_bwd[row]) / (2.0 * eps);
+            }
+        }
+
+        Matrix6::from_fn(|row, col| columns[col][row])
+    }
+
+    #[test]
+    fn test_jacobian_to_equinoctial_against_finite_differences() {
+        let kep = KeplerianElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 2.5,
+            eccentricity: 0.3,
+            inclination: 0.5,
+            ascending_node_longitude: 1.2,
+            periapsis_argument: 0.8,
+            mean_anomaly: 2.1,
+        };
+
+        let analytical = kep.jacobian_to_equinoctial();
+        let numerical = fd_jacobian_kep_to_eq(&kep, 1e-6);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(
+                    analytical[(row, col)],
+                    numerical[(row, col)],
+                    epsilon = 1e-7
+                );
+            }
+        }
+    }
+
+    /// Near-circular orbit: e ≈ 0, the h/k row should remain well-defined.
+    #[test]
+    fn test_jacobian_to_equinoctial_near_circular() {
+        let kep = KeplerianElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 1.0,
+            eccentricity: 1e-8,
+            inclination: 0.3,
+            ascending_node_longitude: 0.5,
+            periapsis_argument: 0.2,
+            mean_anomaly: 1.0,
+        };
+
+        let j = kep.jacobian_to_equinoctial();
+        let numerical = fd_jacobian_kep_to_eq(&kep, 1e-6);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(j[(row, col)], numerical[(row, col)], epsilon = 1e-6);
+            }
+        }
     }
 }

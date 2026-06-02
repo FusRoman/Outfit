@@ -223,15 +223,19 @@ mod gauss_results_tests {
     use std::format;
 
     fn dummy_orbit() -> OrbitalElements {
-        OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59000.0,
-            semi_major_axis: 2.5,
-            eccentricity: 0.12,
-            inclination: 0.1,
-            ascending_node_longitude: 1.2,
-            periapsis_argument: 0.8,
-            mean_anomaly: 0.3,
-        })
+        OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59000.0,
+                semi_major_axis: 2.5,
+                eccentricity: 0.12,
+                inclination: 0.1,
+                ascending_node_longitude: 1.2,
+                periapsis_argument: 0.8,
+                mean_anomaly: 0.3,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     }
 
     #[test]
@@ -264,15 +268,19 @@ mod gauss_results_tests {
 
     #[test]
     fn test_display_format_summary() {
-        let orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59001.5,
-            semi_major_axis: 1.234567,
-            eccentricity: 0.1,
-            inclination: 0.2,
-            ascending_node_longitude: 0.3,
-            periapsis_argument: 0.4,
-            mean_anomaly: 0.5,
-        });
+        let orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59001.5,
+                semi_major_axis: 1.234567,
+                eccentricity: 0.1,
+                inclination: 0.2,
+                ascending_node_longitude: 0.3,
+                periapsis_argument: 0.4,
+                mean_anomaly: 0.5,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         let result = GaussResult::CorrectedOrbit(orbit);
 

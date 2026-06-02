@@ -55,9 +55,12 @@ use crate::{
         outlier_rejection::{update_observation_selection, OutlierRejectionConfig},
         single_iteration::single_iteration,
     },
-    orbit_type::equinoctial_element::EquinoctialLimits,
+    orbit_type::{
+        equinoctial_element::EquinoctialLimits,
+        uncertainty::{EquinoctialUncertainty, OrbitalCovariance},
+    },
     propagator::PropagatorKind,
-    EquinoctialElements, JPLEphem, OutfitError,
+    EquinoctialElements, JPLEphem, OrbitalElements, OutfitError,
 };
 
 use super::least_square::OrbitalUncertainty;
@@ -219,6 +222,24 @@ pub struct DifferentialCorrectionOutput {
     /// Number of scalar measurements used in the final fit (2 per active
     /// optical observation).
     pub num_measurements: usize,
+}
+
+/// Conversion from [`DifferentialCorrectionOutput`] to the more general
+/// [`OrbitalElements`] type.
+///
+/// The covariance is extracted from the `uncertainty` field and included in the
+/// `OrbitalElements::Equinoctial` variant.
+impl From<DifferentialCorrectionOutput> for OrbitalElements {
+    fn from(output: DifferentialCorrectionOutput) -> Self {
+        let orb_covariance = OrbitalCovariance {
+            matrix: output.uncertainty.covariance,
+        };
+        OrbitalElements::Equinoctial {
+            elements: output.elements,
+            uncertainty: Some(EquinoctialUncertainty::from_covariance(&orb_covariance)),
+            covariance: Some(orb_covariance),
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -30,7 +30,9 @@
 //!
 //! // Convert to Keplerian form if possible
 //! if let Ok(kep) = elems.to_keplerian() {
-//!     println!("semi-major axis = {}", kep.semi_major_axis);
+//!     if let OrbitalElements::Keplerian { elements, .. } = kep {
+//!         println!("semi-major axis = {}", elements.semi_major_axis);
+//!     }
 //! }
 //! ```
 use nalgebra::Vector3;
@@ -38,8 +40,12 @@ use nalgebra::Vector3;
 use crate::{
     orb_elem::ccek1,
     orbit_type::{
-        cometary_element::CometaryElements, equinoctial_element::EquinoctialElements,
+        cometary_element::CometaryElements,
+        equinoctial_element::EquinoctialElements,
         keplerian_element::KeplerianElements,
+        uncertainty::{
+            CometaryUncertainty, EquinoctialUncertainty, KeplerianUncertainty, OrbitalCovariance,
+        },
     },
     OutfitError,
 };
@@ -52,6 +58,9 @@ pub mod keplerian_element;
 
 /// Cometary (parabolic/hyperbolic) orbital elements and related conversions.
 pub mod cometary_element;
+
+/// Uncertainty structures for orbital elements.
+pub mod uncertainty;
 
 /// Canonical orbital elements in multiple representations.
 ///
@@ -74,9 +83,21 @@ pub mod cometary_element;
 /// * [`crate::orbit_type::OrbitalElements::to_keplerian`] – Conversion with domain checks.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrbitalElements {
-    Keplerian(KeplerianElements),
-    Equinoctial(EquinoctialElements),
-    Cometary(CometaryElements),
+    Keplerian {
+        elements: KeplerianElements,
+        uncertainty: Option<KeplerianUncertainty>,
+        covariance: Option<OrbitalCovariance>,
+    },
+    Equinoctial {
+        elements: EquinoctialElements,
+        uncertainty: Option<EquinoctialUncertainty>,
+        covariance: Option<OrbitalCovariance>,
+    },
+    Cometary {
+        elements: CometaryElements,
+        uncertainty: Option<CometaryUncertainty>,
+        covariance: Option<OrbitalCovariance>,
+    },
 }
 
 impl OrbitalElements {
@@ -121,65 +142,196 @@ impl OrbitalElements {
         ccek1(position, velocity, reference_epoch)
     }
 
-    /// Convert to Keplerian elements, if possible.
+    /// Convert to Keplerian representation, propagating covariance if present.
     ///
-    /// This conversion may fail if the current representation is not suitable
-    /// for Keplerian elements. In particular, `Cometary` elements with
-    /// eccentricity e < 1 cannot be converted to Keplerian form.
-    ///
-    /// Errors
+    /// Return
     /// ------
-    /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
-    pub fn to_keplerian(&self) -> Result<KeplerianElements, OutfitError> {
+    /// * `Ok(OrbitalElements::Keplerian)` – Converted elements with propagated
+    ///   uncertainty and covariance when available.
+    /// * `Err(OutfitError)` – If the conversion is not defined for the current
+    ///   element set (e.g. parabolic cometary elements).
+    pub fn to_keplerian(&self) -> Result<OrbitalElements, OutfitError> {
         match self {
-            OrbitalElements::Keplerian(ke) => Ok(ke.clone()),
-            OrbitalElements::Equinoctial(ee) => Ok(KeplerianElements::from(ee)),
-            OrbitalElements::Cometary(ce) => KeplerianElements::try_from(ce),
+            OrbitalElements::Keplerian { .. } => Ok(self.clone()),
+
+            OrbitalElements::Equinoctial {
+                elements,
+                covariance,
+                ..
+            } => {
+                let kep = KeplerianElements::from(elements);
+                let jacobian = elements.jacobian_to_keplerian();
+
+                let new_cov = covariance.as_ref().map(|c| c.propagate(&jacobian));
+                let new_unc = new_cov.as_ref().map(KeplerianUncertainty::from_covariance);
+
+                Ok(OrbitalElements::Keplerian {
+                    elements: kep,
+                    uncertainty: new_unc,
+                    covariance: new_cov,
+                })
+            }
+
+            OrbitalElements::Cometary {
+                elements,
+                covariance,
+                ..
+            } => {
+                let kep = KeplerianElements::try_from(elements)?;
+                let jacobian = elements.jacobian_to_keplerian();
+
+                let new_cov = covariance.as_ref().map(|c| c.propagate(&jacobian));
+                let new_unc = new_cov.as_ref().map(KeplerianUncertainty::from_covariance);
+
+                Ok(OrbitalElements::Keplerian {
+                    elements: kep,
+                    uncertainty: new_unc,
+                    covariance: new_cov,
+                })
+            }
         }
     }
 
-    /// Convert to Equinoctial elements, if possible.
+    /// Convert to equinoctial representation, propagating covariance if present.
     ///
-    /// This conversion may fail if the current representation is not suitable
-    /// for Equinoctial elements. In particular, `Cometary` elements with
-    /// eccentricity e < 1 cannot be converted to Equinoctial form.
-    ///
-    /// Errors
+    /// Return
     /// ------
-    /// Returns an `OutfitError::InvalidOrbit` if the conversion is not possible.
-    pub fn to_equinoctial(&self) -> Result<EquinoctialElements, OutfitError> {
+    /// * `Ok(OrbitalElements::Equinoctial)` – Converted elements with propagated
+    ///   uncertainty and covariance when available.
+    /// * `Err(OutfitError)` – If the conversion is not defined for the current
+    ///   element set (e.g. hyperbolic cometary elements).
+    pub fn to_equinoctial(&self) -> Result<OrbitalElements, OutfitError> {
         match self {
-            OrbitalElements::Keplerian(ke) => Ok(EquinoctialElements::from(ke)),
-            OrbitalElements::Equinoctial(ee) => Ok(ee.clone()),
-            OrbitalElements::Cometary(ce) => EquinoctialElements::try_from(ce),
+            OrbitalElements::Equinoctial { .. } => Ok(self.clone()),
+
+            OrbitalElements::Keplerian {
+                elements,
+                covariance,
+                ..
+            } => {
+                let eq = EquinoctialElements::from(elements);
+                let jacobian = elements.jacobian_to_equinoctial();
+
+                let new_cov = covariance.as_ref().map(|c| c.propagate(&jacobian));
+                let new_unc = new_cov
+                    .as_ref()
+                    .map(EquinoctialUncertainty::from_covariance);
+
+                Ok(OrbitalElements::Equinoctial {
+                    elements: eq,
+                    uncertainty: new_unc,
+                    covariance: new_cov,
+                })
+            }
+
+            OrbitalElements::Cometary {
+                elements,
+                covariance,
+                ..
+            } => {
+                let eq = EquinoctialElements::try_from(elements)?;
+                let jacobian = elements.jacobian_to_equinoctial()?;
+
+                let new_cov = covariance.as_ref().map(|c| c.propagate(&jacobian));
+                let new_unc = new_cov
+                    .as_ref()
+                    .map(EquinoctialUncertainty::from_covariance);
+
+                Ok(OrbitalElements::Equinoctial {
+                    elements: eq,
+                    uncertainty: new_unc,
+                    covariance: new_cov,
+                })
+            }
         }
     }
 
     /// Get a reference to the underlying [`KeplerianElements`] if this is `Keplerian`.
-    pub fn as_keplerian(&self) -> Option<&KeplerianElements> {
-        if let OrbitalElements::Keplerian(ref k) = self {
-            Some(k)
+    pub fn as_keplerian_ref(&self) -> Option<&KeplerianElements> {
+        if let OrbitalElements::Keplerian { elements, .. } = self {
+            Some(elements)
+        } else {
+            None
+        }
+    }
+
+    /// Get the owned underlying [`KeplerianElements`] if this is `Keplerian`.
+    pub fn as_keplerian(self) -> Option<KeplerianElements> {
+        if let OrbitalElements::Keplerian { elements, .. } = self {
+            Some(elements)
         } else {
             None
         }
     }
 
     /// Get a reference to the underlying [`EquinoctialElements`] if this is `Equinoctial`.
-    pub fn as_equinoctial(&self) -> Option<&EquinoctialElements> {
-        if let OrbitalElements::Equinoctial(ref e) = self {
-            Some(e)
+    pub fn as_equinoctial_ref(&self) -> Option<&EquinoctialElements> {
+        if let OrbitalElements::Equinoctial { elements, .. } = self {
+            Some(elements)
+        } else {
+            None
+        }
+    }
+
+    /// Get the owned underlying [`EquinoctialElements`] if this is `Equinoctial`.
+    pub fn as_equinoctial(self) -> Option<EquinoctialElements> {
+        if let OrbitalElements::Equinoctial { elements, .. } = self {
+            Some(elements)
         } else {
             None
         }
     }
 
     /// Get a reference to the underlying [`CometaryElements`] if this is `Cometary`.
-    pub fn as_cometary(&self) -> Option<&CometaryElements> {
-        if let OrbitalElements::Cometary(ref c) = self {
-            Some(c)
+    pub fn as_cometary_ref(&self) -> Option<&CometaryElements> {
+        if let OrbitalElements::Cometary { elements, .. } = self {
+            Some(elements)
         } else {
             None
         }
+    }
+
+    /// Get the owned underlying [`CometaryElements`] if this is `Cometary`.
+    pub fn as_cometary(self) -> Option<CometaryElements> {
+        if let OrbitalElements::Cometary { elements, .. } = self {
+            Some(elements)
+        } else {
+            None
+        }
+    }
+
+    /// Convert to [`KeplerianElements`], propagating covariance if present.
+    ///
+    /// Shorthand for `.to_keplerian()?.as_keplerian()`.
+    ///
+    /// Return
+    /// ------
+    /// * `Ok(KeplerianElements)` – Converted elements.
+    /// * `Err(OutfitError)` – If the conversion is not defined for the current
+    ///   element set (e.g. parabolic cometary elements).
+    pub fn into_keplerian(self) -> Result<KeplerianElements, OutfitError> {
+        self.to_keplerian()?
+            .as_keplerian()
+            .ok_or(OutfitError::InvalidConversion(
+                "Conversion to Keplerian elements failed".to_string(),
+            ))
+    }
+
+    /// Convert to [`EquinoctialElements`], propagating covariance if present.
+    ///
+    /// Shorthand for `.to_equinoctial()?.as_equinoctial()`.
+    ///
+    /// Return
+    /// ------
+    /// * `Ok(EquinoctialElements)` – Converted elements.
+    /// * `Err(OutfitError)` – If the conversion is not defined for the current
+    ///   element set (e.g. hyperbolic cometary elements).
+    pub fn into_equinoctial(self) -> Result<EquinoctialElements, OutfitError> {
+        self.to_equinoctial()?
+            .as_equinoctial()
+            .ok_or(OutfitError::InvalidConversion(
+                "Conversion to equinoctial elements failed".to_string(),
+            ))
     }
 }
 
@@ -188,17 +340,17 @@ use std::fmt;
 impl fmt::Display for OrbitalElements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OrbitalElements::Keplerian(k) => {
+            OrbitalElements::Keplerian { elements, .. } => {
                 writeln!(f, "[Keplerian]")?;
-                write!(f, "{k}")
+                write!(f, "{elements}")
             }
-            OrbitalElements::Equinoctial(e) => {
+            OrbitalElements::Equinoctial { elements, .. } => {
                 writeln!(f, "[Equinoctial]")?;
-                write!(f, "{e}")
+                write!(f, "{elements}")
             }
-            OrbitalElements::Cometary(c) => {
+            OrbitalElements::Cometary { elements, .. } => {
                 writeln!(f, "[Cometary]")?;
-                write!(f, "{c}")
+                write!(f, "{elements}")
             }
         }
     }
@@ -217,7 +369,10 @@ pub(crate) mod orbit_type_test {
         tol: f64,
     ) -> bool {
         match (current, other) {
-            (OrbitalElements::Keplerian(ke1), OrbitalElements::Keplerian(ke2)) => {
+            (
+                OrbitalElements::Keplerian { elements: ke1, .. },
+                OrbitalElements::Keplerian { elements: ke2, .. },
+            ) => {
                 abs_diff_eq!(ke1.semi_major_axis, ke2.semi_major_axis, epsilon = tol)
                     && abs_diff_eq!(ke1.eccentricity, ke2.eccentricity, epsilon = tol)
                     && abs_diff_eq!(ke1.inclination, ke2.inclination, epsilon = tol)
@@ -233,7 +388,10 @@ pub(crate) mod orbit_type_test {
                     )
                     && abs_diff_eq!(ke1.mean_anomaly, ke2.mean_anomaly, epsilon = tol)
             }
-            (OrbitalElements::Equinoctial(ee1), OrbitalElements::Equinoctial(ee2)) => {
+            (
+                OrbitalElements::Equinoctial { elements: ee1, .. },
+                OrbitalElements::Equinoctial { elements: ee2, .. },
+            ) => {
                 abs_diff_eq!(ee1.semi_major_axis, 0.0, epsilon = tol)
                     && abs_diff_eq!(
                         ee1.eccentricity_sin_lon,
@@ -257,7 +415,10 @@ pub(crate) mod orbit_type_test {
                     )
                     && abs_diff_eq!(ee1.mean_longitude, ee2.mean_longitude, epsilon = tol)
             }
-            (OrbitalElements::Cometary(ce1), OrbitalElements::Cometary(ce2)) => {
+            (
+                OrbitalElements::Cometary { elements: ce1, .. },
+                OrbitalElements::Cometary { elements: ce2, .. },
+            ) => {
                 abs_diff_eq!(
                     ce1.perihelion_distance,
                     ce2.perihelion_distance,
@@ -317,7 +478,7 @@ pub(crate) mod orbit_type_test {
         let elems = OrbitalElements::from_orbital_state(&r, &v, jd_tdb);
 
         match elems {
-            OrbitalElements::Keplerian(ke) => {
+            OrbitalElements::Keplerian { elements: ke, .. } => {
                 assert!(ke.semi_major_axis > 0.0);
                 // Loose target for a sanity check, not a golden number.
                 assert_abs_diff_eq!(ke.semi_major_axis, 1.8155, epsilon = 5e-3);
@@ -343,7 +504,7 @@ pub(crate) mod orbit_type_test {
         let elems = OrbitalElements::from_orbital_state(&r, &v, jd_tdb);
 
         match elems {
-            OrbitalElements::Cometary(ce) => {
+            OrbitalElements::Cometary { elements: ce, .. } => {
                 assert!(ce.eccentricity >= 1.0);
                 assert!(ce.perihelion_distance > 0.0);
             }
@@ -364,11 +525,17 @@ pub(crate) mod orbit_type_test {
             periapsis_argument: deg(30.0),
             mean_anomaly: deg(40.0),
         };
-        let oe = OrbitalElements::Keplerian(ke.clone());
+        let oe = OrbitalElements::Keplerian {
+            elements: ke.clone(),
+            uncertainty: None,
+            covariance: None,
+        };
 
         let back = oe
             .to_keplerian()
-            .expect("Keplerian -> Keplerian should succeed");
+            .expect("Keplerian -> Keplerian should succeed")
+            .as_keplerian()
+            .expect("Failed to convert to Keplerian");
 
         assert_abs_diff_eq!(back.semi_major_axis, ke.semi_major_axis, epsilon = 1e-14);
         assert_abs_diff_eq!(back.eccentricity, ke.eccentricity, epsilon = 1e-14);
@@ -397,11 +564,17 @@ pub(crate) mod orbit_type_test {
             periapsis_argument: deg(35.0),
             mean_anomaly: deg(45.0),
         };
-        let oe = OrbitalElements::Keplerian(ke.clone());
+        let oe = OrbitalElements::Keplerian {
+            elements: ke.clone(),
+            uncertainty: None,
+            covariance: None,
+        };
 
         let eq = oe
             .to_equinoctial()
-            .expect("Keplerian -> Equinoctial should succeed");
+            .expect("Keplerian -> Equinoctial should succeed")
+            .as_equinoctial()
+            .expect("Failed to convert to Equinoctial");
         let ke_back = KeplerianElements::from(&eq);
 
         // Use a mix of absolute and relative checks to be robust to scaling.
@@ -433,9 +606,17 @@ pub(crate) mod orbit_type_test {
             mean_anomaly: deg(10.0),
         };
         let eq = EquinoctialElements::from(&ke);
-        let oe = OrbitalElements::Equinoctial(eq.clone());
+        let oe = OrbitalElements::Equinoctial {
+            elements: eq.clone(),
+            uncertainty: None,
+            covariance: None,
+        };
 
-        let back_via_enum = oe.to_keplerian().expect("Eq -> Kep should succeed");
+        let back_via_enum = oe
+            .to_keplerian()
+            .expect("Eq -> Kep should succeed")
+            .as_keplerian()
+            .expect("Failed to convert to Keplerian");
         let back_via_direct = KeplerianElements::from(&eq);
 
         assert_abs_diff_eq!(
@@ -484,11 +665,17 @@ pub(crate) mod orbit_type_test {
             periapsis_argument: deg(45.0),
             true_anomaly: deg(5.0),
         };
-        let oe = OrbitalElements::Cometary(ce);
+        let oe = OrbitalElements::Cometary {
+            elements: ce,
+            uncertainty: None,
+            covariance: None,
+        };
 
         let ke = oe
             .to_keplerian()
-            .expect("Cometary(e>1) -> Keplerian should succeed for hyperbolic orbits");
+            .expect("Cometary(e>1) -> Keplerian should succeed for hyperbolic orbits")
+            .as_keplerian()
+            .expect("Failed to convert to Keplerian");
 
         assert!(ke.eccentricity >= 1.0, "expected e >= 1 for hyperbola");
         assert!(ke.semi_major_axis < 0.0, "expected a < 0 for hyperbola");
@@ -508,9 +695,16 @@ pub(crate) mod orbit_type_test {
             periapsis_argument: deg(30.0),
             true_anomaly: deg(15.0),
         };
-        let oe = OrbitalElements::Cometary(ce);
+        let oe = OrbitalElements::Cometary {
+            elements: ce,
+            uncertainty: None,
+            covariance: None,
+        };
 
         if let Ok(eq) = oe.to_equinoctial() {
+            let eq = eq
+                .as_equinoctial()
+                .expect("Failed to convert to Equinoctial after successful conversion");
             assert!(
                 eq.semi_major_axis < 0.0,
                 "equinoctial a should be < 0 for hyperbolic orbits"
@@ -542,20 +736,32 @@ pub(crate) mod orbit_type_test {
             true_anomaly: 0.0,
         };
 
-        let oe_k = OrbitalElements::Keplerian(ke.clone());
-        assert!(oe_k.as_keplerian().is_some());
-        assert!(oe_k.as_equinoctial().is_none());
-        assert!(oe_k.as_cometary().is_none());
+        let oe_k = OrbitalElements::Keplerian {
+            elements: ke.clone(),
+            uncertainty: None,
+            covariance: None,
+        };
+        assert!(oe_k.as_keplerian_ref().is_some());
+        assert!(oe_k.as_equinoctial_ref().is_none());
+        assert!(oe_k.as_cometary_ref().is_none());
 
-        let oe_e = OrbitalElements::Equinoctial(eq);
-        assert!(oe_e.as_keplerian().is_none());
-        assert!(oe_e.as_equinoctial().is_some());
-        assert!(oe_e.as_cometary().is_none());
+        let oe_e = OrbitalElements::Equinoctial {
+            elements: eq,
+            uncertainty: None,
+            covariance: None,
+        };
+        assert!(oe_e.as_keplerian_ref().is_none());
+        assert!(oe_e.as_equinoctial_ref().is_some());
+        assert!(oe_e.as_cometary_ref().is_none());
 
-        let oe_c = OrbitalElements::Cometary(ce);
-        assert!(oe_c.as_keplerian().is_none());
-        assert!(oe_c.as_equinoctial().is_none());
-        assert!(oe_c.as_cometary().is_some());
+        let oe_c = OrbitalElements::Cometary {
+            elements: ce,
+            uncertainty: None,
+            covariance: None,
+        };
+        assert!(oe_c.as_keplerian_ref().is_none());
+        assert!(oe_c.as_equinoctial_ref().is_none());
+        assert!(oe_c.as_cometary_ref().is_some());
     }
 
     // ---------- Display formatting ----------
@@ -582,13 +788,34 @@ pub(crate) mod orbit_type_test {
             true_anomaly: deg(0.0),
         };
 
-        let s_k = format!("{}", OrbitalElements::Keplerian(ke));
+        let s_k = format!(
+            "{}",
+            OrbitalElements::Keplerian {
+                elements: ke,
+                uncertainty: None,
+                covariance: None,
+            }
+        );
         assert!(s_k.starts_with("[Keplerian]"));
 
-        let s_e = format!("{}", OrbitalElements::Equinoctial(eq));
+        let s_e = format!(
+            "{}",
+            OrbitalElements::Equinoctial {
+                elements: eq,
+                uncertainty: None,
+                covariance: None,
+            }
+        );
         assert!(s_e.starts_with("[Equinoctial]"));
 
-        let s_c = format!("{}", OrbitalElements::Cometary(ce));
+        let s_c = format!(
+            "{}",
+            OrbitalElements::Cometary {
+                elements: ce,
+                uncertainty: None,
+                covariance: None,
+            }
+        );
         assert!(s_c.starts_with("[Cometary]"));
     }
 }

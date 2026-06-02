@@ -77,15 +77,19 @@ fn test_iod_from_polars() {
     let best_orbit = full_orbit.remove(&"14226".into()).unwrap().unwrap();
     let orbit = best_orbit.orbital_elements();
 
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60894.372896385554,
-        semi_major_axis: 0.5415009930884174,
-        eccentricity: 0.9027228307040831,
-        inclination: 0.31200939353818746,
-        ascending_node_longitude: 5.550735343593096,
-        periapsis_argument: 3.1638244350882596,
-        mean_anomaly: 2.7888128618151495,
-    });
+    let expected_orbit = OrbitalElements::Keplerian {
+        elements: KeplerianElements {
+            reference_epoch: 60894.372896385554,
+            semi_major_axis: 0.5415009930884174,
+            eccentricity: 0.9027228307040831,
+            inclination: 0.31200939353818746,
+            ascending_node_longitude: 5.550735343593096,
+            periapsis_argument: 3.1638244350882596,
+            mean_anomaly: 2.7888128618151495,
+        },
+        uncertainty: None,
+        covariance: None,
+    };
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
@@ -99,15 +103,19 @@ fn test_iod_from_polars() {
     let best_orbit = full_orbit.remove(&"29757".into()).unwrap().unwrap();
     let orbit = best_orbit.orbital_elements();
 
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60835.25573266984,
-        semi_major_axis: 0.635955220245824,
-        eccentricity: 0.5904849550180079,
-        inclination: 0.2263529126300279,
-        ascending_node_longitude: 4.366539949885583,
-        periapsis_argument: 3.3107966723035602,
-        mean_anomaly: 3.0157533331616966,
-    });
+    let expected_orbit = OrbitalElements::Keplerian {
+        elements: KeplerianElements {
+            reference_epoch: 60835.25573266984,
+            semi_major_axis: 0.635955220245824,
+            eccentricity: 0.5904849550180079,
+            inclination: 0.2263529126300279,
+            ascending_node_longitude: 4.366539949885583,
+            periapsis_argument: 3.3107966723035602,
+            mean_anomaly: 3.0157533331616966,
+        },
+        uncertainty: None,
+        covariance: None,
+    };
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
@@ -121,15 +129,19 @@ fn test_iod_from_polars() {
     let best_orbit = full_orbit.remove(&"95777".into()).unwrap().unwrap();
     let orbit = best_orbit.orbital_elements();
 
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60894.252965553926,
-        semi_major_axis: 1.24701989952089,
-        eccentricity: 0.2082069422196415,
-        inclination: 0.08116316040114972,
-        ascending_node_longitude: 2.49554922649176,
-        periapsis_argument: 2.5470318525197477,
-        mean_anomaly: 0.2983936748249412,
-    });
+    let expected_orbit = OrbitalElements::Keplerian {
+        elements: KeplerianElements {
+            reference_epoch: 60894.252965553926,
+            semi_major_axis: 1.24701989952089,
+            eccentricity: 0.2082069422196415,
+            inclination: 0.08116316040114972,
+            ascending_node_longitude: 2.49554922649176,
+            periapsis_argument: 2.5470318525197477,
+            mean_anomaly: 0.2983936748249412,
+        },
+        uncertainty: None,
+        covariance: None,
+    };
 
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
