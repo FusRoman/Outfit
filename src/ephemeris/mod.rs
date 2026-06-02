@@ -92,12 +92,14 @@
 
 pub(crate) mod aberration;
 pub(crate) mod apparent_position;
+pub mod batch;
 pub(crate) mod geometry;
 pub(crate) mod observation_ephemeris;
 pub mod request;
 pub mod result;
 pub use aberration::AberrationOrder;
 pub use apparent_position::ApparentPosition;
+pub use batch::FullOrbitResultExt;
 pub use geometry::BodyGeometry;
 pub use request::{
     Combined, EphemerisMode, EphemerisOutputKind, EphemerisRequest, Geometry, ObserverRequest,

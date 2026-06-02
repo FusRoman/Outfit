@@ -28,8 +28,8 @@ use outfit::{
     orbit_type::OrbitalElements,
     propagator::{NBodyConfig, PropagatorKind},
     AberrationOrder, Combined, DifferentialCorrectionConfig, EphemerisConfig, EphemerisEntry,
-    EphemerisMode, EphemerisRequest, FitLSQ, FullOrbitResult, Geometry, IODParams, JPLEphem,
-    Position,
+    EphemerisMode, EphemerisRequest, FitLSQ, FullOrbitResult, FullOrbitResultExt, Geometry,
+    IODParams, JPLEphem, OutfitError, Position,
 };
 use photom::{
     observation_dataset::{observation::Observation, ObsDataset},
@@ -557,4 +557,230 @@ fn test_ephemeris_8467_nbody() {
 #[test]
 fn test_ephemeris_2015ab_nbody() {
     run_nbody_ephemeris_test(TrajId::from("K09R05F"), 15.0);
+}
+
+// ── Batch ephemeris tests (FullOrbitResultExt) ────────────────────────────────
+
+/// Run `fit_lsq` on the full dataset and return the `FullOrbitResult`.
+fn fit_all_lsq(
+    dataset: ObsDataset,
+    jpl: &JPLEphem,
+    ut1: &Ut1Provider,
+    iod_params: &IODParams,
+    diff_cor_config: &DifferentialCorrectionConfig,
+) -> FullOrbitResult {
+    dataset
+        .fit_lsq(
+            jpl,
+            ut1,
+            ObsErrorModel::FCCT14,
+            iod_params,
+            diff_cor_config,
+            None,
+            &mut StdRng::seed_from_u64(42),
+        )
+        .expect("fit_lsq failed")
+}
+
+/// `compute_ephemerides` must return a map whose key set equals that of the
+/// input `FullOrbitResult`, with every successfully determined orbit producing
+/// an `Ok(EphemerisResult)` whose entry count matches the number of
+/// observation epochs supplied via `At` mode.
+#[test]
+fn test_batch_compute_ephemerides_key_coverage() {
+    let (jpl, ut1, dataset, iod_params, diff_cor_config) = build_fixtures();
+    let orbits = fit_all_lsq(dataset.clone(), &jpl, &ut1, &iod_params, &diff_cor_config);
+
+    let traj_ids = [
+        TrajId::Int(33803),
+        TrajId::Int(8467),
+        TrajId::from("K09R05F"),
+    ];
+
+    // Build a single geocentric At-mode request with all epochs of the three
+    // trajectories merged into one observer slot.
+    let geo_obs = geocentric_observer();
+    let all_epochs: Vec<Epoch> = traj_ids
+        .iter()
+        .flat_map(|tid| {
+            let (_, epochs) = traj_obs_and_epochs(&dataset, tid.clone());
+            epochs
+        })
+        .collect();
+    let n_epochs = all_epochs.len();
+
+    let request = EphemerisRequest::<Position>::new(EphemerisConfig::default())
+        .add(geo_obs, EphemerisMode::At(all_epochs));
+
+    let batch = orbits.compute_ephemerides(&request, &jpl, &ut1);
+
+    // The output map must have the same number of keys as the input.
+    assert_eq!(
+        batch.len(),
+        orbits.len(),
+        "batch map key count differs from input FullOrbitResult"
+    );
+
+    // Every trajectory that succeeded in orbit determination must produce an
+    // Ok result containing exactly `n_epochs` entries.
+    for traj_id in &traj_ids {
+        let entry = batch
+            .get(traj_id)
+            .unwrap_or_else(|| panic!("{traj_id:?} missing from batch result"));
+
+        let ephem = entry
+            .as_ref()
+            .unwrap_or_else(|e| panic!("{traj_id:?} unexpected Err in batch: {e}"));
+
+        assert_eq!(
+            ephem.len(),
+            n_epochs,
+            "{traj_id:?}: expected {n_epochs} entries, got {}",
+            ephem.len()
+        );
+    }
+}
+
+/// Errors from orbit determination must be forwarded as `Err` values in the
+/// batch output map.  We inject a synthetic failure by constructing a
+/// `FullOrbitResult` with one `Err` entry and one real orbit.
+#[test]
+fn test_batch_error_forwarding() {
+    let (jpl, ut1, dataset, iod_params, diff_cor_config) = build_fixtures();
+    let mut orbits = fit_all_lsq(dataset.clone(), &jpl, &ut1, &iod_params, &diff_cor_config);
+
+    // Inject a synthetic failure for a fake trajectory id.
+    let fake_id = TrajId::Int(99999);
+    orbits.insert(
+        fake_id.clone(),
+        Err(OutfitError::InvalidConversion(
+            "synthetic failure".to_string(),
+        )),
+    );
+
+    let geo_obs = geocentric_observer();
+    let (_, epochs) = traj_obs_and_epochs(&dataset, TrajId::Int(33803));
+    let request = EphemerisRequest::<Position>::new(EphemerisConfig::default())
+        .add(geo_obs, EphemerisMode::At(epochs));
+
+    let batch = orbits.compute_ephemerides(&request, &jpl, &ut1);
+
+    // The fake id must appear in the output as an Err.
+    let fake_entry = batch
+        .get(&fake_id)
+        .unwrap_or_else(|| panic!("fake traj {fake_id:?} missing from batch result"));
+    assert!(
+        fake_entry.is_err(),
+        "expected Err for fake traj {fake_id:?}, got Ok"
+    );
+
+    // The real trajectories must still be Ok.
+    for traj_id in [
+        TrajId::Int(33803),
+        TrajId::Int(8467),
+        TrajId::from("K09R05F"),
+    ] {
+        let entry = batch
+            .get(&traj_id)
+            .unwrap_or_else(|| panic!("{traj_id:?} missing"));
+        assert!(entry.is_ok(), "{traj_id:?} should be Ok but got Err");
+    }
+}
+
+/// `compute_ephemerides` with a `Combined` output kind: verify that every
+/// successfully determined orbit produces no per-entry errors and that
+/// geometric quantities are in their expected ranges.
+#[test]
+fn test_batch_compute_ephemerides_combined() {
+    let (jpl, ut1, dataset, iod_params, diff_cor_config) = build_fixtures();
+    let orbits = fit_all_lsq(dataset.clone(), &jpl, &ut1, &iod_params, &diff_cor_config);
+
+    let geo_obs = geocentric_observer();
+    let traj_ids = [TrajId::Int(33803), TrajId::Int(8467)];
+
+    for traj_id in &traj_ids {
+        let (_, epochs) = traj_obs_and_epochs(&dataset, traj_id.clone());
+
+        let request = EphemerisRequest::<Combined>::new(EphemerisConfig::default())
+            .add(geo_obs.clone(), EphemerisMode::At(epochs.clone()));
+
+        let batch = orbits.compute_ephemerides(&request, &jpl, &ut1);
+
+        let ephem = batch
+            .get(traj_id)
+            .unwrap_or_else(|| panic!("{traj_id:?} missing"))
+            .as_ref()
+            .unwrap_or_else(|e| panic!("{traj_id:?} Err: {e}"));
+
+        assert_eq!(
+            ephem.error_count(),
+            0,
+            "{traj_id:?} Combined batch: {} epochs failed",
+            ephem.error_count()
+        );
+
+        for entry in ephem.successes() {
+            let (ap, geo) = entry.result.as_ref().unwrap();
+            assert!(
+                (0.0..2.0 * std::f64::consts::PI).contains(&ap.coord.ra),
+                "{traj_id:?}: RA {:.4} rad out of [0, 2π)",
+                ap.coord.ra
+            );
+            assert!(
+                (0.0..=std::f64::consts::PI).contains(&geo.phase_angle),
+                "{traj_id:?}: phase angle {:.4} rad out of [0, π]",
+                geo.phase_angle
+            );
+        }
+    }
+}
+
+/// Parallel batch must return the same number of keys and the same entry
+/// counts as the sequential version.
+#[cfg(feature = "parallel")]
+#[test]
+fn test_batch_compute_ephemerides_parallel_matches_sequential() {
+    let (jpl, ut1, dataset, iod_params, diff_cor_config) = build_fixtures();
+    let orbits = fit_all_lsq(dataset.clone(), &jpl, &ut1, &iod_params, &diff_cor_config);
+
+    let geo_obs = geocentric_observer();
+    let all_epochs: Vec<Epoch> = [
+        TrajId::Int(33803),
+        TrajId::Int(8467),
+        TrajId::from("K09R05F"),
+    ]
+    .iter()
+    .flat_map(|tid| {
+        let (_, epochs) = traj_obs_and_epochs(&dataset, tid.clone());
+        epochs
+    })
+    .collect();
+
+    let request = EphemerisRequest::<Position>::new(EphemerisConfig::default())
+        .add(geo_obs, EphemerisMode::At(all_epochs));
+
+    let seq = orbits.compute_ephemerides(&request, &jpl, &ut1);
+    let par = orbits.compute_ephemerides_parallel(&request, &jpl, &ut1);
+
+    // Same key set.
+    assert_eq!(par.len(), seq.len(), "parallel map has different key count");
+
+    // For every key, both results must agree on Ok/Err and on entry count.
+    for (traj_id, seq_entry) in &seq {
+        let par_entry = par
+            .get(traj_id)
+            .unwrap_or_else(|| panic!("{traj_id:?} missing from parallel result"));
+
+        match (seq_entry, par_entry) {
+            (Ok(s), Ok(p)) => assert_eq!(
+                s.len(),
+                p.len(),
+                "{traj_id:?}: sequential has {} entries, parallel has {}",
+                s.len(),
+                p.len()
+            ),
+            (Err(_), Err(_)) => {}
+            _ => panic!("{traj_id:?}: sequential and parallel disagree on Ok/Err"),
+        }
+    }
 }

@@ -270,8 +270,8 @@ pub use crate::jpl_ephem::JPLEphem;
 // Ephemeris façade
 pub use crate::ephemeris::{
     AberrationOrder, ApparentPosition, BodyGeometry, Combined, EphemerisConfig, EphemerisEntry,
-    EphemerisMode, EphemerisOutputKind, EphemerisRequest, EphemerisResult, Geometry,
-    ObserverRequest, Position,
+    EphemerisMode, EphemerisOutputKind, EphemerisRequest, EphemerisResult, FullOrbitResultExt,
+    Geometry, ObserverRequest, Position,
 };
 
 // IOD entry points and result types
