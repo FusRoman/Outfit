@@ -22,39 +22,51 @@ struct ExpectedResult {
 fn expected_results() -> Vec<ExpectedResult> {
     vec![
         ExpectedResult {
-            orbit: OrbitalElements::Keplerian(KeplerianElements {
-                reference_epoch: 57049.2684537375,
-                semi_major_axis: 1.801740835743616,
-                eccentricity: 0.28356259478492557,
-                inclination: 0.2026828189979528,
-                ascending_node_longitude: 0.007951791820548622,
-                periapsis_argument: 1.2450647642587158,
-                mean_anomaly: 0.4408048786626789,
-            }),
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 57049.2684537375,
+                    semi_major_axis: 1.801740835743616,
+                    eccentricity: 0.28356259478492557,
+                    inclination: 0.2026828189979528,
+                    ascending_node_longitude: 0.007951791820548622,
+                    periapsis_argument: 1.2450647642587158,
+                    mean_anomaly: 0.4408048786626789,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
             rms: 66.97479288637471,
         },
         ExpectedResult {
-            orbit: OrbitalElements::Keplerian(KeplerianElements {
-                reference_epoch: 60672.2443617134,
-                semi_major_axis: 3.2199380906809876,
-                eccentricity: 0.0624192099888107,
-                inclination: 0.1829771029880289,
-                ascending_node_longitude: 0.030775930195064964,
-                periapsis_argument: 1.9053705720223801,
-                mean_anomaly: 4.980622835177979,
-            }),
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 60672.2443617134,
+                    semi_major_axis: 3.2199380906809876,
+                    eccentricity: 0.0624192099888107,
+                    inclination: 0.1829771029880289,
+                    ascending_node_longitude: 0.030775930195064964,
+                    periapsis_argument: 1.9053705720223801,
+                    mean_anomaly: 4.980622835177979,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
             rms: 0.5739558189489471,
         },
         ExpectedResult {
-            orbit: OrbitalElements::Keplerian(KeplerianElements {
-                reference_epoch: 60465.26777915681,
-                semi_major_axis: 2.1874983804796972,
-                eccentricity: 0.20256414489486008,
-                inclination: 0.11906245183260411,
-                ascending_node_longitude: 3.0918063960305293,
-                periapsis_argument: 2.4793248309745692,
-                mean_anomaly: 4.934465465531324,
-            }),
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 60465.26777915681,
+                    semi_major_axis: 2.1874983804796972,
+                    eccentricity: 0.20256414489486008,
+                    inclination: 0.11906245183260411,
+                    ascending_node_longitude: 3.0918063960305293,
+                    periapsis_argument: 2.4793248309745692,
+                    mean_anomaly: 4.934465465531324,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
             rms: 18.963755528781288,
         },
     ]

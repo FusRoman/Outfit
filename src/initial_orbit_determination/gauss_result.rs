@@ -223,15 +223,19 @@ mod gauss_results_tests {
     use std::format;
 
     fn dummy_orbit() -> OrbitalElements {
-        OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59000.0,
-            semi_major_axis: 2.5,
-            eccentricity: 0.12,
-            inclination: 0.1,
-            ascending_node_longitude: 1.2,
-            periapsis_argument: 0.8,
-            mean_anomaly: 0.3,
-        })
+        OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59000.0,
+                semi_major_axis: 2.5,
+                eccentricity: 0.12,
+                inclination: 0.1,
+                ascending_node_longitude: 1.2,
+                periapsis_argument: 0.8,
+                mean_anomaly: 0.3,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     }
 
     #[test]
@@ -264,15 +268,19 @@ mod gauss_results_tests {
 
     #[test]
     fn test_display_format_summary() {
-        let orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59001.5,
-            semi_major_axis: 1.234567,
-            eccentricity: 0.1,
-            inclination: 0.2,
-            ascending_node_longitude: 0.3,
-            periapsis_argument: 0.4,
-            mean_anomaly: 0.5,
-        });
+        let orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59001.5,
+                semi_major_axis: 1.234567,
+                eccentricity: 0.1,
+                inclination: 0.2,
+                ascending_node_longitude: 0.3,
+                periapsis_argument: 0.4,
+                mean_anomaly: 0.5,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         let result = GaussResult::CorrectedOrbit(orbit);
 
@@ -284,6 +292,6 @@ mod gauss_results_tests {
         assert!(output.contains("a   (semi-major axis)       = 1.234567 AU"));
         assert!(output.contains("e   (eccentricity)          = 0.100000"));
         assert!(output.contains("i   (inclination)           = 0.200000 rad (11.459156°)"));
-        assert!(output.contains("Keplerian Elements @ epoch (MJD): 59001.500000"));
+        assert!(output.contains("Elements @ epoch (MJD): 59001.500000"));
     }
 }

@@ -488,7 +488,13 @@ impl TrajectoryFit for Vec<&Observation> {
                 };
 
                 // 4.b) Convert to the element set required by the scorer.
-                let equinoctial_elements = gauss_res.get_orbit().to_equinoctial()?;
+                let equinoctial_elements = gauss_res
+                    .get_orbit()
+                    .to_equinoctial()?
+                    .as_equinoctial()
+                    .ok_or(OutfitError::InvalidConversion(
+                        "Conversion to equinoctial elements failed".to_string(),
+                    ))?;
 
                 // 4.c) Score orbit vs. full observation set (RMS residual).
                 let rms = match self.rms_orbit_error(
@@ -817,15 +823,19 @@ mod test_obs_ext {
 
         let orbit = best_orbit.orbital_elements();
 
-        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 57049.22904475403,
-            semi_major_axis: 1.8017609974509807,
-            eccentricity: 0.2835733667643381,
-            inclination: 0.20267686119302475,
-            ascending_node_longitude: 0.00799201841873464,
-            periapsis_argument: 1.245034216916367,
-            mean_anomaly: 0.4405089048961484,
-        });
+        let expected_orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 57049.22904475403,
+                semi_major_axis: 1.8017609974509807,
+                eccentricity: 0.2835733667643381,
+                inclination: 0.20267686119302475,
+                ascending_node_longitude: 0.00799201841873464,
+                periapsis_argument: 1.245034216916367,
+                mean_anomaly: 0.4405089048961484,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         assert!(approx_equal(orbit, &expected_orbit, 1e-14));
         assert_relative_eq!(

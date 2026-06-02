@@ -111,8 +111,8 @@ use hifitime::ut1::Ut1Provider;
 
 use crate::{
     cache::observer_fixed_cache::ObserverFixedCache,
-    ephemeris::observation_ephemeris::check_elliptical_orbit, propagator::PropagatorKind, JPLEphem,
-    OrbitalElements, OutfitError,
+    ephemeris::observation_ephemeris::check_elliptical_orbit, propagator::PropagatorKind,
+    EquinoctialElements, JPLEphem, OrbitalElements, OutfitError,
 };
 
 // ---------------------------------------------------------------------------
@@ -291,7 +291,11 @@ impl OrbitalElements {
 
     /// Convert `self` to [`crate::EquinoctialElements`] for use in ephemeris
     /// computation.
-    fn to_equinoctial_for_ephemeris(&self) -> Result<crate::EquinoctialElements, OutfitError> {
-        self.to_equinoctial()
+    fn to_equinoctial_for_ephemeris(&self) -> Result<EquinoctialElements, OutfitError> {
+        self.to_equinoctial()?
+            .as_equinoctial()
+            .ok_or(OutfitError::InvalidConversion(
+                "Conversion to equinoctial elements failed".to_string(),
+            ))
     }
 }

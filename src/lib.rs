@@ -28,7 +28,12 @@
 //!   - Classical **Gauss method** for three observations.
 //! - **Orbital elements**:
 //!   - Classical **Keplerian elements**,
-//!   - **Equinoctial elements** with conversions and two-body solver.
+//!   - **Equinoctial elements** with conversions and two-body solver,
+//!   - **Cometary elements** for parabolic and hyperbolic trajectories.
+//! - **Uncertainty propagation**:
+//!   - Full **covariance matrix propagation** between orbital element representations,
+//!   - Standard deviations and correlations tracked via **Jacobian transformations**,
+//!   - Rigorous linear uncertainty propagation for orbit conversions.
 //! - **Reference frames & preprocessing**:
 //!   - Precession, nutation (IAU 1980), aberration, and light-time correction,
 //!   - Ecliptic ↔ equatorial conversions, RA/DEC parsing, time systems.
@@ -46,6 +51,22 @@
 //!
 //! - **Vaisalä method** for short arcs,
 //! - Full support for **hyperbolic trajectories**.
+//!
+//! ## Why Track Uncertainties?
+//!
+//! Orbital element uncertainties quantify the confidence in derived orbits and are essential for:
+//!
+//! - **Orbit quality assessment** — distinguishing reliable solutions from poorly-constrained fits.
+//! - **Prediction uncertainty** — forecasting position errors for future ephemerides.
+//! - **Data association** — deciding whether observations belong to the same object.
+//! - **Differential correction** — weighting observations and detecting outliers.
+//! - **Mission planning** — evaluating pointing and timing requirements for follow-up observations.
+//!
+//! Outfit propagates uncertainties rigorously through coordinate transformations using **Jacobian
+//! matrices** and **linear covariance propagation**, ensuring that correlations between orbital
+//! parameters are preserved when converting between Keplerian, equinoctial, and cometary representations.
+//!
+//! For mathematical details and usage examples, see the [`orbit_type`] module documentation.
 //!
 //! ## Workflow at a Glance
 //!
@@ -177,7 +198,7 @@
 //!
 //! - [`initial_orbit_determination`] — Gauss IOD algorithm, triplet generation, IOD parameters, public api to perform iod on an [`ObsDataset`](photom::observation_dataset::ObsDataset).
 //! - [`jpl_ephem`] — Ephemerides backends (Horizons/NAIF DE440).
-//! - [`orbit_type`] — Orbital element representations (Keplerian, Equinoctial, Cometary).
+//! - [`orbit_type`] — Orbital element representations (Keplerian, Equinoctial, Cometary) with full covariance propagation and uncertainty tracking for conversions between representations.
 //! - [`ref_system`] — Reference frame transformations.
 //! - [`constants`] — Physical constants and unit conversions.
 //! - [`conversion`] — RA/DEC parsing and coordinate utilities.

@@ -76,13 +76,13 @@
 //!     GaussResult::PrelimOrbit(oe)
 //!     | GaussResult::CorrectedOrbit(oe) => {
 //!         match oe {
-//!             OrbitalElements::Keplerian(kepl) => {
+//!             OrbitalElements::Keplerian { elements: kepl, .. } => {
 //!                 println!("a [AU] = {}", kepl.semi_major_axis);
 //!             }
-//!             OrbitalElements::Equinoctial(eq) => {
+//!             OrbitalElements::Equinoctial { elements: eq, .. } => {
 //!                 println!("lambda [rad] = {}", eq.mean_longitude);
 //!             }
-//!             OrbitalElements::Cometary(com) => {
+//!             OrbitalElements::Cometary { elements: com, .. } => {
 //!                 println!("q [AU] = {}", com.perihelion_distance);
 //!             }
 //!         }
@@ -1737,15 +1737,19 @@ pub(crate) mod gauss_test {
         // The values are very close to the ones obtained from the Rust implementation
         // The floating point differences is very close to one ulp
         // (unit in the last place) of the floating point representation
-        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 57_049.229_045_244_22,
-            semi_major_axis: 1.8014943988486352,
-            eccentricity: 0.283_514_142_249_080_7,
-            inclination: 0.20264170920820326,
-            ascending_node_longitude: 8.118_562_444_269_591E-3,
-            periapsis_argument: 1.244_795_311_814_302,
-            mean_anomaly: 0.44065425435816186,
-        });
+        let expected_orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 57_049.229_045_244_22,
+                semi_major_axis: 1.8014943988486352,
+                eccentricity: 0.283_514_142_249_080_7,
+                inclination: 0.20264170920820326,
+                ascending_node_longitude: 8.118_562_444_269_591E-3,
+                periapsis_argument: 1.244_795_311_814_302,
+                mean_anomaly: 0.44065425435816186,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         // Compare the prelim_orbit with the expected orbit
         assert!(approx_equal(prelim_orbit, &expected_orbit, tol));
@@ -1766,15 +1770,19 @@ pub(crate) mod gauss_test {
         let binding = a.prelim_orbit(&IODParams::default()).unwrap();
         let prelim_orbit_a = binding.get_orbit();
 
-        let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 57049.22904525282,
-            semi_major_axis: 1.801490008178814,
-            eccentricity: 0.28350961635625993,
-            inclination: 0.20264261257939395,
-            ascending_node_longitude: 0.008105552171682476,
-            periapsis_argument: 1.244832121745955,
-            mean_anomaly: 0.4406444535028061,
-        });
+        let expected_orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 57049.22904525282,
+                semi_major_axis: 1.801490008178814,
+                eccentricity: 0.28350961635625993,
+                inclination: 0.20264261257939395,
+                ascending_node_longitude: 0.008105552171682476,
+                periapsis_argument: 1.244832121745955,
+                mean_anomaly: 0.4406444535028061,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         // Compare the prelim_orbit_a with the expected orbit
         assert!(approx_equal(prelim_orbit_a, &expected_orbit, tol));
@@ -1814,15 +1822,19 @@ pub(crate) mod gauss_test {
 
         // This is the expected orbit based on the Orbfit software
         // The values are obtained from the Orbfit output for the same observations
-        let expected_orbfit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 57_049.229_045_608_86,
-            semi_major_axis: 1.8013098187420686,
-            eccentricity: 0.28347096712267805,
-            inclination: 0.202_617_665_872_441_2,
-            ascending_node_longitude: 8.194_805_420_465_082E-3,
-            periapsis_argument: 1.2446747244785052,
-            mean_anomaly: 0.44073731381184733,
-        });
+        let expected_orbfit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 57_049.229_045_608_86,
+                semi_major_axis: 1.8013098187420686,
+                eccentricity: 0.28347096712267805,
+                inclination: 0.202_617_665_872_441_2,
+                ascending_node_longitude: 8.194_805_420_465_082E-3,
+                periapsis_argument: 1.2446747244785052,
+                mean_anomaly: 0.44073731381184733,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         // Compare the prelim_orbit_b with the expected orbit
         // The epsilon value is set to 1e-13 for a very close match between the OrbFit and the Rust implementation

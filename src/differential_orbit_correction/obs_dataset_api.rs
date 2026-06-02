@@ -26,7 +26,7 @@ use crate::{
         obs_fit_data::ObsFitData,
     },
     initial_orbit_determination::{obs_dataset_api::run_iod_on_observations, IODParams},
-    FullOrbitResult, JPLEphem, OrbitalElements, OutfitError,
+    FullOrbitResult, JPLEphem, OutfitError,
 };
 use hifitime::ut1::Ut1Provider;
 use photom::{
@@ -210,7 +210,13 @@ fn run_differential_correction_for_trajectory(
     let initial_equinoctial = match initial_orbits.and_then(|map| map.get(traj_id)) {
         Some(Ok(orbital_elements)) => {
             // Caller provided an initial orbit — convert to equinoctial.
-            orbital_elements.orbital_elements().to_equinoctial()?
+            orbital_elements
+                .orbital_elements()
+                .to_equinoctial()?
+                .as_equinoctial()
+                .ok_or(OutfitError::InvalidConversion(
+                    "Conversion to equinoctial elements failed".to_string(),
+                ))?
         }
         Some(Err(_)) | None => {
             // No initial orbit — run IOD directly on the already-corrected
@@ -218,7 +224,13 @@ fn run_differential_correction_for_trajectory(
             // dataset.  This avoids reconstructing an ObsDataset and
             // rebuilding the cache.
             let iod_result = run_iod_on_observations(&observations, cache, jpl, iod_params, rng)?;
-            iod_result.orbital_elements().to_equinoctial()?
+            iod_result
+                .orbital_elements()
+                .to_equinoctial()?
+                .as_equinoctial()
+                .ok_or(OutfitError::InvalidConversion(
+                    "Conversion to equinoctial elements failed".to_string(),
+                ))?
         }
     };
 
@@ -239,9 +251,9 @@ fn run_differential_correction_for_trajectory(
     )?;
 
     // ── Package the result ────────────────────────────────────────────────────
-    let orbital_elements = OrbitalElements::Equinoctial(dc_output.elements);
+    let normalised_rms = dc_output.normalised_rms;
     Ok(FitOrbitResult::DifferentialCorrection((
-        orbital_elements,
-        dc_output.normalised_rms,
+        dc_output.into(),
+        normalised_rms,
     )))
 }

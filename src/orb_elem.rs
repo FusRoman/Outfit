@@ -129,15 +129,19 @@ pub(crate) fn ccek1(
         let true_anomaly = sin_true_anomaly.atan2(cos_true_anomaly);
         let periapsis_argument = periapsis_argument_from_true_anomaly(true_anomaly);
 
-        OrbitalElements::Cometary(CometaryElements {
-            reference_epoch,
-            perihelion_distance,
-            eccentricity,
-            inclination,
-            ascending_node_longitude,
-            periapsis_argument,
-            true_anomaly,
-        })
+        OrbitalElements::Cometary {
+            elements: CometaryElements {
+                reference_epoch,
+                perihelion_distance,
+                eccentricity,
+                inclination,
+                ascending_node_longitude,
+                periapsis_argument,
+                true_anomaly,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     };
 
     // ---- 3) Orbit classification --------------------------------------------
@@ -172,15 +176,19 @@ pub(crate) fn ccek1(
         let cos_periapsis = x1n * position_orbital.x + x2n * position_orbital.y;
         let periapsis_argument = wrap_0_2pi(sin_periapsis.atan2(cos_periapsis));
 
-        OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch,
-            semi_major_axis,
-            eccentricity,
-            inclination,
-            ascending_node_longitude,
-            periapsis_argument,
-            mean_anomaly,
-        })
+        OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch,
+                semi_major_axis,
+                eccentricity,
+                inclination,
+                ascending_node_longitude,
+                periapsis_argument,
+                mean_anomaly,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     } else if reciprocal_semi_major_axis.abs() <= EPS_PARAB {
         // -------- Parabolic orbit
         parabolic_solution()
@@ -201,15 +209,19 @@ pub(crate) fn ccek1(
         let perihelion_distance = semi_latus_rectum / (1.0 + eccentricity);
         let periapsis_argument = periapsis_argument_from_true_anomaly(true_anomaly);
 
-        OrbitalElements::Cometary(CometaryElements {
-            reference_epoch,
-            perihelion_distance,
-            eccentricity,
-            inclination,
-            ascending_node_longitude,
-            periapsis_argument,
-            true_anomaly,
-        })
+        OrbitalElements::Cometary {
+            elements: CometaryElements {
+                reference_epoch,
+                perihelion_distance,
+                eccentricity,
+                inclination,
+                ascending_node_longitude,
+                periapsis_argument,
+                true_anomaly,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     }
 }
 
@@ -408,7 +420,7 @@ mod orb_elem_test {
         let orbit = ccek1(&position, &velocity, 0.0);
 
         match orbit {
-            OrbitalElements::Cometary(ce) => {
+            OrbitalElements::Cometary { elements: ce, .. } => {
                 assert!(
                     ce.perihelion_distance > 0.0,
                     "Perihelion distance must be positive, got {q}",
@@ -421,7 +433,7 @@ mod orb_elem_test {
                 );
                 assert!(ce.true_anomaly.is_finite());
             }
-            OrbitalElements::Keplerian(_) | OrbitalElements::Equinoctial(_) => {
+            OrbitalElements::Keplerian { .. } | OrbitalElements::Equinoctial { .. } => {
                 panic!("Expected Cometary elements, got {orbit:#?}")
             }
         }
@@ -453,7 +465,7 @@ mod orb_elem_test {
         let orbit = ccek1(&position, &velocity, 0.0);
 
         match orbit {
-            OrbitalElements::Keplerian(ke) => {
+            OrbitalElements::Keplerian { elements: ke, .. } => {
                 // Eccentricity should be very close to 1
                 assert!(
                     (ke.eccentricity - 1.0).abs() < 1e-5,
@@ -462,7 +474,7 @@ mod orb_elem_test {
                 );
             }
 
-            OrbitalElements::Cometary(ce) => {
+            OrbitalElements::Cometary { elements: ce, .. } => {
                 assert!(
                     (ce.eccentricity - 1.0).abs() < 1e-5,
                     "Near-parabolic eccentricity should be ~1, got {e}",
@@ -470,7 +482,7 @@ mod orb_elem_test {
                 );
             }
 
-            OrbitalElements::Equinoctial(_) => {
+            OrbitalElements::Equinoctial { .. } => {
                 panic!("Expected Keplerian or Cometary elements, got {orbit:#?}")
             }
         }
@@ -552,34 +564,34 @@ mod orb_elem_test {
 
         // Extract invariants a, e, i (Keplerian) or q, e, i (Cometary).
         let (a1, e1, i1, om1) = match &orbit {
-            OrbitalElements::Keplerian(k) => (
+            OrbitalElements::Keplerian { elements: k, .. } => (
                 k.semi_major_axis,
                 k.eccentricity,
                 k.inclination,
                 k.ascending_node_longitude,
             ),
-            OrbitalElements::Cometary(c) => (
+            OrbitalElements::Cometary { elements: c, .. } => (
                 c.perihelion_distance,
                 c.eccentricity,
                 c.inclination,
                 c.ascending_node_longitude,
             ),
-            OrbitalElements::Equinoctial(_) => panic!("Unexpected equinoctial here"),
+            OrbitalElements::Equinoctial { .. } => panic!("Unexpected equinoctial here"),
         };
         let (a2, e2, i2, om2) = match &orbit2 {
-            OrbitalElements::Keplerian(k) => (
+            OrbitalElements::Keplerian { elements: k, .. } => (
                 k.semi_major_axis,
                 k.eccentricity,
                 k.inclination,
                 k.ascending_node_longitude,
             ),
-            OrbitalElements::Cometary(c) => (
+            OrbitalElements::Cometary { elements: c, .. } => (
                 c.perihelion_distance,
                 c.eccentricity,
                 c.inclination,
                 c.ascending_node_longitude,
             ),
-            OrbitalElements::Equinoctial(_) => panic!("Unexpected equinoctial here"),
+            OrbitalElements::Equinoctial { .. } => panic!("Unexpected equinoctial here"),
         };
 
         // Invariants under active Z-rotation of (r, v):
@@ -636,7 +648,7 @@ mod orb_elem_test {
             let wrap_0_2pi = |ang: f64| ang.rem_euclid(TWO_PI);
 
             match orbit {
-                OrbitalElements::Keplerian(ke) => {
+                OrbitalElements::Keplerian { elements: ke, .. } => {
                     // Eccentricity must match the control within tolerance
                     prop_assert!((e_ctrl - ke.eccentricity).abs() < 1e-6);
 
@@ -668,7 +680,7 @@ mod orb_elem_test {
                     prop_assert!((-1e-12..=std::f64::consts::PI + 1e-12).contains(&inc));
                 }
 
-                OrbitalElements::Cometary(ce) => {
+                OrbitalElements::Cometary { elements: ce, .. } => {
                     // Eccentricity must match the control within tolerance
                     prop_assert!((e_ctrl - ce.eccentricity).abs() < 1e-6);
 
@@ -692,7 +704,7 @@ mod orb_elem_test {
                     prop_assert!((-1e-12..=std::f64::consts::PI + 1e-12).contains(&inc));
                 }
 
-                OrbitalElements::Equinoctial(_) => {
+                OrbitalElements::Equinoctial { .. } => {
                     // Not tested here
                     prop_assert!(false, "Equinoctial elements not tested");
                 }

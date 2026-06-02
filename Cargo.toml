@@ -84,8 +84,8 @@ name = "fit_full_iod_parallel"
 path = "examples/run_full_iod_parallel.rs"
 required-features = ["parallel"]
 
-#[profile.test]
-#debug = false
+[profile.dev]
+debug = false
 
 [profile.bench]
 opt-level = 3
