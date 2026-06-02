@@ -59,9 +59,41 @@
 //!
 //! ## Advantages of equinoctial elements
 //!
-//! * Avoid singularities when `e → 0` or `i → 0`
-//! * Smooth derivatives, ideal for gradient-based fitting
-//! * Directly compatible with least-squares adjustment and orbit uncertainty analysis
+//! Equinoctial elements provide several critical advantages over classical Keplerian elements:
+//!
+//! * **Non-singular for $e < 1$ and $0 \leq i < \pi$** — no undefined elements for circular
+//!   or equatorial orbits, unlike Keplerian $\omega$ and $\Omega$
+//!
+//! * **Smooth, well-conditioned derivatives** — Jacobian matrices remain well-behaved throughout
+//!   the valid domain, enabling robust numerical optimization and uncertainty propagation
+//!
+//! * **Ideal for orbit determination** — gradient-based least-squares fitting converges reliably
+//!   without special handling of degenerate cases
+//!
+//! * **Superior uncertainty propagation** — covariance matrices transform smoothly without
+//!   singular amplification near $e = 0$ or $i = 0$
+//!
+//! * **Compatible with two-body propagation** — Keplerian dynamics equations extend naturally
+//!   to equinoctial form with regular behavior
+//!
+//! ## Uncertainty representation
+//!
+//! Uncertainties in equinoctial elements are represented through:
+//!
+//! - **Standard deviations** on each element $(a, h, k, p, q, \lambda)$ via
+//!   [`EquinoctialUncertainty`](crate::orbit_type::uncertainty::EquinoctialUncertainty)
+//!
+//! - **Covariance matrices** capturing correlations between elements via
+//!   [`OrbitalCovariance`](crate::orbit_type::uncertainty::OrbitalCovariance)
+//!
+//! When converting to/from Keplerian elements, uncertainties are propagated using analytical
+//! Jacobian matrices:
+//!
+//! - [`jacobian_to_keplerian`](EquinoctialElements::jacobian_to_keplerian) —
+//!   $J_{\text{Eq} \to \text{Kep}} = \partial(a,e,i,\Omega,\omega,M) / \partial(a,h,k,p,q,\lambda)$
+//!
+//! These Jacobians handle singular points by zeroing derivatives when denominators vanish
+//! (threshold $\epsilon = 10^{-12}$), ensuring numerical stability at all orbital configurations.
 //!
 //! ## Example
 //!
@@ -91,6 +123,7 @@
 //!
 //! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
+
 use core::f64;
 use std::{f64::consts::PI, fmt};
 
@@ -964,25 +997,55 @@ impl EquinoctialElements {
     /// $$\frac{\partial i}{\partial p} = \frac{2p}{t(1+t^2)}, \quad
     ///   \frac{\partial i}{\partial q} = \frac{2q}{t(1+t^2)}$$
     ///
-    /// Degenerate cases
-    /// ----------------
-    /// * `e ≈ 0`: $\varpi$ is undefined; derivatives involving $e^{-2}$ are
-    ///   set to zero. The orbit is near-circular and the direction of periapsis
-    ///   carries no physical meaning.
-    /// * `t ≈ 0`: $\Omega$ is undefined; derivatives involving $t^{-1}$ are
-    ///   set to zero. The orbit is near-equatorial.
+    /// Degenerate cases and regularization
+    /// ------------------------------------
     ///
-    /// Arguments
-    /// ---------
-    /// * `&self` – Equinoctial elements $(a, h, k, p, q, \lambda)$.
+    /// The transformation has singularities at certain orbital configurations:
     ///
-    /// Return
-    /// ------
-    /// * `Matrix6<f64>` – The $6 \times 6$ Jacobian matrix $\partial\mathbf{y}/\partial\mathbf{x}$.
+    /// * **Near-circular orbits ($e \approx 0$)**: $\varpi = \text{atan2}(h, k)$ is undefined
+    ///   when $h^2 + k^2 \to 0$. Derivatives $\partial \varpi / \partial h$ and
+    ///   $\partial \varpi / \partial k$ involve $e^{-2}$, which diverges.
+    ///   
+    ///   **Regularization**: When $e < \epsilon$ (with $\epsilon = 10^{-12}$), these
+    ///   derivatives are set to zero. Physically, the periapsis direction has no meaning
+    ///   for a circular orbit.
     ///
-    /// See also
-    /// --------
-    /// * [`KeplerianElements::jacobian_to_equinoctial`] – Inverse Jacobian.
+    /// * **Near-equatorial orbits ($i \approx 0$, i.e., $t = \tan(i/2) \approx 0$)**:
+    ///   $\Omega = \text{atan2}(p, q)$ is undefined when $p^2 + q^2 \to 0$. Derivatives
+    ///   $\partial \Omega / \partial p$ and $\partial \Omega / \partial q$ involve $t^{-2}$,
+    ///   which diverges.
+    ///   
+    ///   **Regularization**: When $t < \epsilon$, these derivatives are set to zero.
+    ///   The ascending node direction is undefined for an equatorial orbit.
+    ///
+    /// These regularizations prevent numerical overflow but may **underestimate uncertainties**
+    /// in $\omega$ and $\Omega$ for degenerate orbits. For such cases, equinoctial elements
+    /// should remain the primary representation.
+    ///
+    /// ## Usage in uncertainty propagation
+    ///
+    /// This Jacobian transforms covariance matrices from equinoctial to Keplerian:
+    ///
+    /// $$
+    /// \Sigma_{\text{Kep}} = J \, \Sigma_{\text{Eq}} \, J^\top
+    /// $$
+    ///
+    /// See [`OrbitalCovariance::propagate`](crate::orbit_type::uncertainty::OrbitalCovariance::propagate)
+    /// and [`OrbitalElements::to_keplerian`](crate::orbit_type::OrbitalElements::to_keplerian).
+    ///
+    /// ## Arguments
+    ///
+    /// * `&self` – Equinoctial elements $(a, h, k, p, q, \lambda)$
+    ///
+    /// ## Return
+    ///
+    /// * `Matrix6<f64>` – The $6 \times 6$ Jacobian matrix $\partial\mathbf{y}/\partial\mathbf{x}$
+    ///   where rows correspond to $[a, e, i, \Omega, \omega, M]$ and columns to $[a, h, k, p, q, \lambda]$
+    ///
+    /// ## See also
+    ///
+    /// * [`KeplerianElements::jacobian_to_equinoctial`](crate::orbit_type::keplerian_element::KeplerianElements::jacobian_to_equinoctial) — Inverse Jacobian
+    /// * [`OrbitalElements::to_keplerian`](crate::orbit_type::OrbitalElements::to_keplerian) — High-level conversion with uncertainty
     pub fn jacobian_to_keplerian(&self) -> Matrix6<f64> {
         let h = self.eccentricity_sin_lon;
         let k = self.eccentricity_cos_lon;

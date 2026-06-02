@@ -1,3 +1,99 @@
+//! Cometary (perihelion-based) orbital elements for parabolic and hyperbolic trajectories
+//!
+//! This module implements the **cometary orbital element representation**, which uses
+//! perihelion distance $q$ and true anomaly $\nu$ instead of semi-major axis $a$ and
+//! mean anomaly $M$. This parameterization is **natural and numerically stable** for
+//! cometary and interstellar objects on parabolic ($e = 1$) or hyperbolic ($e > 1$) orbits.
+//!
+//! ## Motivation
+//!
+//! For unbound or marginally-bound trajectories, classical Keplerian elements become
+//! problematic:
+//!
+//! - **Parabolic orbits** ($e = 1$): semi-major axis $a = \infty$ is undefined
+//! - **Hyperbolic orbits** ($e > 1$): $a < 0$ is mathematically valid but less intuitive
+//!
+//! In contrast, the **perihelion distance** $q = a(1 - e)$ remains **finite and positive**
+//! for all eccentricities, making it a robust observable directly linked to astrometric
+//! measurements near perihelion passage.
+//!
+//! ## Element definition
+//!
+//! Cometary elements consist of six parameters:
+//!
+//! | Symbol | Name | Units | Notes |
+//! |--------|------|-------|-------|
+//! | $q$ | Perihelion distance | AU | Always positive |
+//! | $e$ | Eccentricity | — | $e \geq 1$ for cometary/interstellar objects |
+//! | $i$ | Inclination | radians | $0 \leq i \leq \pi$ |
+//! | $\Omega$ | Longitude of ascending node | radians | $0 \leq \Omega < 2\pi$ |
+//! | $\omega$ | Argument of periapsis | radians | $0 \leq \omega < 2\pi$ |
+//! | $\nu$ | True anomaly | radians | Angle from periapsis at epoch |
+//!
+//! ## Conversions
+//!
+//! This module provides conversions to standard representations via `TryFrom` traits:
+//!
+//! - **Cometary → Keplerian**: Compute $a = q/(1-e)$, derive $M$ from $\nu$ via
+//!   eccentric/hyperbolic anomaly (see [`CometaryElements::hyperbolic_mean_anomaly`])
+//!
+//! - **Cometary → Equinoctial**: Chain through Keplerian as intermediate step
+//!
+//! Conversions **fail** for parabolic orbits ($|e - 1| < 10^{-12}$) since $a$ becomes
+//! numerically unstable.
+//!
+//! ## Uncertainty propagation
+//!
+//! Uncertainties are propagated through coordinate transformations using **analytical Jacobians**:
+//!
+//! - [`jacobian_to_keplerian`](CometaryElements::jacobian_to_keplerian) —
+//!   $J = \partial(a,e,i,\Omega,\omega,M) / \partial(q,e,i,\Omega,\omega,\nu)$
+//!
+//! - [`jacobian_to_equinoctial`](CometaryElements::jacobian_to_equinoctial) —
+//!   Computed via chain rule: $J_{\text{Com→Eq}} = J_{\text{Kep→Eq}} \cdot J_{\text{Com→Kep}}$
+//!
+//! The Jacobian matrices enable **linear covariance propagation** (see
+//! [`OrbitalCovariance::propagate`](crate::orbit_type::uncertainty::OrbitalCovariance::propagate))
+//! when converting between element sets.
+//!
+//! ## Usage
+//!
+//! ```rust
+//! use outfit::orbit_type::cometary_element::CometaryElements;
+//! use outfit::orbit_type::keplerian_element::KeplerianElements;
+//!
+//! // Define hyperbolic orbit elements (e.g., 'Oumuamua-like)
+//! let cometary = CometaryElements {
+//!     reference_epoch: 58000.0, // MJD
+//!     perihelion_distance: 0.25, // AU
+//!     eccentricity: 1.2,        // hyperbolic
+//!     inclination: 0.5,         // radians
+//!     ascending_node_longitude: 1.0,
+//!     periapsis_argument: 0.3,
+//!     true_anomaly: 0.1,
+//! };
+//!
+//! // Convert to Keplerian (a < 0 for hyperbolic)
+//! let keplerian = KeplerianElements::try_from(&cometary).unwrap();
+//! assert!(keplerian.semi_major_axis < 0.0);
+//!
+//! // Compute Jacobian for uncertainty propagation
+//! let jacobian = cometary.jacobian_to_keplerian();
+//! ```
+//!
+//! ## Implementation notes
+//!
+//! - **Hyperbolic mean anomaly** is computed using $\text{atanh}$ with numerical clamping
+//!   to avoid infinities when approaching asymptotic directions (see
+//!   [`hyperbolic_mean_anomaly`](CometaryElements::hyperbolic_mean_anomaly))
+//!
+//! - **Parabolic tolerance**: orbits with $|e - 1| < 10^{-12}$ are rejected to avoid
+//!   catastrophic cancellation in $a = q/(1-e)$
+//!
+//! - **Test coverage**: unit tests verify round-trip conversions, Jacobian accuracy via
+//!   finite differences, and edge cases (parabolic rejection, asymptotic behavior)
+//! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
+
 use nalgebra::{Matrix6, Vector6};
 
 use crate::{
@@ -5,23 +101,81 @@ use crate::{
     outfit_errors::OutfitError,
 };
 
-/// # Cometary orbital elements
+/// Cometary orbital elements with uncertainty propagation
 ///
-/// Cometary (perihelion-based) elements are convenient for **parabolic and
-/// hyperbolic** solutions, where the semi-major axis is not finite (parabola)
-/// or negative (hyperbola).
+/// Cometary (perihelion-based) elements use perihelion distance $q$ and true anomaly $\nu$
+/// instead of semi-major axis $a$ and mean anomaly $M$. This representation is **natural for
+/// parabolic and hyperbolic orbits**, where $a$ is infinite ($e = 1$) or negative ($e > 1$).
 ///
-/// Units & conventions
-/// --------------------
-/// - Distances in **AU**; angles in **radians**; epochs in **MJD (TDB)**.
-/// - State is assumed heliocentric, equatorial mean J2000.
-/// - For hyperbolic motion: `a < 0`, `e > 1`; for parabolic: `e = 1`.
+/// ## Element definition
 ///
-/// See also
-/// ------------
-/// * [`KeplerianElements`] – Classical elements `(a, e, i, Ω, ω, M)` (supports elliptic & hyperbolic).  
-/// * [`EquinoctialElements`] – Non-singular elements `(a, h, k, p, q, λ)`.  
-/// * [`CometaryElements::hyperbolic_mean_anomaly`] – Returns the hyperbolic mean anomaly from `(e, ν)`
+/// The six cometary elements are:
+///
+/// 1. **q** — Perihelion distance (AU): $q = a(1 - e)$
+/// 2. **e** — Eccentricity (unitless): $e \geq 1$ for cometary trajectories
+/// 3. **i** — Inclination (radians)
+/// 4. **Ω** — Longitude of ascending node (radians)
+/// 5. **ω** — Argument of periapsis (radians)
+/// 6. **ν** — True anomaly at epoch (radians)
+///
+/// ## When to use cometary elements
+///
+/// - **Parabolic orbits ($e = 1$)**: $a = \infty$ is undefined in Keplerian/equinoctial forms;
+///   cometary elements remain well-defined
+/// - **Hyperbolic orbits ($e > 1$)**: $a < 0$ is mathematically valid but less intuitive than $q > 0$
+/// - **Comets and interstellar objects**: observed near perihelion where $q$ and $\nu$ are
+///   well-determined from astrometry
+///
+/// For elliptic orbits ($e < 1$), Keplerian or equinoctial elements are generally preferred.
+///
+/// ## Uncertainty representation and propagation
+///
+/// Uncertainties in cometary elements are represented through:
+///
+/// - **Standard deviations** on each element $(q, e, i, \Omega, \omega, \nu)$ via
+///   [`CometaryUncertainty`](crate::orbit_type::uncertainty::CometaryUncertainty)
+///
+/// - **Covariance matrices** capturing correlations via
+///   [`OrbitalCovariance`](crate::orbit_type::uncertainty::OrbitalCovariance)
+///
+/// When converting to Keplerian or equinoctial elements, uncertainties are propagated using
+/// analytical Jacobian matrices:
+///
+/// - [`jacobian_to_keplerian`](CometaryElements::jacobian_to_keplerian) —
+///   $J_{\text{Com} \to \text{Kep}} = \partial(a,e,i,\Omega,\omega,M) / \partial(q,e,i,\Omega,\omega,\nu)$
+///
+/// - [`jacobian_to_equinoctial`](CometaryElements::jacobian_to_equinoctial) —
+///   Computed via chain rule: $J_{\text{Com} \to \text{Eq}} = J_{\text{Kep} \to \text{Eq}} \cdot J_{\text{Com} \to \text{Kep}}$
+///
+/// ## Mathematical relations
+///
+/// The semi-major axis relates to perihelion distance by:
+///
+/// $$
+/// a = \frac{q}{1 - e}
+/// $$
+///
+/// - For $e < 1$ (ellipse): $a > q > 0$
+/// - For $e = 1$ (parabola): $a = \infty$
+/// - For $e > 1$ (hyperbola): $a < 0$ and $q > 0$
+///
+/// The mean anomaly $M$ is computed from true anomaly $\nu$ via:
+///
+/// - **Elliptic** ($e < 1$): through eccentric anomaly $E$
+/// - **Hyperbolic** ($e > 1$): through hyperbolic anomaly $H$ (see [`hyperbolic_mean_anomaly`](CometaryElements::hyperbolic_mean_anomaly))
+///
+/// ## Units and conventions
+///
+/// - Distances: **AU**
+/// - Angles: **radians**
+/// - Epochs: **MJD (TDB)**
+/// - Reference frame: heliocentric ecliptic J2000
+///
+/// ## See also
+///
+/// * [`KeplerianElements`] — Classical elements $(a, e, i, \Omega, \omega, M)$
+/// * [`EquinoctialElements`] — Non-singular elements $(a, h, k, p, q, \lambda)$
+/// * [`hyperbolic_mean_anomaly`](CometaryElements::hyperbolic_mean_anomaly) — Computes $M$ from $(e, \nu)$ for $e > 1$
 #[derive(Debug, Clone, PartialEq)]
 pub struct CometaryElements {
     /// Reference epoch of the element set (MJD, TDB).
@@ -240,9 +394,9 @@ impl CometaryElements {
     ///
     /// Uses the chain rule through the Keplerian representation:
     ///
-    /// $$J_{\text{com}\to\text{eq}} = J_{\text{kep}\to\text{eq}} \cdot J_{\text{com}\to\text{kep}}$$
+    /// $$J_{\text{Com}\to\text{Eq}} = J_{\text{Kep}\to\text{Eq}} \cdot J_{\text{Com}\to\text{Kep}}$$
     ///
-    /// where $J_{\text{kep}\to\text{eq}}$ is evaluated at the Keplerian elements
+    /// where $J_{\text{Kep}\to\text{Eq}}$ is evaluated at the Keplerian elements
     /// obtained by converting `self`.
     ///
     /// Arguments
@@ -253,7 +407,7 @@ impl CometaryElements {
     /// Return
     /// ------
     /// * `Ok(Matrix6<f64>)` – The $6 \times 6$ Jacobian matrix
-    ///   $\partial\mathbf{y}_\text{eq}/\partial\mathbf{x}_\text{com}$.
+    ///   $ \frac{\partial\mathbf{y}_\text{eq}}{ \partial \mathbf{x} _\text{com}} $.
     /// * `Err(OutfitError)` – If the cometary-to-Keplerian conversion fails
     ///   (e.g. parabolic orbit $e = 1$).
     ///

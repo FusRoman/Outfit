@@ -34,17 +34,46 @@
 //! - Angles: **radians**
 //! - Time: **days** (epoch usually in **MJD**, TDB/TT scale)
 //!
-//! ## Degeneracies
+//! ## Degeneracies and singularities
 //!
-//! Classical Keplerian elements suffer from singularities:
+//! Classical Keplerian elements suffer from singularities in certain orbital configurations:
 //!
-//! - **Circular orbits (`e → 0`)**: periapsis argument ω becomes undefined.  
-//!   → conventionally set to `0.0` during conversion.
+//! - **Circular orbits ($e \to 0$)**: the periapsis argument $\omega$ becomes undefined because
+//!   there is no distinct periapsis point. Conventionally set to $\omega = 0$ during conversion,
+//!   but derivatives $\partial \omega / \partial h$ and $\partial \omega / \partial k$ are
+//!   singular ($\sim e^{-2}$).
 //!
-//! - **Equatorial orbits (`i → 0`)**: ascending node Ω becomes undefined.  
-//!   → conventionally set to `0.0` during conversion.
+//! - **Equatorial orbits ($i \to 0$)**: the ascending node longitude $\Omega$ becomes undefined
+//!   because the orbital plane coincides with the reference plane. Conventionally set to $\Omega = 0$,
+//!   with singular derivatives $\partial \Omega / \partial p$ and $\partial \Omega / \partial q$
+//!   ($\sim i^{-1}$).
 //!
-//! For robust numerical work, the [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) representation is recommended.
+//! - **Circular equatorial orbits ($e \to 0$ and $i \to 0$)**: both $\omega$ and $\Omega$ are
+//!   undefined. Only the mean longitude $\lambda = \Omega + \omega + M$ remains well-defined.
+//!
+//! These singularities impact **uncertainty propagation**: near-circular or near-equatorial orbits
+//! will have artificially inflated or ill-defined uncertainties in $\omega$ or $\Omega$ when
+//! converted from equinoctial elements.
+//!
+//! **Recommendation**: For numerical work and uncertainty analysis on circular or equatorial orbits,
+//! use [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) as the
+//! primary representation to avoid singularities.
+//!
+//! ## Uncertainty propagation from equinoctial elements
+//!
+//! When converting from equinoctial $(a, h, k, p, q, \lambda)$ to Keplerian $(a, e, i, \Omega, \omega, M)$,
+//! uncertainties are propagated using the Jacobian matrix computed by [`jacobian_to_equinoctial`](KeplerianElements::jacobian_to_equinoctial):
+//!
+//! $$
+//! \Sigma_{\text{Kep}} = J_{\text{Eq} \to \text{Kep}} \, \Sigma_{\text{Eq}} \, J_{\text{Eq} \to \text{Kep}}^\top
+//! $$
+//!
+//! where $J_{\text{Eq} \to \text{Kep}}$ is the inverse Jacobian
+//! (computed in [`EquinoctialElements::jacobian_to_keplerian`](crate::orbit_type::equinoctial_element::EquinoctialElements::jacobian_to_keplerian)).
+//!
+//! Near singular points, derivatives are regularized by setting them to zero when denominators
+//! become small (threshold $\epsilon = 10^{-12}$). This prevents numerical overflow but may
+//! underestimate uncertainties in degenerate cases.
 //!
 //! ## Example
 //!
@@ -203,6 +232,83 @@ impl KeplerianElements {
         }
     }
 
+    /// Compute the Jacobian of the Keplerian-to-equinoctial transformation
+    ///
+    /// This method returns the $6 \times 6$ Jacobian matrix of the transformation from
+    /// Keplerian elements $(a, e, i, \Omega, \omega, M)$ to equinoctial elements $(a, h, k, p, q, \lambda)$.
+    ///
+    /// ## Mathematical formulation
+    ///
+    /// The equinoctial elements are defined by:
+    ///
+    /// $$
+    /// \begin{aligned}
+    /// a &= a \\
+    /// h &= e \sin(\varpi) \\
+    /// k &= e \cos(\varpi) \\
+    /// p &= \tan(i/2) \sin(\Omega) \\
+    /// q &= \tan(i/2) \cos(\Omega) \\
+    /// \lambda &= \varpi + M = \Omega + \omega + M
+    /// \end{aligned}
+    /// $$
+    ///
+    /// where $\varpi = \Omega + \omega$ is the longitude of periapsis.
+    ///
+    /// ## Jacobian structure
+    ///
+    /// The Jacobian $J = \partial \mathbf{y} / \partial \mathbf{x}$ has the following structure:
+    ///
+    /// - **Column 1** ($\partial / \partial a$): Only $\partial a / \partial a = 1$ is nonzero
+    ///
+    /// - **Column 2** ($\partial / \partial e$):
+    ///   $$\frac{\partial h}{\partial e} = \sin(\varpi), \quad \frac{\partial k}{\partial e} = \cos(\varpi)$$
+    ///
+    /// - **Column 3** ($\partial / \partial i$):
+    ///   $$\frac{\partial p}{\partial i} = \frac{1}{2 \cos^2(i/2)} \sin(\Omega), \quad
+    ///   \frac{\partial q}{\partial i} = \frac{1}{2 \cos^2(i/2)} \cos(\Omega)$$
+    ///
+    /// - **Column 4** ($\partial / \partial \Omega$):
+    ///   $$\frac{\partial h}{\partial \Omega} = e \cos(\varpi), \quad
+    ///   \frac{\partial k}{\partial \Omega} = -e \sin(\varpi)$$
+    ///   $$\frac{\partial p}{\partial \Omega} = \tan(i/2) \cos(\Omega), \quad
+    ///   \frac{\partial q}{\partial \Omega} = -\tan(i/2) \sin(\Omega)$$
+    ///   $$\frac{\partial \lambda}{\partial \Omega} = 1$$
+    ///
+    /// - **Column 5** ($\partial / \partial \omega$):
+    ///   Same as $\partial / \partial \Omega$ for $h, k, \lambda$ but zero for $p, q$
+    ///
+    /// - **Column 6** ($\partial / \partial M$):
+    ///   Only $\partial \lambda / \partial M = 1$ is nonzero
+    ///
+    /// ## Handling singularities
+    ///
+    /// No singularities occur in this forward transformation (Keplerian → Equinoctial) because:
+    /// - $h, k$ are well-defined for all $e \geq 0$
+    /// - $p, q$ are well-defined for all $i \in [0, \pi]$
+    ///
+    /// This makes the Jacobian numerically stable for all orbital configurations.
+    ///
+    /// ## Usage in uncertainty propagation
+    ///
+    /// This Jacobian is used to transform covariance matrices from Keplerian to equinoctial:
+    ///
+    /// $$
+    /// \Sigma_{\text{Eq}} = J \, \Sigma_{\text{Kep}} \, J^\top
+    /// $$
+    ///
+    /// See [`OrbitalCovariance::propagate`](crate::orbit_type::uncertainty::OrbitalCovariance::propagate)
+    /// for the propagation implementation.
+    ///
+    /// ## Return
+    ///
+    /// A $6 \times 6$ matrix where:
+    /// - **Rows** correspond to target elements: $[a, h, k, p, q, \lambda]$
+    /// - **Columns** correspond to source elements: $[a, e, i, \Omega, \omega, M]$
+    ///
+    /// ## See also
+    ///
+    /// - [`EquinoctialElements::jacobian_to_keplerian`](crate::orbit_type::equinoctial_element::EquinoctialElements::jacobian_to_keplerian) — Inverse Jacobian
+    /// - [`OrbitalElements::to_equinoctial`](crate::orbit_type::OrbitalElements::to_equinoctial) — High-level conversion with uncertainty propagation
     pub fn jacobian_to_equinoctial(&self) -> Matrix6<f64> {
         let e = self.eccentricity;
         let i = self.inclination;

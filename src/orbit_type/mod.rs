@@ -1,19 +1,140 @@
-//! # Orbital element representations
+//! Orbital element representations and uncertainty propagation
 //!
-//! This module defines multiple **canonical orbital element sets** and the
-//! associated conversions between them:
+//! This module defines multiple **canonical orbital element sets** with full support for
+//! **uncertainty propagation** during conversions between representations. It provides
+//! three distinct parameterizations of Keplerian orbits, each with advantages for different
+//! orbital regimes:
 //!
-//! - [`keplerian_element`](crate::orbit_type::keplerian_element) — Classical Keplerian elements `(a, e, i, Ω, ω, M)`,
-//!   valid for elliptic and hyperbolic orbits.
-//! - [`equinoctial_element`](crate::orbit_type::equinoctial_element) — Equinoctial elements `(a, h, k, p, q, λ)`,
-//!   a **non-singular formulation** well suited for orbit determination near
+//! - [`keplerian_element`](crate::orbit_type::keplerian_element) — Classical Keplerian elements $(a, e, i, \Omega, \omega, M)$,
+//!   widely used for elliptic and hyperbolic orbits but singular for circular and equatorial cases.
+//! - [`equinoctial_element`](crate::orbit_type::equinoctial_element) — Equinoctial elements $(a, h, k, p, q, \lambda)$,
+//!   a **non-singular formulation** ideal for orbit determination and propagation near
 //!   zero eccentricity or inclination.
-//! - [`cometary_element`](crate::orbit_type::cometary_element) — Perihelion-based representation `(q, e, i, Ω, ω, ν)`,
-//!   convenient for parabolic and hyperbolic orbits.
+//! - [`cometary_element`](crate::orbit_type::cometary_element) — Perihelion-based representation $(q, e, i, \Omega, \omega, \nu)$,
+//!   natural for parabolic and hyperbolic orbits where perihelion distance $q$ is better
+//!   defined than semi-major axis $a$.
 //!
-//! The [`OrbitalElements`](crate::orbit_type::OrbitalElements) enum acts as a **type-erased wrapper** that can hold
-//! any of these three representations, while providing uniform constructors and
-//! conversion methods.
+//! The [`OrbitalElements`] enum acts as a **type-erased wrapper** that can hold any of these
+//! three representations along with optional **uncertainty** and **covariance** information,
+//! providing uniform constructors and rigorous conversion methods with uncertainty propagation.
+//!
+//! ## Choosing an orbital element representation
+//!
+//! Each representation has optimal use cases:
+//!
+//! **Keplerian elements** $(a, e, i, \Omega, \omega, M)$:
+//! - Intuitive physical interpretation: size, shape, orientation, and position in orbit
+//! - Standard in classical celestial mechanics and literature
+//! - Singular when $e \to 0$ (circular) or $i \to 0$ (equatorial): derivatives become undefined
+//! - Best for: communication, visualization, moderate eccentricity/inclination orbits
+//!
+//! **Equinoctial elements** $(a, h, k, p, q, \lambda)$:
+//! - Non-singular for all $e < 1$ and $0 \leq i < \pi$
+//! - Smooth, well-defined derivatives enable robust orbit fitting and least-squares optimization
+//! - Ideal for numerical propagation and uncertainty analysis
+//! - Best for: orbit determination, propagation, covariance propagation, near-circular or near-equatorial orbits
+//!
+//! **Cometary elements** $(q, e, i, \Omega, \omega, \nu)$:
+//! - Uses perihelion distance $q = a(1 - e)$ instead of semi-major axis
+//! - Well-behaved for $e \geq 1$ (parabolic and hyperbolic orbits)
+//! - Natural for cometary and hyperbolic trajectories
+//! - Best for: comets, interstellar objects, hyperbolic encounters
+//!
+//! ## Uncertainty representation and propagation
+//!
+//! Orbital uncertainties arise from measurement errors, numerical approximations, and model limitations.
+//! This module represents uncertainties in two complementary ways:
+//!
+//! 1. **Standard deviations**: individual $1\sigma$ uncertainties on each element
+//!    (see [`KeplerianUncertainty`](crate::orbit_type::uncertainty::KeplerianUncertainty), [`EquinoctialUncertainty`](crate::orbit_type::uncertainty::EquinoctialUncertainty), [`CometaryUncertainty`](crate::orbit_type::uncertainty::CometaryUncertainty))
+//!
+//! 2. **Covariance matrices**: full $6 \times 6$ symmetric positive semi-definite matrices capturing
+//!    element correlations (see [`OrbitalCovariance`](crate::orbit_type::uncertainty::OrbitalCovariance))
+//!
+//! When converting between representations, **covariance matrices are transformed** using the Jacobian
+//! of the conversion:
+//!
+//! $$
+//! \Sigma_y = J \, \Sigma_x \, J^\top
+//! $$
+//!
+//! where $\Sigma_x$ is the covariance in the source representation, $\Sigma_y$ is the covariance in the
+//! target representation, and $J = \partial \mathbf{y} / \partial \mathbf{x}$ is the Jacobian matrix of
+//! partial derivatives evaluated at the nominal element values.
+//!
+//! This **linear covariance propagation** preserves the statistical properties of uncertainties under
+//! first-order approximation, which is accurate for small uncertainties relative to the element values.
+//!
+//! ## Mathematical background: Jacobian matrices
+//!
+//! Each element representation provides Jacobian methods for conversions:
+//!
+//! ### Keplerian ↔ Equinoctial
+//!
+//! The transformation between Keplerian $(a, e, i, \Omega, \omega, M)$ and equinoctial
+//! $(a, h, k, p, q, \lambda)$ is defined by:
+//!
+//! $$
+//! \begin{aligned}
+//! h &= e \sin(\Omega + \omega) \\
+//! k &= e \cos(\Omega + \omega) \\
+//! p &= \tan(i/2) \sin(\Omega) \\
+//! q &= \tan(i/2) \cos(\Omega) \\
+//! \lambda &= \Omega + \omega + M
+//! \end{aligned}
+//! $$
+//!
+//! The Jacobian $J_{\text{Kep} \to \text{Eq}}$ is computed analytically in
+//! [`KeplerianElements::jacobian_to_equinoctial`], and the inverse in
+//! [`EquinoctialElements::jacobian_to_keplerian`].
+//!
+//! **Singular cases**: When $e \approx 0$, the longitude of periapsis $\varpi = \Omega + \omega$
+//! is undefined, and derivatives involving $\partial \varpi / \partial h$ and
+//! $\partial \varpi / \partial k$ become singular. These are handled by setting the derivatives
+//! to zero when $e < \epsilon$ (typically $\epsilon = 10^{-12}$). Similarly, when $i \approx 0$,
+//! $\Omega$ is undefined and related derivatives are zeroed.
+//!
+//! ### Cometary ↔ Keplerian
+//!
+//! The cometary representation $(q, e, i, \Omega, \omega, \nu)$ relates to Keplerian elements through:
+//!
+//! $$
+//! a = \frac{q}{1 - e}, \quad M = M(e, \nu)
+//! $$
+//!
+//! where $M(e, \nu)$ is the mean anomaly computed from the true anomaly $\nu$ via the eccentric
+//! anomaly $E$ (for $e < 1$) or hyperbolic anomaly $H$ (for $e > 1$). The Jacobian
+//! $J_{\text{Com} \to \text{Kep}}$ is computed in [`CometaryElements::jacobian_to_keplerian`].
+//!
+//! For conversions to equinoctial, the **chain rule** is applied:
+//!
+//! $$
+//! J_{\text{Com} \to \text{Eq}} = J_{\text{Kep} \to \text{Eq}} \cdot J_{\text{Com} \to \text{Kep}}
+//! $$
+//!
+//! This is implemented in [`CometaryElements::jacobian_to_equinoctial`].
+//!
+//! ## Conversion methods with uncertainty propagation
+//!
+//! The [`OrbitalElements`] enum provides conversion methods that automatically propagate covariance:
+//!
+//! - [`OrbitalElements::to_keplerian`] — Convert to Keplerian, propagating covariance if present
+//! - [`OrbitalElements::to_equinoctial`] — Convert to equinoctial, propagating covariance if present
+//!
+//! If a covariance matrix is attached to the source elements, it is transformed using the appropriate
+//! Jacobian and attached to the result. The 1-σ uncertainties are then recomputed from the diagonal
+//! of the transformed covariance.
+//!
+//! **Error handling**: Conversions that are mathematically undefined (e.g., parabolic cometary → Keplerian,
+//! where $a = \infty$) return `Err(OutfitError::InvalidConversion)`.
+//!
+//! ## Units and conventions
+//!
+//! - **Lengths**: astronomical units (AU)
+//! - **Angles**: radians
+//! - **Time**: Modified Julian Date (MJD) in TDB scale for epochs
+//! - **Velocities**: AU/day
+//! - **Reference frame**: heliocentric ecliptic J2000
 //!
 //! ## Typical workflow
 //!
@@ -28,13 +149,28 @@
 //! // Build canonical orbital elements from state
 //! let elems = OrbitalElements::from_orbital_state(&r, &v, 2460000.5);
 //!
-//! // Convert to Keplerian form if possible
+//! // Convert to Keplerian form if possible (uncertainty propagated if present)
 //! if let Ok(kep) = elems.to_keplerian() {
-//!     if let OrbitalElements::Keplerian { elements, .. } = kep {
+//!     if let OrbitalElements::Keplerian { elements, uncertainty, .. } = kep {
 //!         println!("semi-major axis = {}", elements.semi_major_axis);
+//!         if let Some(unc) = uncertainty {
+//!             println!("  ± {} AU", unc.semi_major_axis);
+//!         }
 //!     }
 //! }
 //! ```
+//!
+//! ## See also
+//!
+//! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) — Classical elements with Jacobian methods
+//! - [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) — Non-singular elements with propagation
+//! - [`CometaryElements`](crate::orbit_type::cometary_element::CometaryElements) — Perihelion-based elements for hyperbolic orbits
+//! - [`uncertainty`](crate::orbit_type::uncertainty) — Uncertainty structures and covariance propagation
+//!
+//! ## References
+//!
+//! - Milani & Gronchi, *Theory of Orbit Determination* (2010), Chapter 5
+//! - Walker et al., "A Set of Modified Equinoctial Orbital Elements", *Celestial Mechanics* 36 (1985)
 use nalgebra::Vector3;
 
 use crate::{
@@ -142,14 +278,40 @@ impl OrbitalElements {
         ccek1(position, velocity, reference_epoch)
     }
 
-    /// Convert to Keplerian representation, propagating covariance if present.
+    /// Convert to Keplerian representation with full uncertainty propagation
     ///
-    /// Return
-    /// ------
+    /// This method converts the orbital elements to Keplerian form $(a, e, i, \Omega, \omega, M)$
+    /// and, if a covariance matrix is present, propagates it through the transformation using
+    /// the appropriate Jacobian matrix.
+    ///
+    /// ## Uncertainty propagation
+    ///
+    /// When the source elements have an attached covariance matrix $\Sigma_x$, this method:
+    ///
+    /// 1. Computes the Jacobian $J = \partial \mathbf{y}_{\text{Kep}} / \partial \mathbf{x}_{\text{src}}$
+    ///    where $\mathbf{x}_{\text{src}}$ is the source parameterization and
+    ///    $\mathbf{y}_{\text{Kep}} = [a, e, i, \Omega, \omega, M]^\top$
+    ///
+    /// 2. Transforms the covariance using **linear covariance propagation**:
+    ///    $$\Sigma_{\text{Kep}} = J \, \Sigma_x \, J^\top$$
+    ///
+    /// 3. Extracts 1-σ uncertainties from the diagonal: $\sigma_i = \sqrt{\Sigma_{ii}}$
+    ///
+    /// This transformation preserves statistical properties under first-order approximation,
+    /// which is accurate when uncertainties are small relative to element values.
+    ///
+    /// ## Conversions
+    ///
+    /// - **From Keplerian**: returns a clone (no transformation needed)
+    /// - **From Equinoctial**: uses [`EquinoctialElements::jacobian_to_keplerian`]
+    /// - **From Cometary**: uses [`CometaryElements::jacobian_to_keplerian`]
+    ///
+    /// ## Return
+    ///
     /// * `Ok(OrbitalElements::Keplerian)` – Converted elements with propagated
-    ///   uncertainty and covariance when available.
-    /// * `Err(OutfitError)` – If the conversion is not defined for the current
-    ///   element set (e.g. parabolic cometary elements).
+    ///   uncertainty and covariance when available
+    /// * `Err(OutfitError)` – If the conversion is mathematically undefined
+    ///   (e.g., parabolic cometary elements with $e = 1$, where $a = \infty$)
     pub fn to_keplerian(&self) -> Result<OrbitalElements, OutfitError> {
         match self {
             OrbitalElements::Keplerian { .. } => Ok(self.clone()),
@@ -192,14 +354,40 @@ impl OrbitalElements {
         }
     }
 
-    /// Convert to equinoctial representation, propagating covariance if present.
+    /// Convert to equinoctial representation with full uncertainty propagation
     ///
-    /// Return
-    /// ------
+    /// This method converts the orbital elements to equinoctial form $(a, h, k, p, q, \lambda)$
+    /// and, if a covariance matrix is present, propagates it through the transformation using
+    /// the appropriate Jacobian matrix.
+    ///
+    /// ## Uncertainty propagation
+    ///
+    /// When the source elements have an attached covariance matrix $\Sigma_x$, this method:
+    ///
+    /// 1. Computes the Jacobian $J = \partial \mathbf{y}_{\text{Eq}} / \partial \mathbf{x}_{\text{src}}$
+    ///    where $\mathbf{x}_{\text{src}}$ is the source parameterization and
+    ///    $\mathbf{y}_{\text{Eq}} = [a, h, k, p, q, \lambda]^\top$
+    ///
+    /// 2. Transforms the covariance using **linear covariance propagation**:
+    ///    $$\Sigma_{\text{Eq}} = J \, \Sigma_x \, J^\top$$
+    ///
+    /// 3. Extracts 1-σ uncertainties from the diagonal: $\sigma_i = \sqrt{\Sigma_{ii}}$
+    ///
+    /// The equinoctial representation is **non-singular** for $e < 1$ and $0 \leq i < \pi$,
+    /// making it ideal for uncertainty analysis and propagation when Keplerian elements
+    /// would be near-singular.
+    ///
+    /// ## Conversions
+    ///
+    /// - **From Equinoctial**: returns a clone (no transformation needed)
+    /// - **From Keplerian**: uses [`KeplerianElements::jacobian_to_equinoctial`]
+    /// - **From Cometary**: uses [`CometaryElements::jacobian_to_equinoctial`] (chain rule through Keplerian)
+    ///
+    /// ## Return
+    ///
     /// * `Ok(OrbitalElements::Equinoctial)` – Converted elements with propagated
-    ///   uncertainty and covariance when available.
-    /// * `Err(OutfitError)` – If the conversion is not defined for the current
-    ///   element set (e.g. hyperbolic cometary elements).
+    ///   uncertainty and covariance when available
+    /// * `Err(OutfitError)` – If the conversion is mathematically undefined
     pub fn to_equinoctial(&self) -> Result<OrbitalElements, OutfitError> {
         match self {
             OrbitalElements::Equinoctial { .. } => Ok(self.clone()),
