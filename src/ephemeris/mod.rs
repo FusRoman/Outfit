@@ -216,7 +216,7 @@ impl OrbitalElements {
             }
         };
 
-        // Optim 3 — check eccentricity once before any epoch loop.
+        // Optim — check eccentricity once before any epoch loop.
         // Avoids recomputing sqrt(h²+k²) for every (epoch, observer) pair.
         // If the orbit is hyperbolic/parabolic every entry would fail anyway,
         // so we short-circuit immediately with a uniform error result.

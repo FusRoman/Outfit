@@ -285,18 +285,13 @@ fn observer_pv(
     let rot = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
 
     // obs_pos_equ = earth_pos + ROT_ecl→equ * geo_pos_ecl
-    // (replaces Observer::helio_position)
     let obs_pos_equ: Vector3<f64> = (earth_pos_equ_raw.to_notnan()? + rot * geo_pos_ecl)
         .map(|x: ordered_float::NotNan<f64>| x.into_inner());
 
     // earth_pos_equ: used in assemble_apparent_position for geocentric distance.
-    // (replaces earth_heliocentric_position)
     let earth_pos_equ = earth_pos_equ_raw;
 
     // obs_vel_equ = earth_vel + ROT_ecl→equ * geo_vel_ecl
-    // Since pvobs was called with compute_velocity=false, geo_vel_ecl = 0,
-    // so obs_vel_equ = Earth's heliocentric velocity only.
-    // (replaces Observer::helio_velocity with a zero geocentric contribution)
     let obs_vel_equ = earth_vel_equ_raw.to_notnan()?.map(|x| x.into_inner());
 
     Ok((obs_pos_equ, obs_vel_equ, earth_pos_equ))
