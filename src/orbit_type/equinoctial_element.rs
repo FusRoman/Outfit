@@ -966,11 +966,7 @@ impl From<&EquinoctialElements> for KeplerianElements {
 impl fmt::Display for EquinoctialElements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rad_to_deg = 180.0 / std::f64::consts::PI;
-        writeln!(
-            f,
-            "Equinoctial Elements @ epoch (MJD): {:.6}",
-            self.reference_epoch
-        )?;
+        writeln!(f, "Elements @ epoch (MJD): {:.6}", self.reference_epoch)?;
         writeln!(f, "------------------------------------------------")?;
         writeln!(
             f,

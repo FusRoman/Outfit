@@ -189,15 +189,15 @@ impl fmt::Display for OrbitalElements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OrbitalElements::Keplerian(k) => {
-                writeln!(f, "[Keplerian representation]")?;
+                writeln!(f, "[Keplerian]")?;
                 write!(f, "{k}")
             }
             OrbitalElements::Equinoctial(e) => {
-                writeln!(f, "[Equinoctial representation]")?;
+                writeln!(f, "[Equinoctial]")?;
                 write!(f, "{e}")
             }
             OrbitalElements::Cometary(c) => {
-                writeln!(f, "[Cometary representation]")?;
+                writeln!(f, "[Cometary]")?;
                 write!(f, "{c}")
             }
         }
@@ -583,12 +583,12 @@ pub(crate) mod orbit_type_test {
         };
 
         let s_k = format!("{}", OrbitalElements::Keplerian(ke));
-        assert!(s_k.starts_with("[Keplerian representation]"));
+        assert!(s_k.starts_with("[Keplerian]"));
 
         let s_e = format!("{}", OrbitalElements::Equinoctial(eq));
-        assert!(s_e.starts_with("[Equinoctial representation]"));
+        assert!(s_e.starts_with("[Equinoctial]"));
 
         let s_c = format!("{}", OrbitalElements::Cometary(ce));
-        assert!(s_c.starts_with("[Cometary representation]"));
+        assert!(s_c.starts_with("[Cometary]"));
     }
 }

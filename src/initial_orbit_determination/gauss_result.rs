@@ -284,6 +284,6 @@ mod gauss_results_tests {
         assert!(output.contains("a   (semi-major axis)       = 1.234567 AU"));
         assert!(output.contains("e   (eccentricity)          = 0.100000"));
         assert!(output.contains("i   (inclination)           = 0.200000 rad (11.459156°)"));
-        assert!(output.contains("Keplerian Elements @ epoch (MJD): 59001.500000"));
+        assert!(output.contains("Elements @ epoch (MJD): 59001.500000"));
     }
 }

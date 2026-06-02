@@ -224,11 +224,7 @@ impl fmt::Display for CometaryElements {
     /// * [`KeplerianElements`] – Classical representation used in conversions.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rad_to_deg = 180.0 / std::f64::consts::PI;
-        writeln!(
-            f,
-            "Cometary Elements @ epoch (MJD): {:.6}",
-            self.reference_epoch
-        )?;
+        writeln!(f, "Elements @ epoch (MJD): {:.6}", self.reference_epoch)?;
         writeln!(f, "------------------------------------------------")?;
         writeln!(
             f,
@@ -504,10 +500,7 @@ mod cometary_element_tests {
         };
 
         let s = format!("{ce}");
-        assert!(
-            s.contains("Cometary Elements @ epoch (MJD)"),
-            "header missing"
-        );
+        assert!(s.contains("Elements @ epoch (MJD)"), "header missing");
         assert!(s.contains("q   (perihelion distance)"), "q line missing");
         assert!(s.contains("e   (eccentricity)"), "e line missing");
         assert!(
