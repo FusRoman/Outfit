@@ -113,10 +113,14 @@ jobs:
       - name: Generate coverage (lcov)
         run: |
           if [ "${{ matrix.features }}" = "default" ]; then
+            RUST_TEST_THREADS=1 \
+            RAYON_NUM_THREADS=2 \
             cargo llvm-cov \
               --workspace \
               --lcov --output-path lcov.info
           else
+            RUST_TEST_THREADS=1 \
+            RAYON_NUM_THREADS=2 \
             cargo llvm-cov \
               --workspace \
               --features ${{ matrix.features }} \
