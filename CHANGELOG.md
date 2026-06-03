@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **N-body propagator (`propagator/`)**
+  - New `propagator` module exposing two propagation strategies selectable at runtime via `PropagatorKind`:
+    - `PropagatorKind::TwoBody` — analytic Keplerian propagation (default, no extra dependencies).
+    - `PropagatorKind::NBody(NBodyConfig)` — numerical N-body integration via an 8th-order Dormand–Prince (DOP853) integrator from the `differential-equations` crate.
+  - `NBodyConfig` — configuration struct selecting which planetary perturbers to include.
+  - `NBodyResult` — propagation output holding the final heliocentric state and the 6×6 State Transition Matrix (STM) Φ.
+  - The STM is propagated alongside the trajectory (variational equations `dΦ/dt = A(t)·Φ`), enabling N-body-quality partial derivatives for the differential corrector.
+  - `propagator::planet_gm` — planetary GM constants table.
+  - New dependency: [`differential-equations`](https://crates.io/crates/differential-equations) (DOP853 integrator).
+  - Integration tests for N-body propagation added in `tests/test_diff_cor.rs`.
+
+- **Ephemeris generation (`ephemeris/`)**
+  - Entirely new `ephemeris` module providing a complete, type-safe pipeline to predict apparent sky positions and geometric quantities from an orbit:
+    - **`EphemerisRequest<O>`** — typed builder pairing observers with generation modes; `O` is one of three zero-cost marker types:
+      - `Position` — computes apparent (RA, Dec), geocentric/heliocentric distances → `ApparentPosition`.
+      - `Geometry` — computes phase angle, solar elongation, radial velocity, angular rates → `BodyGeometry`.
+      - `Combined` — both of the above from a single propagation → `(ApparentPosition, BodyGeometry)`.
+    - **`EphemerisMode`** — epoch generation strategy:
+      - `Single` — single epoch.
+      - `Range { start, end, step }` — uniform grid.
+      - `At(Vec<Epoch>)` — arbitrary epoch list.
+    - **`EphemerisResult<O>`** — result container; per-entry errors are recorded without short-circuiting the full computation.
+      - `successes()`, `errors()`, `by_observer()` accessors.
+    - **`EphemerisConfig`** — global configuration (aberration corrections, etc.).
+    - **`OrbitalElements::compute`** — entry point: `elements.compute(&request, &jpl, &ut1)`.
+    - **`ApparentPosition`** — apparent RA/Dec, geocentric distance, heliocentric distance, light-travel-time corrected.
+    - **`BodyGeometry`** — phase angle, solar elongation, radial velocity, apparent angular rates.
+    - **Aberration correction** (`aberration.rs`) — stellar aberration applied to apparent positions.
+    - **Batch ephemeris (`batch.rs`)** — `FullOrbitResultExt` extension trait on `FullOrbitResult`:
+      - `compute_ephemerides(&request, &jpl, &ut1)` — sequential computation over all orbits in a `FullOrbitResult`.
+      - `compute_ephemerides_parallel(&request, &jpl, &ut1)` *(feature `parallel`)* — Rayon-parallel variant.
+    - Integration tests in `tests/test_ephemeris.rs` (≈780 lines).
+
+- **Orbital uncertainty & Jacobian propagation (`orbit_type/uncertainty.rs`)**
+  - New `uncertainty` submodule providing first-order linear covariance propagation across all three orbital element representations:
+    - `KeplerianUncertainty` — 1σ standard deviations for (a, e, i, Ω, ω, M).
+    - `EquinoctialUncertainty` — 1σ standard deviations for (a, h, k, p, q, λ).
+    - `CometaryUncertainty` — 1σ standard deviations for (q, e, i, Ω, ω, ν).
+    - Each built via `from_covariance(&OrbitalCovariance)` extracting diagonal variances.
+    - `OrbitalCovariance` — full 6×6 symmetric covariance matrix Σ with `propagate(jacobian)` → `Σ' = J Σ Jᵀ`.
+  - **Jacobian methods** on orbital element structs:
+    - `EquinoctialElements::jacobian_to_keplerian()` — ∂(a,e,i,Ω,ω,M)/∂(a,h,k,p,q,λ).
+    - `KeplerianElements::jacobian_to_equinoctial()` and `jacobian_to_cometary()`.
+    - `CometaryElements::jacobian_to_keplerian()` and `jacobian_to_equinoctial()`.
+  - `OrbitalElements` (the top-level enum) gains:
+    - `uncertainty() -> Option<OrbitalCovariance>` — returns the attached covariance if present.
+    - Covariance is propagated and converted automatically when calling `into_keplerian()`, `into_equinoctial()`, `into_cometary()`, preserving uncertainty across representations.
+  - `DifferentialCorrectionOutput` updated to expose `OrbitalCovariance` through `OrbitalElements` directly.
+
 - **Differential orbit correction (`differential_orbit_correction`)**
   - New module implementing a full **least-squares differential correction** pipeline over optical astrometry, using 2-body (Keplerian) propagation:
     - `DifferentialCorrectionConfig` — configuration struct (max iterations, convergence threshold, RMS divergence ratio, outlier rejection settings).
@@ -53,6 +102,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **Orbit display simplified** — `Display` implementations for `KeplerianElements`, `EquinoctialElements`, and `CometaryElements` simplified; `GaussResult` display updated accordingly. Verbose per-field multi-line output replaced by a more compact single-block format.
+
+- **`PropagatorKind` integrated into differential corrector** — `DifferentialCorrectionConfig` now accepts a `PropagatorKind` field; the corrector dispatches to two-body or N-body propagation transparently. Existing configs default to `PropagatorKind::TwoBody` (no migration required).
+
+- **`observation_ephemeris.rs` moved** — `src/observation_ephemeris.rs` relocated to `src/ephemeris/observation_ephemeris.rs`; public re-exports updated in `src/lib.rs`.
+
+- **CI: test thread count capped** — `RUST_TEST_THREADS` set in CI workflow to limit concurrency during `cargo test`, reducing peak memory usage from heavy doctests.
+
 - **`photom` crate extracted** — observation parsing, error models, observer management, and trajectory ingestion have been moved into a dedicated `photom` crate (published on crates.io). Outfit now depends on `photom` as an external dependency.
   - Removed from Outfit: `src/observations/`, `src/observers/`, `src/trajectories/`, `src/error_models/`, `src/outfit.rs`, `src/env_state.rs` and associated modules.
   - Public re-exports updated in `src/lib.rs`; user-facing types (`ObsDataset`, `ObsErrorModel`, `TrajId`, `Observer`, `Observatories`, …) are now accessed via `photom`.
@@ -94,7 +151,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Notes
 
-- The differential corrector uses **2-body (Keplerian) propagation** only. For well-observed main-belt asteroids with dense N-body-quality astrometry, the first Newton step may temporarily increase the RMS (2-body vs N-body mismatch) before converging. The default `rms_divergence_ratio` (1.5) can be raised in `DifferentialCorrectionConfig` if needed. N-body propagation + variational equations is planned for a future release.
+- The differential corrector now supports both **2-body (Keplerian)** and **N-body** propagation via `PropagatorKind`. The default remains `TwoBody`. For well-observed main-belt asteroids, select `NBody` with the appropriate planetary perturbers for higher accuracy. The default `rms_divergence_ratio` (1.5) in `DifferentialCorrectionConfig` can be raised if needed during convergence.
+- The `dev` profile no longer emits debug symbols (`debug = false`) to reduce RAM consumption when running doctests.
+- Ephemeris computation is designed to be fault-tolerant: individual `(epoch, observer)` errors are captured per-entry inside `EphemerisResult` without aborting the whole batch.
 
 ---
 
