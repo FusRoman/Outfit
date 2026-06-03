@@ -18,6 +18,11 @@ keywords = [
 ]
 categories = ["science", "parsing", "data-structures"]
 authors = ["Roman Le Montagner <roman.le-montagner@ijclab.in2p3.fr>"]
+exclude = [
+    ".github/",
+    "examples/",
+    "tests/",
+]
 
 [dependencies]
 
