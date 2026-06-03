@@ -34,17 +34,46 @@
 //! - Angles: **radians**
 //! - Time: **days** (epoch usually in **MJD**, TDB/TT scale)
 //!
-//! ## Degeneracies
+//! ## Degeneracies and singularities
 //!
-//! Classical Keplerian elements suffer from singularities:
+//! Classical Keplerian elements suffer from singularities in certain orbital configurations:
 //!
-//! - **Circular orbits (`e → 0`)**: periapsis argument ω becomes undefined.  
-//!   → conventionally set to `0.0` during conversion.
+//! - **Circular orbits ($e \to 0$)**: the periapsis argument $\omega$ becomes undefined because
+//!   there is no distinct periapsis point. Conventionally set to $\omega = 0$ during conversion,
+//!   but derivatives $\partial \omega / \partial h$ and $\partial \omega / \partial k$ are
+//!   singular ($\sim e^{-2}$).
 //!
-//! - **Equatorial orbits (`i → 0`)**: ascending node Ω becomes undefined.  
-//!   → conventionally set to `0.0` during conversion.
+//! - **Equatorial orbits ($i \to 0$)**: the ascending node longitude $\Omega$ becomes undefined
+//!   because the orbital plane coincides with the reference plane. Conventionally set to $\Omega = 0$,
+//!   with singular derivatives $\partial \Omega / \partial p$ and $\partial \Omega / \partial q$
+//!   ($\sim i^{-1}$).
 //!
-//! For robust numerical work, the [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) representation is recommended.
+//! - **Circular equatorial orbits ($e \to 0$ and $i \to 0$)**: both $\omega$ and $\Omega$ are
+//!   undefined. Only the mean longitude $\lambda = \Omega + \omega + M$ remains well-defined.
+//!
+//! These singularities impact **uncertainty propagation**: near-circular or near-equatorial orbits
+//! will have artificially inflated or ill-defined uncertainties in $\omega$ or $\Omega$ when
+//! converted from equinoctial elements.
+//!
+//! **Recommendation**: For numerical work and uncertainty analysis on circular or equatorial orbits,
+//! use [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) as the
+//! primary representation to avoid singularities.
+//!
+//! ## Uncertainty propagation from equinoctial elements
+//!
+//! When converting from equinoctial $(a, h, k, p, q, \lambda)$ to Keplerian $(a, e, i, \Omega, \omega, M)$,
+//! uncertainties are propagated using the Jacobian matrix computed by [`jacobian_to_equinoctial`](KeplerianElements::jacobian_to_equinoctial):
+//!
+//! $$
+//! \Sigma_{\text{Kep}} = J_{\text{Eq} \to \text{Kep}} \, \Sigma_{\text{Eq}} \, J_{\text{Eq} \to \text{Kep}}^\top
+//! $$
+//!
+//! where $J_{\text{Eq} \to \text{Kep}}$ is the inverse Jacobian
+//! (computed in [`EquinoctialElements::jacobian_to_keplerian`](crate::orbit_type::equinoctial_element::EquinoctialElements::jacobian_to_keplerian)).
+//!
+//! Near singular points, derivatives are regularized by setting them to zero when denominators
+//! become small (threshold $\epsilon = 10^{-12}$). This prevents numerical overflow but may
+//! underestimate uncertainties in degenerate cases.
 //!
 //! ## Example
 //!
@@ -83,6 +112,8 @@
 //! - [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) – regularized, non-singular form.
 //! - [`principal_angle`](crate::kepler::principal_angle) – helper to normalize angular elements.
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
+
+use nalgebra::{Matrix6, Vector6};
 
 use crate::{kepler::principal_angle, orbit_type::equinoctial_element::EquinoctialElements};
 use std::fmt;
@@ -200,6 +231,152 @@ impl KeplerianElements {
             mean_anomaly,
         }
     }
+
+    /// Compute the Jacobian of the Keplerian-to-equinoctial transformation
+    ///
+    /// This method returns the $6 \times 6$ Jacobian matrix of the transformation from
+    /// Keplerian elements $(a, e, i, \Omega, \omega, M)$ to equinoctial elements $(a, h, k, p, q, \lambda)$.
+    ///
+    /// ## Mathematical formulation
+    ///
+    /// The equinoctial elements are defined by:
+    ///
+    /// $$
+    /// \begin{aligned}
+    /// a &= a \\
+    /// h &= e \sin(\varpi) \\
+    /// k &= e \cos(\varpi) \\
+    /// p &= \tan(i/2) \sin(\Omega) \\
+    /// q &= \tan(i/2) \cos(\Omega) \\
+    /// \lambda &= \varpi + M = \Omega + \omega + M
+    /// \end{aligned}
+    /// $$
+    ///
+    /// where $\varpi = \Omega + \omega$ is the longitude of periapsis.
+    ///
+    /// ## Jacobian structure
+    ///
+    /// The Jacobian $J = \partial \mathbf{y} / \partial \mathbf{x}$ has the following structure:
+    ///
+    /// - **Column 1** ($\partial / \partial a$): Only $\partial a / \partial a = 1$ is nonzero
+    ///
+    /// - **Column 2** ($\partial / \partial e$):
+    ///   $$\frac{\partial h}{\partial e} = \sin(\varpi), \quad \frac{\partial k}{\partial e} = \cos(\varpi)$$
+    ///
+    /// - **Column 3** ($\partial / \partial i$):
+    ///   $$\frac{\partial p}{\partial i} = \frac{1}{2 \cos^2(i/2)} \sin(\Omega), \quad
+    ///   \frac{\partial q}{\partial i} = \frac{1}{2 \cos^2(i/2)} \cos(\Omega)$$
+    ///
+    /// - **Column 4** ($\partial / \partial \Omega$):
+    ///   $$\frac{\partial h}{\partial \Omega} = e \cos(\varpi), \quad
+    ///   \frac{\partial k}{\partial \Omega} = -e \sin(\varpi)$$
+    ///   $$\frac{\partial p}{\partial \Omega} = \tan(i/2) \cos(\Omega), \quad
+    ///   \frac{\partial q}{\partial \Omega} = -\tan(i/2) \sin(\Omega)$$
+    ///   $$\frac{\partial \lambda}{\partial \Omega} = 1$$
+    ///
+    /// - **Column 5** ($\partial / \partial \omega$):
+    ///   Same as $\partial / \partial \Omega$ for $h, k, \lambda$ but zero for $p, q$
+    ///
+    /// - **Column 6** ($\partial / \partial M$):
+    ///   Only $\partial \lambda / \partial M = 1$ is nonzero
+    ///
+    /// ## Handling singularities
+    ///
+    /// No singularities occur in this forward transformation (Keplerian → Equinoctial) because:
+    /// - $h, k$ are well-defined for all $e \geq 0$
+    /// - $p, q$ are well-defined for all $i \in [0, \pi]$
+    ///
+    /// This makes the Jacobian numerically stable for all orbital configurations.
+    ///
+    /// ## Usage in uncertainty propagation
+    ///
+    /// This Jacobian is used to transform covariance matrices from Keplerian to equinoctial:
+    ///
+    /// $$
+    /// \Sigma_{\text{Eq}} = J \, \Sigma_{\text{Kep}} \, J^\top
+    /// $$
+    ///
+    /// See [`OrbitalCovariance::propagate`](crate::orbit_type::uncertainty::OrbitalCovariance::propagate)
+    /// for the propagation implementation.
+    ///
+    /// ## Return
+    ///
+    /// A $6 \times 6$ matrix where:
+    /// - **Rows** correspond to target elements: $[a, h, k, p, q, \lambda]$
+    /// - **Columns** correspond to source elements: $[a, e, i, \Omega, \omega, M]$
+    ///
+    /// ## See also
+    ///
+    /// - [`EquinoctialElements::jacobian_to_keplerian`](crate::orbit_type::equinoctial_element::EquinoctialElements::jacobian_to_keplerian) — Inverse Jacobian
+    /// - [`OrbitalElements::to_equinoctial`](crate::orbit_type::OrbitalElements::to_equinoctial) — High-level conversion with uncertainty propagation
+    pub fn jacobian_to_equinoctial(&self) -> Matrix6<f64> {
+        let e = self.eccentricity;
+        let i = self.inclination;
+        let varpi = self.ascending_node_longitude + self.periapsis_argument;
+        let big_omega = self.ascending_node_longitude;
+
+        let sin_varpi = varpi.sin();
+        let cos_varpi = varpi.cos();
+        let sin_omega = big_omega.sin();
+        let cos_omega = big_omega.cos();
+
+        let half_i = i / 2.0;
+        let tan_half_i = half_i.tan();
+        let d_tan_half_i_d_i = 0.5 / half_i.cos().powi(2);
+
+        // Each Vector6 is one column: ∂y/∂x_j for source variable x_j.
+        // Row ordering (target):    [a, h, k, p, q, λ]
+        // Column ordering (source): [a, e, i, Ω, ω, M]
+
+        let col_a = Vector6::new(1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+        let col_e = Vector6::new(
+            0.0,       // ∂a/∂e
+            sin_varpi, // ∂h/∂e
+            cos_varpi, // ∂k/∂e
+            0.0,       // ∂p/∂e
+            0.0,       // ∂q/∂e
+            0.0,       // ∂λ/∂e
+        );
+
+        let col_i = Vector6::new(
+            0.0,                          // ∂a/∂i
+            0.0,                          // ∂h/∂i
+            0.0,                          // ∂k/∂i
+            d_tan_half_i_d_i * sin_omega, // ∂p/∂i
+            d_tan_half_i_d_i * cos_omega, // ∂q/∂i
+            0.0,                          // ∂λ/∂i
+        );
+
+        let col_big_omega = Vector6::new(
+            0.0,                     // ∂a/∂Ω
+            e * cos_varpi,           // ∂h/∂Ω
+            -e * sin_varpi,          // ∂k/∂Ω
+            tan_half_i * cos_omega,  // ∂p/∂Ω
+            -tan_half_i * sin_omega, // ∂q/∂Ω
+            1.0,                     // ∂λ/∂Ω
+        );
+
+        let col_omega = Vector6::new(
+            0.0,            // ∂a/∂ω
+            e * cos_varpi,  // ∂h/∂ω
+            -e * sin_varpi, // ∂k/∂ω
+            0.0,            // ∂p/∂ω
+            0.0,            // ∂q/∂ω
+            1.0,            // ∂λ/∂ω
+        );
+
+        let col_m = Vector6::new(
+            0.0, // ∂a/∂M
+            0.0, // ∂h/∂M
+            0.0, // ∂k/∂M
+            0.0, // ∂p/∂M
+            0.0, // ∂q/∂M
+            1.0, // ∂λ/∂M
+        );
+
+        Matrix6::from_columns(&[col_a, col_e, col_i, col_big_omega, col_omega, col_m])
+    }
 }
 
 impl From<KeplerianElements> for EquinoctialElements {
@@ -252,11 +429,7 @@ impl From<&KeplerianElements> for EquinoctialElements {
 impl fmt::Display for KeplerianElements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rad_to_deg = 180.0 / std::f64::consts::PI;
-        writeln!(
-            f,
-            "Keplerian Elements @ epoch (MJD): {:.6}",
-            self.reference_epoch
-        )?;
+        writeln!(f, "Elements @ epoch (MJD): {:.6}", self.reference_epoch)?;
         writeln!(f, "-------------------------------------------")?;
         writeln!(
             f,
@@ -326,5 +499,111 @@ pub(crate) mod test_keplerian_element {
                 mean_longitude: 1.693697008,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_jacobian_keplerian {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    /// Finite-difference Jacobian for reference.
+    fn fd_jacobian_kep_to_eq(kep: &KeplerianElements, eps: f64) -> Matrix6<f64> {
+        let fields: [f64; 6] = [
+            kep.semi_major_axis,
+            kep.eccentricity,
+            kep.inclination,
+            kep.ascending_node_longitude,
+            kep.periapsis_argument,
+            kep.mean_anomaly,
+        ];
+
+        let eq_to_arr = |e: &EquinoctialElements| -> [f64; 6] {
+            [
+                e.semi_major_axis,
+                e.eccentricity_sin_lon,
+                e.eccentricity_cos_lon,
+                e.tan_half_incl_sin_node,
+                e.tan_half_incl_cos_node,
+                e.mean_longitude,
+            ]
+        };
+
+        let mut columns = [[0.0f64; 6]; 6];
+
+        for col in 0..6 {
+            let mut fwd = fields;
+            let mut bwd = fields;
+            fwd[col] += eps;
+            bwd[col] -= eps;
+
+            let make_kep = |f: [f64; 6]| KeplerianElements {
+                reference_epoch: kep.reference_epoch,
+                semi_major_axis: f[0],
+                eccentricity: f[1],
+                inclination: f[2],
+                ascending_node_longitude: f[3],
+                periapsis_argument: f[4],
+                mean_anomaly: f[5],
+            };
+
+            let eq_fwd = eq_to_arr(&EquinoctialElements::from(&make_kep(fwd)));
+            let eq_bwd = eq_to_arr(&EquinoctialElements::from(&make_kep(bwd)));
+
+            for row in 0..6 {
+                columns[col][row] = (eq_fwd[row] - eq_bwd[row]) / (2.0 * eps);
+            }
+        }
+
+        Matrix6::from_fn(|row, col| columns[col][row])
+    }
+
+    #[test]
+    fn test_jacobian_to_equinoctial_against_finite_differences() {
+        let kep = KeplerianElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 2.5,
+            eccentricity: 0.3,
+            inclination: 0.5,
+            ascending_node_longitude: 1.2,
+            periapsis_argument: 0.8,
+            mean_anomaly: 2.1,
+        };
+
+        let analytical = kep.jacobian_to_equinoctial();
+        let numerical = fd_jacobian_kep_to_eq(&kep, 1e-6);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(
+                    analytical[(row, col)],
+                    numerical[(row, col)],
+                    epsilon = 1e-7
+                );
+            }
+        }
+    }
+
+    /// Near-circular orbit: e ≈ 0, the h/k row should remain well-defined.
+    #[test]
+    fn test_jacobian_to_equinoctial_near_circular() {
+        let kep = KeplerianElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 1.0,
+            eccentricity: 1e-8,
+            inclination: 0.3,
+            ascending_node_longitude: 0.5,
+            periapsis_argument: 0.2,
+            mean_anomaly: 1.0,
+        };
+
+        let j = kep.jacobian_to_equinoctial();
+        let numerical = fd_jacobian_kep_to_eq(&kep, 1e-6);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(j[(row, col)], numerical[(row, col)], epsilon = 1e-6);
+            }
+        }
     }
 }

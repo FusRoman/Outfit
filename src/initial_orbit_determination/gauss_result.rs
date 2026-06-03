@@ -1,6 +1,6 @@
 //! # Gauss orbit determination result
 //!
-//! This module defines [`GaussResult`], an enum representing the outcome of the
+//! This module defines [`crate::initial_orbit_determination::gauss_result::GaussResult`], an enum representing the outcome of the
 //! **Gauss initial orbit determination method** applied to a triplet of astrometric
 //! observations.  
 //! It encapsulates the orbital elements computed from the Gauss method and distinguishes
@@ -16,18 +16,18 @@
 //!   A corrected orbit obtained after at least one iteration of refinement, typically
 //!   using velocity correction or Lagrange coefficient adjustments.
 //!
-//! Both variants wrap an [`OrbitalElements`] value, which can hold Keplerian,
+//! Both variants wrap an [`crate::orbit_type::OrbitalElements`] value, which can hold Keplerian,
 //! Equinoctial, or Cometary elements depending on the solution domain.
 //!
 //! ## Features
 //!
 //! - Query methods:
-//!   * [`GaussResult::is_prelim`] – check if the result is a preliminary orbit.
-//!   * [`GaussResult::is_corrected`] – check if the result includes refinement.
+//!   * [`crate::initial_orbit_determination::gauss_result::GaussResult::is_prelim`] – check if the result is a preliminary orbit.
+//!   * [`crate::initial_orbit_determination::gauss_result::GaussResult::is_corrected`] – check if the result includes refinement.
 //! - Accessors:
-//!   * [`GaussResult::get_orbit`] – borrow the inner [`OrbitalElements`].
-//!   * [`GaussResult::as_inner`] – alias to `get_orbit`, for generic contexts.
-//!   * [`GaussResult::into_inner`] – consume the enum and return the inner [`OrbitalElements`].
+//!   * [`crate::initial_orbit_determination::gauss_result::GaussResult::get_orbit`] – borrow the inner [`crate::orbit_type::OrbitalElements`].
+//!   * [`crate::initial_orbit_determination::gauss_result::GaussResult::as_inner`] – alias to `get_orbit`, for generic contexts.
+//!   * [`crate::initial_orbit_determination::gauss_result::GaussResult::into_inner`] – consume the enum and return the inner [`crate::orbit_type::OrbitalElements`].
 //!
 //! Additionally, `GaussResult` implements [`Display`](std::fmt::Display) to provide a formatted,
 //! human-readable view of the result and its orbital elements.
@@ -36,7 +36,7 @@
 //!
 //! This type is returned by functions such as
 //! [`GaussObs::prelim_orbit`](crate::initial_orbit_determination::gauss::GaussObs::prelim_orbit)
-//! or [`estimate_best_orbit`](crate::observations::observations_ext::ObservationIOD::estimate_best_orbit).
+//! or [`FitIOD::fit_iod`](crate::FitIOD::fit_iod).
 //!
 //! ```rust,no_run
 //! use outfit::initial_orbit_determination::gauss_result::GaussResult;
@@ -52,12 +52,12 @@
 //!
 //! ## Notes
 //!
-//! - If you need a specific representation, use [`OrbitalElements::to_keplerian`] or
-//!   [`OrbitalElements::to_equinoctial`] for explicit conversion.
+//! - If you need a specific representation, use [`crate::orbit_type::OrbitalElements::to_keplerian`] or
+//!   [`crate::orbit_type::OrbitalElements::to_equinoctial`] for explicit conversion.
 //!
 //! ## See also
 //!
-//! - [`OrbitalElements`] – Canonical orbital element sum type.
+//! - [`crate::orbit_type::OrbitalElements`] – Canonical orbital element sum type.
 //! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements), [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements), [`CometaryElements`](crate::orbit_type::cometary_element::CometaryElements) – The three supported element forms.
 //! - [`GaussObs`](crate::initial_orbit_determination::gauss::GaussObs)
 //! - Milani & Gronchi (2010), *Theory of Orbit Determination*
@@ -82,7 +82,7 @@ use std::fmt;
 ///
 /// Notes
 /// -------
-/// * Both variants wrap an [`OrbitalElements`] value, which may itself contain:
+/// * Both variants wrap an [`crate::orbit_type::OrbitalElements`] value, which may itself contain:
 ///   - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements) (classical orbital elements),
 ///   - [`EquinoctialElements`](crate::orbit_type::equinoctial_element::EquinoctialElements) (non-singular formulation), or
 ///   - [`CometaryElements`](crate::orbit_type::cometary_element::CometaryElements) (perihelion form for e ≥ 1).
@@ -181,16 +181,16 @@ impl GaussResult {
     ///
     /// Arguments
     /// -----------------
-    /// * `self` – The [`GaussResult`] to be consumed.
+    /// * `self` – The [`crate::initial_orbit_determination::gauss_result::GaussResult`] to be consumed.
     ///
     /// Return
     /// ----------
-    /// * `OrbitalElements` – The inner orbital elements, moved out of `self`.
+    /// * [`crate::orbit_type::OrbitalElements`] – The inner orbital elements, moved out of `self`.
     ///
     /// See also
     /// ------------
-    /// * [`GaussResult::get_orbit`] – Borrow instead of moving.
-    /// * [`OrbitalElements::to_keplerian`] – Convert to Keplerian if needed.
+    /// * [`crate::initial_orbit_determination::gauss_result::GaussResult::get_orbit`] – Borrow instead of moving.
+    /// * [`crate::orbit_type::OrbitalElements::to_keplerian`] – Convert to Keplerian if needed.
     /// * [`OrbitalElements::to_equinoctial`] – Convert to equinoctial if needed.
     pub fn into_inner(self) -> OrbitalElements {
         match self {
@@ -223,15 +223,19 @@ mod gauss_results_tests {
     use std::format;
 
     fn dummy_orbit() -> OrbitalElements {
-        OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59000.0,
-            semi_major_axis: 2.5,
-            eccentricity: 0.12,
-            inclination: 0.1,
-            ascending_node_longitude: 1.2,
-            periapsis_argument: 0.8,
-            mean_anomaly: 0.3,
-        })
+        OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59000.0,
+                semi_major_axis: 2.5,
+                eccentricity: 0.12,
+                inclination: 0.1,
+                ascending_node_longitude: 1.2,
+                periapsis_argument: 0.8,
+                mean_anomaly: 0.3,
+            },
+            uncertainty: None,
+            covariance: None,
+        }
     }
 
     #[test]
@@ -264,15 +268,19 @@ mod gauss_results_tests {
 
     #[test]
     fn test_display_format_summary() {
-        let orbit = OrbitalElements::Keplerian(KeplerianElements {
-            reference_epoch: 59001.5,
-            semi_major_axis: 1.234567,
-            eccentricity: 0.1,
-            inclination: 0.2,
-            ascending_node_longitude: 0.3,
-            periapsis_argument: 0.4,
-            mean_anomaly: 0.5,
-        });
+        let orbit = OrbitalElements::Keplerian {
+            elements: KeplerianElements {
+                reference_epoch: 59001.5,
+                semi_major_axis: 1.234567,
+                eccentricity: 0.1,
+                inclination: 0.2,
+                ascending_node_longitude: 0.3,
+                periapsis_argument: 0.4,
+                mean_anomaly: 0.5,
+            },
+            uncertainty: None,
+            covariance: None,
+        };
 
         let result = GaussResult::CorrectedOrbit(orbit);
 
@@ -284,6 +292,6 @@ mod gauss_results_tests {
         assert!(output.contains("a   (semi-major axis)       = 1.234567 AU"));
         assert!(output.contains("e   (eccentricity)          = 0.100000"));
         assert!(output.contains("i   (inclination)           = 0.200000 rad (11.459156°)"));
-        assert!(output.contains("Keplerian Elements @ epoch (MJD): 59001.500000"));
+        assert!(output.contains("Elements @ epoch (MJD): 59001.500000"));
     }
 }

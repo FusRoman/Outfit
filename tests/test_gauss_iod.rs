@@ -1,138 +1,189 @@
-#![cfg(feature = "jpl-download")]
-
 mod common;
 
 use approx::assert_relative_eq;
-use camino::Utf8Path;
-use outfit::constants::ObjectNumber;
-use outfit::error_models::ErrorModel;
-use outfit::initial_orbit_determination::gauss_result::GaussResult;
+use hifitime::ut1::Ut1Provider;
 use outfit::initial_orbit_determination::IODParams;
-use outfit::observations::observations_ext::ObservationIOD;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
-use outfit::outfit::Outfit;
-use outfit::outfit_errors::OutfitError;
-use outfit::trajectories::trajectory_file::TrajectoryFile;
-use outfit::TrajectorySet;
+use outfit::FitIOD;
+use outfit::{FullOrbitResult, JPLEphem};
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 use crate::common::approx_equal;
 
-fn run_iod(
-    env_state: &mut Outfit,
-    traj_set: &mut TrajectorySet,
-    traj_number: &ObjectNumber,
-) -> Result<(GaussResult, f64), OutfitError> {
-    let obs = traj_set.get_mut(traj_number).unwrap();
-    let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility
+struct ExpectedResult {
+    orbit: OrbitalElements,
+    rms: f64,
+}
 
-    let default = IODParams::builder()
+fn expected_results() -> Vec<ExpectedResult> {
+    vec![
+        ExpectedResult {
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 57049.2684537375,
+                    semi_major_axis: 1.801740835743616,
+                    eccentricity: 0.28356259478492557,
+                    inclination: 0.2026828189979528,
+                    ascending_node_longitude: 0.007951791820548622,
+                    periapsis_argument: 1.2450647642587158,
+                    mean_anomaly: 0.4408048786626789,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
+            rms: 66.97479288637471,
+        },
+        ExpectedResult {
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 60672.2443617134,
+                    semi_major_axis: 3.2199380906809876,
+                    eccentricity: 0.0624192099888107,
+                    inclination: 0.1829771029880289,
+                    ascending_node_longitude: 0.030775930195064964,
+                    periapsis_argument: 1.9053705720223801,
+                    mean_anomaly: 4.980622835177979,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
+            rms: 0.5739558189489471,
+        },
+        ExpectedResult {
+            orbit: OrbitalElements::Keplerian {
+                elements: KeplerianElements {
+                    reference_epoch: 60465.26777915681,
+                    semi_major_axis: 2.1874983804796972,
+                    eccentricity: 0.20256414489486008,
+                    inclination: 0.11906245183260411,
+                    ascending_node_longitude: 3.0918063960305293,
+                    periapsis_argument: 2.4793248309745692,
+                    mean_anomaly: 4.934465465531324,
+                },
+                uncertainty: None,
+                covariance: None,
+            },
+            rms: 18.963755528781288,
+        },
+    ]
+}
+
+fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
+    let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
+        .expect("Download of the JPL short time scale UT1 data failed");
+
+    let jpl_ephem: JPLEphem = "horizon:DE440"
+        .try_into()
+        .expect("Failed to load JPL ephemeris");
+
+    let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
+        "tests/data/2015AB.obs",
+        "tests/data/8467.obs",
+        "tests/data/33803.obs",
+    ]);
+    if !errors.is_empty() {
+        panic!("Failed to load observation datasets: {:?}", errors);
+    }
+
+    let iod_params = IODParams::builder()
         .n_noise_realizations(10)
         .noise_scale(1.1)
-        .max_obs_for_triplets(obs.len())
+        .max_obs_for_triplets(130)
         .max_triplets(30)
-        .build()?;
+        .build()
+        .unwrap();
 
-    obs.estimate_best_orbit(env_state, &ErrorModel::FCCT14, &mut rng, &default)
+    (jpl_ephem, ut1_provider, obs_dataset, iod_params)
+}
+
+fn assert_iod_results(mut full_orbit: FullOrbitResult, test_epsilon: f64, test_max_relative: f64) {
+    // K09R05F
+    let expected = &expected_results()[0];
+    let best_orbit = full_orbit.remove(&"K09R05F".into()).unwrap().unwrap();
+    assert!(approx_equal(
+        &expected.orbit,
+        best_orbit.orbital_elements(),
+        test_epsilon
+    ));
+    assert_relative_eq!(
+        best_orbit.orbit_quality(),
+        expected.rms,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
+
+    // 8467
+    let expected = &expected_results()[1];
+    let best_orbit = full_orbit.remove(&8467_u32.into()).unwrap().unwrap();
+    assert!(approx_equal(
+        &expected.orbit,
+        best_orbit.orbital_elements(),
+        test_epsilon
+    ));
+    assert_relative_eq!(
+        best_orbit.orbit_quality(),
+        expected.rms,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
+
+    // 33803
+    let expected = &expected_results()[2];
+    let best_orbit = full_orbit.remove(&33803_u32.into()).unwrap().unwrap();
+    assert!(approx_equal(
+        &expected.orbit,
+        best_orbit.orbital_elements(),
+        test_epsilon
+    ));
+    assert_relative_eq!(
+        best_orbit.orbit_quality(),
+        expected.rms,
+        epsilon = test_epsilon,
+        max_relative = test_max_relative
+    );
 }
 
 #[test]
-
 fn test_gauss_iod() {
-    let test_max_relative = 1e-11;
     let test_epsilon = 1e-11;
+    let test_max_relative = 1e-11;
 
-    let mut env_state = Outfit::new("horizon:DE440", ErrorModel::FCCT14).unwrap();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params) = build_test_fixtures();
 
-    let path_file = Utf8Path::new("tests/data/2015AB.obs");
-    let mut traj_set = TrajectorySet::new_from_80col(&mut env_state, path_file);
+    let full_orbit = obs_dataset
+        .fit_full_iod(
+            &jpl_ephem,
+            &ut1_provider,
+            &iod_params,
+            ObsErrorModel::FCCT14,
+            &mut StdRng::seed_from_u64(42),
+        )
+        .unwrap();
 
-    let path_file = Utf8Path::new("tests/data/8467.obs");
-    traj_set.add_from_80col(&mut env_state, path_file);
+    assert_iod_results(full_orbit, test_epsilon, test_max_relative);
+}
 
-    let path_file = Utf8Path::new("tests/data/33803.obs");
-    traj_set.add_from_80col(&mut env_state, path_file);
+#[test]
+#[cfg(feature = "parallel")]
+fn test_gauss_iod_parallel() {
+    let test_epsilon = 1e-11;
+    let test_max_relative = 1e-11;
 
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("K09R05F".into()),
-    )
-    .unwrap();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params) = build_test_fixtures();
 
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 57049.22904452732,
-        semi_major_axis: 1.8017634341924542,
-        eccentricity: 0.28360400982137396,
-        inclination: 0.20267485730439427,
-        ascending_node_longitude: 0.00810182022710516,
-        periapsis_argument: 1.2445523487100616,
-        mean_anomaly: 0.44069989140091426,
-    });
+    let full_orbit = obs_dataset
+        .fit_full_iod_parallel(
+            &jpl_ephem,
+            &ut1_provider,
+            &iod_params,
+            ObsErrorModel::FCCT14,
+            &mut StdRng::seed_from_u64(42),
+        )
+        .unwrap();
 
-    let orbit = best_orbit.get_orbit();
-
-    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(
-        best_rms,
-        47.67954270293223,
-        epsilon = test_epsilon,
-        max_relative = test_max_relative
-    );
-
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("8467".into()),
-    )
-    .unwrap();
-
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60672.24113100201,
-        semi_major_axis: 3.189546977249391,
-        eccentricity: 0.05434034666134485,
-        inclination: 0.18343383575588465,
-        ascending_node_longitude: 0.03253594968161228,
-        periapsis_argument: 2.0197545218038355,
-        mean_anomaly: 4.85070383704545,
-    });
-
-    let orbit = best_orbit.get_orbit();
-
-    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(
-        best_rms,
-        0.550927559734816,
-        epsilon = test_epsilon,
-        max_relative = test_max_relative
-    );
-
-    let (best_orbit, best_rms) = run_iod(
-        &mut env_state,
-        &mut traj_set,
-        &ObjectNumber::String("33803".into()),
-    )
-    .unwrap();
-
-    let expected_orbit = OrbitalElements::Keplerian(KeplerianElements {
-        reference_epoch: 60465.26778016307,
-        semi_major_axis: 2.192136202201971,
-        eccentricity: 0.2042936374305811,
-        inclination: 0.1189651192106584,
-        ascending_node_longitude: 3.091130251223283,
-        periapsis_argument: 2.4714439663661487,
-        mean_anomaly: 4.9466622638827324,
-    });
-
-    let orbit = best_orbit.get_orbit();
-
-    assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
-    assert_relative_eq!(
-        best_rms,
-        6.319395085728921,
-        epsilon = test_epsilon,
-        max_relative = test_max_relative
-    );
+    assert_iod_results(full_orbit, test_epsilon, test_max_relative);
 }

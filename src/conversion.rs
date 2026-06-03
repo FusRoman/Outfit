@@ -83,9 +83,11 @@
 //! - MPC/ADES ingestion modules where these utilities are typically used.
 use std::f64::consts::TAU;
 
-use nalgebra::Vector3;
+use nalgebra::{Matrix3, Vector3};
+use ordered_float::{FloatIsNan, NotNan};
+use photom::{coordinates::cartesian::CartesianCoord, Arcseconds, Degrees, Radians};
 
-use crate::constants::{ArcSec, Degree, Radian, DPI};
+use crate::constants::DPI;
 
 /// Estimate the accuracy of a numeric string based on its decimal precision.
 ///
@@ -118,7 +120,7 @@ fn compute_accuracy(field: &str, factor: f64) -> Option<f64> {
 /// ----------
 /// * Angle in **radians** (`Radian`).
 #[inline]
-pub fn arcsec_to_rad(arcsec: ArcSec) -> Radian {
+pub fn arcsec_to_rad(arcsec: Arcseconds) -> Radians {
     (arcsec / 3600.0).to_radians()
 }
 
@@ -153,7 +155,7 @@ pub fn arcsec_to_rad(arcsec: ArcSec) -> Radian {
 ///
 /// # See also
 /// * [`parse_dec_to_deg`] – Parses declination strings into degrees.
-pub fn parse_ra_to_deg(ra: &str) -> Option<(Degree, ArcSec)> {
+pub fn parse_ra_to_deg(ra: &str) -> Option<(Degrees, Arcseconds)> {
     let parts: Vec<&str> = ra.split_whitespace().collect();
     if parts.len() != 3 {
         return None;
@@ -200,7 +202,7 @@ pub fn parse_ra_to_deg(ra: &str) -> Option<(Degree, ArcSec)> {
 ///
 /// # See also
 /// * [`parse_ra_to_deg`] – Parses right ascension strings into degrees.
-pub fn parse_dec_to_deg(dec: &str) -> Option<(Degree, ArcSec)> {
+pub fn parse_dec_to_deg(dec: &str) -> Option<(Degrees, Arcseconds)> {
     let parts: Vec<&str> = dec.split_whitespace().collect();
     if parts.len() != 3 {
         return None;
@@ -424,7 +426,7 @@ pub fn dec_sdms_prec(rad: f64, prec: usize) -> (char, u32, u32, f64) {
 /// * This function is used when converting inertial position vectors to observable angles.
 ///
 /// # See also
-/// * [`correct_aberration`](crate::observations::correct_aberration) – apply aberration correction before calling this if needed
+/// * `correct_aberration_first_order` – apply aberration correction before calling this if needed
 pub fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let pos_norm = cartesian_position.norm();
     if pos_norm == 0. {
@@ -443,6 +445,63 @@ pub fn cartesian_to_radec(cartesian_position: Vector3<f64>) -> (f64, f64, f64) {
     let alpha = sin_alpha.atan2(cos_alpha);
     let alpha = if alpha < 0.0 { alpha + DPI } else { alpha };
     (alpha, delta, pos_norm)
+}
+
+pub trait ToNotNan {
+    type Output;
+    fn to_notnan(self) -> Result<Self::Output, FloatIsNan>;
+}
+
+impl ToNotNan for f64 {
+    type Output = NotNan<f64>;
+    fn to_notnan(self) -> Result<Self::Output, FloatIsNan> {
+        NotNan::new(self)
+    }
+}
+
+impl ToNotNan for Vector3<f64> {
+    type Output = Vector3<NotNan<f64>>;
+    fn to_notnan(self) -> Result<Self::Output, FloatIsNan> {
+        Ok(Vector3::new(
+            self.x.to_notnan()?,
+            self.y.to_notnan()?,
+            self.z.to_notnan()?,
+        ))
+    }
+}
+
+impl ToNotNan for Matrix3<f64> {
+    type Output = Matrix3<NotNan<f64>>;
+    fn to_notnan(self) -> Result<Self::Output, FloatIsNan> {
+        Ok(Matrix3::new(
+            self[(0, 0)].to_notnan()?,
+            self[(0, 1)].to_notnan()?,
+            self[(0, 2)].to_notnan()?,
+            self[(1, 0)].to_notnan()?,
+            self[(1, 1)].to_notnan()?,
+            self[(1, 2)].to_notnan()?,
+            self[(2, 0)].to_notnan()?,
+            self[(2, 1)].to_notnan()?,
+            self[(2, 2)].to_notnan()?,
+        ))
+    }
+}
+
+/// Convert a Cartesian position vector to a `CartesianCoord`.
+///
+/// # Arguments
+///
+/// - `vec`: A 3D vector representing the Cartesian coordinates (x, y, z).
+///
+/// # Returns
+///
+/// - A `CartesianCoord` struct with fields `x`, `y`, and `z` populated from the input vector.
+pub fn cartesion_from_vec(vec: Vector3<f64>) -> CartesianCoord {
+    CartesianCoord {
+        x: vec[0],
+        y: vec[1],
+        z: vec[2],
+    }
 }
 
 #[cfg(test)]

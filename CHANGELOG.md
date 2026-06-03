@@ -2,6 +2,161 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - unreleased
+
+### Added
+
+- **N-body propagator (`propagator/`)**
+  - New `propagator` module exposing two propagation strategies selectable at runtime via `PropagatorKind`:
+    - `PropagatorKind::TwoBody` — analytic Keplerian propagation (default, no extra dependencies).
+    - `PropagatorKind::NBody(NBodyConfig)` — numerical N-body integration via an 8th-order Dormand–Prince (DOP853) integrator from the `differential-equations` crate.
+  - `NBodyConfig` — configuration struct selecting which planetary perturbers to include.
+  - `NBodyResult` — propagation output holding the final heliocentric state and the 6×6 State Transition Matrix (STM) Φ.
+  - The STM is propagated alongside the trajectory (variational equations `dΦ/dt = A(t)·Φ`), enabling N-body-quality partial derivatives for the differential corrector.
+  - `propagator::planet_gm` — planetary GM constants table.
+  - New dependency: [`differential-equations`](https://crates.io/crates/differential-equations) (DOP853 integrator).
+  - Integration tests for N-body propagation added in `tests/test_diff_cor.rs`.
+
+- **Ephemeris generation (`ephemeris/`)**
+  - Entirely new `ephemeris` module providing a complete, type-safe pipeline to predict apparent sky positions and geometric quantities from an orbit:
+    - **`EphemerisRequest<O>`** — typed builder pairing observers with generation modes; `O` is one of three zero-cost marker types:
+      - `Position` — computes apparent (RA, Dec), geocentric/heliocentric distances → `ApparentPosition`.
+      - `Geometry` — computes phase angle, solar elongation, radial velocity, angular rates → `BodyGeometry`.
+      - `Combined` — both of the above from a single propagation → `(ApparentPosition, BodyGeometry)`.
+    - **`EphemerisMode`** — epoch generation strategy:
+      - `Single` — single epoch.
+      - `Range { start, end, step }` — uniform grid.
+      - `At(Vec<Epoch>)` — arbitrary epoch list.
+    - **`EphemerisResult<O>`** — result container; per-entry errors are recorded without short-circuiting the full computation.
+      - `successes()`, `errors()`, `by_observer()` accessors.
+    - **`EphemerisConfig`** — global configuration (aberration corrections, etc.).
+    - **`OrbitalElements::compute`** — entry point: `elements.compute(&request, &jpl, &ut1)`.
+    - **`ApparentPosition`** — apparent RA/Dec, geocentric distance, heliocentric distance, light-travel-time corrected.
+    - **`BodyGeometry`** — phase angle, solar elongation, radial velocity, apparent angular rates.
+    - **Aberration correction** (`aberration.rs`) — stellar aberration applied to apparent positions.
+    - **Batch ephemeris (`batch.rs`)** — `FullOrbitResultExt` extension trait on `FullOrbitResult`:
+      - `compute_ephemerides(&request, &jpl, &ut1)` — sequential computation over all orbits in a `FullOrbitResult`.
+      - `compute_ephemerides_parallel(&request, &jpl, &ut1)` *(feature `parallel`)* — Rayon-parallel variant.
+    - Integration tests in `tests/test_ephemeris.rs` (≈780 lines).
+
+- **Orbital uncertainty & Jacobian propagation (`orbit_type/uncertainty.rs`)**
+  - New `uncertainty` submodule providing first-order linear covariance propagation across all three orbital element representations:
+    - `KeplerianUncertainty` — 1σ standard deviations for (a, e, i, Ω, ω, M).
+    - `EquinoctialUncertainty` — 1σ standard deviations for (a, h, k, p, q, λ).
+    - `CometaryUncertainty` — 1σ standard deviations for (q, e, i, Ω, ω, ν).
+    - Each built via `from_covariance(&OrbitalCovariance)` extracting diagonal variances.
+    - `OrbitalCovariance` — full 6×6 symmetric covariance matrix Σ with `propagate(jacobian)` → `Σ' = J Σ Jᵀ`.
+  - **Jacobian methods** on orbital element structs:
+    - `EquinoctialElements::jacobian_to_keplerian()` — ∂(a,e,i,Ω,ω,M)/∂(a,h,k,p,q,λ).
+    - `KeplerianElements::jacobian_to_equinoctial()` and `jacobian_to_cometary()`.
+    - `CometaryElements::jacobian_to_keplerian()` and `jacobian_to_equinoctial()`.
+  - `OrbitalElements` (the top-level enum) gains:
+    - `uncertainty() -> Option<OrbitalCovariance>` — returns the attached covariance if present.
+    - Covariance is propagated and converted automatically when calling `into_keplerian()`, `into_equinoctial()`, `into_cometary()`, preserving uncertainty across representations.
+  - `DifferentialCorrectionOutput` updated to expose `OrbitalCovariance` through `OrbitalElements` directly.
+
+- **Differential orbit correction (`differential_orbit_correction`)**
+  - New module implementing a full **least-squares differential correction** pipeline over optical astrometry, using 2-body (Keplerian) propagation:
+    - `DifferentialCorrectionConfig` — configuration struct (max iterations, convergence threshold, RMS divergence ratio, outlier rejection settings).
+    - `FitLSQ` trait — top-level entry point on `ObsDataset`: `obs_dataset.fit_lsq(...)` returns a `FullOrbitResult` with converged equinoctial elements and per-observation fit data.
+    - `DifferentialCorrectionOutput` — result type holding final `EquinoctialElements`, per-observation `ObsFitData` (residuals, σ, χ, selection status), `OrbitalUncertainty` (normal matrix, covariance, inversion flag), normalised RMS, iteration count, and measurement count.
+    - `ObsFitData` — per-observation fit metadata: `residual_ra`, `residual_dec`, `sigma_ra`, `sigma_dec`, `bias_ra`, `bias_dec`, `chi`, and `ObsSelection` (`Active` / `Rejected`).
+    - `OrbitalUncertainty` — 6×6 normal matrix and covariance matrix with `inversion_succeeded` flag.
+    - **Outlier rejection** (`outlier_rejection.rs`) — iterative χ²-based rejection with configurable threshold.
+    - **Single Newton iteration** (`single_iteration.rs`) — computes the design matrix G (∂ρ/∂x), normal matrix GᵀWG, right-hand side, applies the Δx correction to equinoctial elements, and returns `correction_norm`.
+    - **Least-squares accumulator** (`least_square.rs`) — builds the weighted normal equations from active observations, computes normalised RMS.
+    - `OutfitError::DifferentialCorrectionDiverged` and `OutfitError::DifferentialCorrectionNotConverged` — new error variants.
+
+- **Observation ephemeris (`observation_ephemeris.rs`)**
+  - Massively extended module (≈ 800 lines added):
+    - Partial derivatives of apparent (topocentric) RA/DEC with respect to equinoctial orbital elements: `∂ρ/∂a`, `∂ρ/∂h`, `∂ρ/∂k`, `∂ρ/∂p`, `∂ρ/∂q` — used to construct the design matrix G for differential correction.
+    - Topocentric coordinate computation from equinoctial elements and observer position.
+    - Observation weighting via error-model sigmas (`ObsWeight`).
+
+- **Cache extensions (`cache/`)**
+  - `observer_centric_cache.rs` extended with observer heliocentric velocity (`helio_velocity`) computation and storage — required by the design matrix G for velocity-dependent partial derivatives.
+  - `ObserverCentricCache` now derives `Debug`.
+
+- **`EquinoctialElements` additions**
+  - `is_bizarre() -> bool` — returns `true` if the equinoctial orbit has unphysical or degenerate parameters (used during differential correction to reject diverging solutions).
+  - Additional conversion utilities and `Display` improvements.
+
+- **`JPLEphem` ergonomics**
+  - `impl TryFrom<&str> for JPLEphem` and `impl TryFrom<String> for JPLEphem` — construct directly from a source string (e.g. `"horizon:DE440".try_into()`), without explicitly building an `EphemFileSource` first.
+  - `JPLEphem::new` signature generalised to `impl Into<EphemFileSource>` — accepts both `EphemFileSource` values and references.
+  - `impl From<&EphemFileSource> for EphemFileSource` added in `download_jpl_file.rs` (clone-based).
+
+- **Constants (`constants.rs`)**
+  - Extended with additional physical and astronomical constants required by the differential correction (e.g. Gaussian gravitational constant, AU/day conversions).
+
+- **Integration tests**
+  - `tests/test_diff_cor.rs` — non-regression test for the full differential correction pipeline on three real asteroids (2015 AB / K09R05F, 33803, 8467) with seed-42 oracles; uses `approx_equal` from `tests/common/mod.rs`.
+  - `tests/test_gauss_iod.rs` and `tests/test_iod_from_polars.rs` — migrated to use `approx_equal` for orbit comparisons.
+
+- **CI improvements**
+  - `fmt`, `clippy`, and `semver-pr` jobs now run **only on pull requests** (skipped on push to `main` after merge).
+  - `coverage` job runs on both PR and `main`, but only after `fmt`, `clippy`, and `semver-pr` are green (or skipped).
+  - Removed the redundant `test` job — coverage via `cargo llvm-cov` already executes all tests.
+  - Added a **feature matrix** (`default`, `parallel`) to `clippy` and `coverage` jobs.
+  - Codecov uploads use per-feature `flags` (`default` / `parallel`) for granular coverage reporting.
+
+### Changed
+
+- **Orbit display simplified** — `Display` implementations for `KeplerianElements`, `EquinoctialElements`, and `CometaryElements` simplified; `GaussResult` display updated accordingly. Verbose per-field multi-line output replaced by a more compact single-block format.
+
+- **`PropagatorKind` integrated into differential corrector** — `DifferentialCorrectionConfig` now accepts a `PropagatorKind` field; the corrector dispatches to two-body or N-body propagation transparently. Existing configs default to `PropagatorKind::TwoBody` (no migration required).
+
+- **`observation_ephemeris.rs` moved** — `src/observation_ephemeris.rs` relocated to `src/ephemeris/observation_ephemeris.rs`; public re-exports updated in `src/lib.rs`.
+
+- **CI: test thread count capped** — `RUST_TEST_THREADS` set in CI workflow to limit concurrency during `cargo test`, reducing peak memory usage from heavy doctests.
+
+- **`photom` crate extracted** — observation parsing, error models, observer management, and trajectory ingestion have been moved into a dedicated `photom` crate (published on crates.io). Outfit now depends on `photom` as an external dependency.
+  - Removed from Outfit: `src/observations/`, `src/observers/`, `src/trajectories/`, `src/error_models/`, `src/outfit.rs`, `src/env_state.rs` and associated modules.
+  - Public re-exports updated in `src/lib.rs`; user-facing types (`ObsDataset`, `ObsErrorModel`, `TrajId`, `Observer`, `Observatories`, …) are now accessed via `photom`.
+
+- **`FullOrbitResult` type alias updated**
+  - Now defined as `HashMap<TrajId, Option<DifferentialCorrectionOutput>>` — keyed by `TrajId` (from `photom`), value is `None` if differential correction did not converge.
+
+- **`GaussResult` / IOD result types**
+  - `GaussResult` now stores `EquinoctialElements` (instead of `KeplerianElements`) as the primary output of Gauss IOD, feeding directly into the differential corrector.
+
+- **`JPLEphem::new` signature** — changed from `fn new(file_source: &EphemFileSource)` to `fn new(source: impl Into<EphemFileSource>)` (see **Added** above).
+
+- **Examples** — `run_full_iod.rs` and `run_full_iod_parallel.rs` updated to use the new `photom`-based API and the `fit_lsq` / `fit_full_iod` entry points.
+
+- **`tests/common/mod.rs`** — fixed a bug in `approx_equal` for `OrbitalElements::Equinoctial`: `ee1.semi_major_axis` was incorrectly compared against `0.0` instead of `ee2.semi_major_axis`.
+
+### Removed
+
+- Removed benchmarks (`benches/`) — `gauss_prelim_orbit`, `load_parquet`, `outfit_gauss_iod`, `solve_kepler_equation` benches removed as part of the photom extraction refactor.
+- Removed old examples (`examples/gauss_iod_once.rs`, `examples/parquet_to_orbit.rs`).
+- Removed old test files (`tests/outfit_struct_test.rs`, `tests/reader_80col_test.rs`, `tests/test_read_ades.rs`, `tests/trajectories_from_parquet.rs`, `tests/trajectories_from_vec.rs`, `tests/vec_to_iod.rs`).
+
+### Breaking Changes
+
+- **`photom` dependency required** — types previously in `outfit::observations`, `outfit::observers`, `outfit::trajectories`, `outfit::error_models` are now in the `photom` crate. Update imports:
+  ```rust
+  // Before
+  use outfit::observations::ObsDataset;
+  use outfit::error_models::ObsErrorModel;
+
+  // After
+  use photom::observation_dataset::ObsDataset;
+  use photom::observer::error_model::ObsErrorModel;
+  ```
+
+- **`FullOrbitResult` keyed by `TrajId` instead of `ObjectNumber`** — update map lookups accordingly.
+
+- **`JPLEphem::new` accepts `impl Into<EphemFileSource>`** — existing call sites passing `&EphemFileSource` continue to work (via `From<&EphemFileSource>`); call sites passing an owned `EphemFileSource` no longer need the `&`.
+
+### Notes
+
+- The differential corrector now supports both **2-body (Keplerian)** and **N-body** propagation via `PropagatorKind`. The default remains `TwoBody`. For well-observed main-belt asteroids, select `NBody` with the appropriate planetary perturbers for higher accuracy. The default `rms_divergence_ratio` (1.5) in `DifferentialCorrectionConfig` can be raised if needed during convergence.
+- The `dev` profile no longer emits debug symbols (`debug = false`) to reduce RAM consumption when running doctests.
+- Ephemeris computation is designed to be fault-tolerant: individual `(epoch, observer)` errors are captured per-entry inside `EphemerisResult` without aborting the whole batch.
+
+---
+
 ## [2.1.0] - 2025-09-18
 
 ### Added

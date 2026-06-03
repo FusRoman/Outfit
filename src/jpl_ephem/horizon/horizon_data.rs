@@ -34,7 +34,7 @@ use nom::{
     IResult, Parser,
 };
 
-use crate::{constants::MJD, jpl_ephem::download_jpl_file::EphemFilePath};
+use crate::{constants::MJDET, jpl_ephem::download_jpl_file::EphemFilePath};
 
 use super::{
     horizon_ids::HorizonID, horizon_records::HorizonRecord, horizon_version::JPLHorizonVersion,
@@ -708,7 +708,7 @@ impl HorizonData {
     /// See also
     /// ------------
     /// * [`HorizonData::get_record_horizon`] – retrieves the actual record for a body.
-    fn get_record_index(&self, et: MJD) -> (usize, f64) {
+    fn get_record_index(&self, et: MJDET) -> (usize, f64) {
         // ephem_start and ephem_end are in JD
         let (ephem_start, ephem_end, ephem_step) = (
             self.header.start_period,
@@ -760,7 +760,7 @@ impl HorizonData {
     /// See also
     /// ------------
     /// * [`HorizonRecord::interpolate`] – evaluate Chebyshev polynomials.
-    fn get_record_horizon(&self, body: u8, et: MJD) -> Option<(&HorizonRecord, f64)> {
+    fn get_record_horizon(&self, body: u8, et: MJDET) -> Option<(&HorizonRecord, f64)> {
         let (nr, tau) = self.get_record_index(et);
 
         let records = &self.records[nr];
@@ -801,6 +801,7 @@ impl HorizonData {
     ///   - `velocity` \[km/day\] (if requested),
     ///   - `acceleration` \[km/day²\] (if requested),
     ///     all expressed relative to the center body.
+    ///     Express in the Ecliptic J2000 frame, consistent with Horizons output.
     ///
     /// See also
     /// ------------
@@ -810,7 +811,7 @@ impl HorizonData {
         &self,
         target: HorizonID,
         center: HorizonID,
-        et: MJD,
+        et: MJDET,
         compute_velocity: bool,
         compute_acceleration: bool,
     ) -> InterpResult {
@@ -850,17 +851,19 @@ impl HorizonData {
 
 #[cfg(test)]
 mod test_horizon_reader {
-    #[cfg(feature = "jpl-download")]
     use super::*;
 
-    #[cfg(feature = "jpl-download")]
-    use crate::unit_test_global::JPL_EPHEM_HORIZON;
+    use crate::test_fixture::JPL_EPHEM_HORIZON;
+
+    fn get_horizon_data() -> HorizonData {
+        JPL_EPHEM_HORIZON.clone().try_into_horizon().unwrap()
+    }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_jpl_reader_from_horizon() {
+        let horizon_data = get_horizon_data();
         assert_eq!(
-            JPL_EPHEM_HORIZON.header,
+            horizon_data.header,
             HorizonHeader {
                 jpl_version: "DE440".to_string(),
                 ipt: [
@@ -888,17 +891,15 @@ mod test_horizon_reader {
             }
         );
 
-        assert_eq!(JPL_EPHEM_HORIZON.records.len(), 12556);
+        let horizon_data = get_horizon_data();
+        assert_eq!(horizon_data.records.len(), 12556);
         assert_eq!(
-            JPL_EPHEM_HORIZON
-                .records
-                .iter()
-                .fold(0, |acc, x| acc + x.len()),
+            horizon_data.records.iter().fold(0, |acc, x| acc + x.len()),
             150672
         );
 
         assert_eq!(
-            &JPL_EPHEM_HORIZON.records[0].get(&0).unwrap()[0],
+            &horizon_data.records[0].get(&0).unwrap()[0],
             &HorizonRecord {
                 start_jd: 2287184.5,
                 end_jd: 2287216.5,
@@ -955,9 +956,9 @@ mod test_horizon_reader {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_get_record_from_horizon() {
-        let (record, tau) = JPL_EPHEM_HORIZON
+        let horizon_data = get_horizon_data();
+        let (record, tau) = horizon_data
             .get_record_horizon(4, 57028.479297592596)
             .unwrap();
 
@@ -1003,18 +1004,18 @@ mod test_horizon_reader {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_get_record_index() {
-        let (index, tau) = JPL_EPHEM_HORIZON.get_record_index(57028.479297592596);
+        let horizon_data = get_horizon_data();
+        let (index, tau) = horizon_data.get_record_index(57028.479297592596);
 
         assert_eq!(index, 5307);
         assert_eq!(tau, 0.6399780497686152);
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_interpolation_from_horizon() {
-        let (record, tau) = JPL_EPHEM_HORIZON
+        let horizon_data = get_horizon_data();
+        let (record, tau) = horizon_data
             .get_record_horizon(10, 57028.479297592596)
             .unwrap();
 
@@ -1031,7 +1032,8 @@ mod test_horizon_reader {
             }
         );
 
-        let (record, tau) = JPL_EPHEM_HORIZON
+        let horizon_data = get_horizon_data();
+        let (record, tau) = horizon_data
             .get_record_horizon(10, 57_049.231_857_592_59)
             .unwrap();
 
@@ -1048,7 +1050,8 @@ mod test_horizon_reader {
             }
         );
 
-        let (record, tau) = JPL_EPHEM_HORIZON
+        let horizon_data = get_horizon_data();
+        let (record, tau) = horizon_data
             .get_record_horizon(10, 60781.51949044435)
             .unwrap();
         let res = record.interpolate(tau, true, true, 2);
@@ -1068,9 +1071,9 @@ mod test_horizon_reader {
     }
 
     #[test]
-    #[cfg(feature = "jpl-download")]
     fn test_target_center_interpolation() {
-        let interp = JPL_EPHEM_HORIZON.ephemeris(
+        let horizon_data = get_horizon_data();
+        let interp = horizon_data.ephemeris(
             HorizonID::Earth,
             HorizonID::Sun,
             60781.51949044435,
@@ -1106,7 +1109,8 @@ mod test_horizon_reader {
             }
         );
 
-        let interp = JPL_EPHEM_HORIZON.ephemeris(
+        let horizon_data = get_horizon_data();
+        let interp = horizon_data.ephemeris(
             HorizonID::Mars,
             HorizonID::Sun,
             60781.51949044435,
@@ -1137,7 +1141,8 @@ mod test_horizon_reader {
             }
         );
 
-        let interp = JPL_EPHEM_HORIZON.ephemeris(
+        let horizon_data = get_horizon_data();
+        let interp = horizon_data.ephemeris(
             HorizonID::Earth,
             HorizonID::Sun,
             52550.18467592593,

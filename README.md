@@ -5,7 +5,7 @@
 <div align="center">
 <h1>Outfit</h1>
 
-A fast, safe, and extensible Rust library for **managing astrometric observations** and **determining preliminary orbits** of small bodies. Outfit reads common observation formats (MPC 80-column, ADES XML, Parquet), performs **initial orbit determination (IOD)** with the **Gauss method**, manages observers (topocentric geometry), and interfaces with **JPL ephemerides** for accurate state propagation.
+A fast, safe, and modular Rust library for **orbit determination** of Solar System small bodies. Outfit focuses exclusively on **orbital dynamics and computation**: Gauss IOD, differential orbit correction, ephemeris generation, Keplerian propagation, reference frame transformations, and JPL ephemeris support. Observation I/O and data structures are provided by the companion crate [**photom**](https://crates.io/crates/photom).
 </div>
 
 <p align="center">
@@ -25,27 +25,25 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
     <img src="https://codecov.io/gh/FusRoman/Outfit/branch/main/graph/badge.svg" alt="codecov"/>
   </a>
   <a href="https://www.rust-lang.org/">
-    <img src="https://img.shields.io/badge/MSRV-1.82%2B-orange" alt="MSRV"/>
+    <img src="https://img.shields.io/badge/MSRV-1.94%2B-orange" alt="MSRV"/>
   </a>
 </p>
 
-> **Why Outfit?**  
-> Modern asteroid pipelines need a library that is **fast (Rust)**, **reproducible**, and **easy to integrate** in data-intensive workflows (batch files, Parquet, CI/benchmarks). Outfit re-implements classic OrbFit IOD logic with a **memory-safe**, **modular** design and production-grade ergonomics (features, docs, tests, benches). It is built to:
-> - ingest **large datasets** efficiently (columnar Parquet, batch APIs);
-> - run **deterministic IOD** with controlled noise and repeatable seeds;
-> - interface **cleanly** with JPL ephemerides (e.g., DE440);
-> - provide a **clean API** that composes well across projects.
+> **Ecosystem split**  
+> Outfit v3 is a focused **orbital dynamics engine**. Everything related to observation loading (MPC 80-column, ADES XML, Parquet), observer management, and astrometric data structures now lives in the separate **[photom](https://crates.io/crates/photom)** crate. Outfit depends on `photom` and exposes the `FitIOD` trait that bridges photom's `ObsDataset` into the orbit fitting pipeline.
 
 ---
 
 ## Table of Contents
 
 - [Features](#features)
+- [Ecosystem: Outfit + photom](#ecosystem-outfit--photom)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Data Formats](#data-formats)
 - [Initial Orbit Determination](#initial-orbit-determination)
-- [Observers & Reference Frames](#observers--reference-frames)
+- [Differential Orbit Correction](#differential-orbit-correction)
+- [Uncertainty Propagation](#uncertainty-propagation)
+- [Ephemeris Generation](#ephemeris-generation)
 - [Cargo Feature Flags](#cargo-feature-flags)
 - [Performance & Reproducibility](#performance--reproducibility)
 - [Roadmap](#roadmap)
@@ -57,96 +55,173 @@ A fast, safe, and extensible Rust library for **managing astrometric observation
 
 ## Features
 
-- **Observation I/O**
-  - MPC **80-column** files
-  - **ADES XML** files
-  - **Parquet** batches for high-throughput pipelines
-- **Observer management**
-  - Lookup by **MPC code**
-  - Topocentric geometry (geocentric & heliocentric positions, AU, J2000)
-- **Initial Orbit Determination**
+- **Initial Orbit Determination (IOD)**
   - **Gauss method** on observation triplets
   - Iterative velocity correction with Lagrange coefficients
   - Dynamic acceptability filters (perihelion, eccentricity, geometry)
   - RMS evaluation on extended arcs
-- **Ephemerides**
-  - Interface with **JPL** ephemerides (e.g., **DE440**)
-- **Error models**
-  - Built-in astrometric uncertainty models (e.g., FCCT14)
-- **Batch processing & benchmarking**
-  - Stream triplets, evaluate, and rank candidates
-  - Criterion-based micro/macro benchmarks
-  - Optional parallel batch IOD using Rayon (feature: `parallel`)
+- **Differential Orbit Correction**
+  - Iterative **Newton–Raphson least-squares** refinement of equinoctial elements
+  - Projection-based **outlier rejection** loop (chi-squared per observation)
+  - Covariance matrix estimation with posterior uncertainty rescaling
+  - Configurable free/fixed element mask (useful for short arcs)
+  - Stagnation and divergence detection with typed error variants
+  - `FitLSQ` trait: per-trajectory pipeline (IOD seed → differential correction) on any `ObsDataset`
+- **Ephemeris generation**
+  - Predict apparent sky positions `(RA, Dec)` and distances from any `OrbitalElements`
+  - Compute geometric quantities: **phase angle**, **solar elongation**, **radial velocity**, apparent angular rates
+  - Combined mode computes position and geometry in a single propagation
+  - Three generation modes per observer: `Single`, `Range` (uniform grid), `At` (arbitrary epoch list)
+  - Multiple observers in one typed `EphemerisRequest`; per-epoch errors collected without aborting the batch
+  - Choice of **two-body (Keplerian)** or **N-body (DOP853)** propagator; first- or second-order aberration correction
+- **Orbital elements**
+  - Classical **Keplerian elements**
+  - **Equinoctial elements** with conversions and two-body solver
+  - **Cometary elements**
+- **JPL ephemerides**
+  - Interface with **JPL DE440** (Horizons and NAIF/SPICE formats)
+- **Reference frames & preprocessing**
+  - Precession, nutation (IAU 1980), aberration, light-time correction
+  - Ecliptic ↔ equatorial conversions, RA/DEC parsing, time systems
+- **Observer geometry**
+  - Geocentric and heliocentric observer positions in AU, J2000
+- **Batch processing**
+  - Single-trajectory and full-dataset IOD via the `FitIOD` trait
+  - Full least-squares fitting for all trajectories via the `FitLSQ` trait
+  - Optional parallel batch execution with Rayon (`parallel` feature)
+
+---
+
+## Ecosystem: Outfit + photom
+
+Outfit is one half of a two-crate pipeline:
+
+| Crate | Responsibility |
+|-------|---------------|
+| [**photom**](https://crates.io/crates/photom) | Observation I/O (MPC 80-col, ADES XML, Parquet), data structures (`ObsDataset`, `Observer`, error models), trajectory grouping |
+| **outfit** | Pure orbital computation: Gauss IOD, differential correction, ephemeris generation, Keplerian/equinoctial elements, JPL ephemerides, reference frames, residuals |
+
+A typical workflow:
+
+1. Use **photom** to load observations into an `ObsDataset`.
+2. Call **outfit**'s `FitIOD::fit_iod` / `FitIOD::fit_full_iod` for initial orbit determination, or `FitLSQ::fit_lsq` for a full least-squares fit.
+3. Inspect the returned `GaussResult` / `DifferentialCorrectionOutput` and RMS values.
+4. Optionally, call `OrbitalElements::compute` with an `EphemerisRequest` to generate predicted positions.
 
 ---
 
 ## Installation
 
-Add Outfit to your `Cargo.toml`:
+Add Outfit and photom to your `Cargo.toml`:
 
 ~~~toml
 [dependencies]
-outfit = "2.0.0"
+outfit = "3.0.0"
+photom = { version = "0.1.0", features = ["mpc_80_col"] }
 ~~~
 
-Enable automatic ephemeris download (JPL DE440) with the `jpl-download` feature:
+Enable optional features as needed:
 
 ~~~toml
 [dependencies]
-outfit = { version = "2.0.0", features = ["jpl-download"] }
-~~~
-
-Enable a CLI-style progress bar for long loops:
-
-~~~toml
-[dependencies]
-outfit = { version = "2.0.0", features = ["progress"] }
-~~~
-
-Combine features as needed (example):
-
-~~~toml
-[dependencies]
-outfit = { version = "2.0.0", features = ["jpl-download", "progress", "parallel"] }
+outfit  = "3.0.0"
+photom  = { version = "0.1.0", features = ["mpc_80_col", "ades", "polars"] }
 ~~~
 
 ---
 
 ## Quick Start
 
-The crate ships with several **ready-to-run examples** in the [`examples/`](examples) directory.  
-They demonstrate end-to-end workflows such as:
+### Single-trajectory IOD from an MPC 80-column file
 
-- Reading observations (MPC 80-column, ADES XML, Parquet)
-- Building a `TrajectorySet` (now via `TrajectoryFile` ingestion helpers)
-- Running Gauss initial orbit determination (single triplet or full batch)
-- Inspecting and printing orbital elements with RMS statistics
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::obs_dataset::FitIOD;
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
 
-Run an example directly with Cargo:
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load observations (photom handles I/O).
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 
-```bash
-cargo run --release --example parquet_to_orbit --features jpl-download
+    // Load JPL DE440 ephemeris.
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+
+    // Earth orientation corrections.
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
+
+    // Configure IOD parameters.
+    let params = IODParams::builder()
+        .n_noise_realizations(10)
+        .max_obs_for_triplets(50)
+        .max_triplets(30)
+        .build()?;
+
+    let mut rng = StdRng::seed_from_u64(42);
+
+    // Run Gauss IOD — outfit does the orbital computation.
+    let (best_orbit, best_rms) = dataset.fit_iod(
+        "K09R05F",
+        &jpl,
+        &ut1,
+        &params,
+        ObsErrorModel::FCCT14,
+        &mut rng,
+    )?;
+
+    println!("Best orbit: {best_orbit}");
+    println!("RMS: {best_rms:.6}");
+    Ok(())
+}
 ```
 
-This will:
+### Batch IOD — all trajectories at once
 
-- Load observations from a Parquet file,
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::obs_dataset::{FitIOD, FullOrbitResult};
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
 
-- Identify the observer by MPC code,
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 
-- Run the Gauss IOD pipeline,
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
 
-- Print the best-fit orbit with its RMS value.
+    let params = IODParams::builder()
+        .n_noise_realizations(10)
+        .max_obs_for_triplets(50)
+        .build()?;
 
----
+    let mut rng = StdRng::seed_from_u64(42);
 
-## Data Formats
+    // Run Gauss IOD for every trajectory in the dataset.
+    let results: FullOrbitResult = dataset.fit_full_iod(
+        &jpl,
+        &ut1,
+        &params,
+        ObsErrorModel::FCCT14,
+        &mut rng,
+    )?;
 
-- **MPC 80-column** – [Minor Planet Center fixed-width astrometry format](https://minorplanetcenter.net/iau/info/OpticalObs.html)  
-- **ADES XML** – [IAU Astrometric Data Exchange Standard (ADES)](https://minorplanetcenter.net/iau/info/ADES.html)  
-- **Parquet** – [Apache Parquet](https://parquet.apache.org/) columnar format for large batch processing  
-  Typical columns: `ra`, `dec`, `jd` or `mjd`, `trajectory_id` (configurable)
-
+    for (traj_id, res) in &results {
+        match res {
+            Ok((gauss, rms)) => println!("{traj_id} → RMS = {rms:.4}\n{gauss}"),
+            Err(e)           => eprintln!("{traj_id} → error: {e}"),
+        }
+    }
+    Ok(())
+}
+```
 
 ---
 
@@ -164,80 +239,191 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ---
 
-### Parallel batches
+## Differential Orbit Correction
 
-Compile with `--features parallel` and prefer the adaptive batching API for very large sets:
+Starting from an initial orbit (e.g. from the Gauss IOD step), outfit can refine the solution via **weighted least-squares differential correction**:
 
-```bash
-cargo run --release --example parquet_to_orbit --features "jpl-download,parallel"
-```
+1. Compute predicted `(RA, Dec)` for each observation using the current elements.
+2. Form the **design matrix** of partial derivatives of the predicted coordinates with respect to the six equinoctial elements.
+3. Solve the **normal equations** to obtain the element correction vector δx.
+4. Apply the correction, check convergence (`‖δx‖ < threshold`), and iterate (Newton–Raphson).
+5. After convergence, apply **projection-based outlier rejection**: observations whose chi-squared contribution exceeds the configured threshold are flagged and the inner loop is re-run on the reduced set. Iterate until the selection is stable.
+6. Rescale the **covariance matrix** by the posterior normalised RMS.
 
-Then call `estimate_all_orbits_in_batches_parallel` (same signature + extra `batch_size` argument) for improved throughput when trajectory sets exceed CPU cache friendliness.
+The `FitLSQ` trait exposes this pipeline at the dataset level:
 
-### Result helpers
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::differential_orbit_correction::{DifferentialCorrectionConfig, FitLSQ};
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
 
-Access individual solutions ergonomically:
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
 
-```rust
-use outfit::trajectories::trajectory_fit::{gauss_result_for, take_gauss_result};
-// Borrow without moving:
-if let Some(Ok((g, rms))) = gauss_result_for(&results, &some_object) {
-   println!("Semi-major axis: {} AU (rms={rms:.3})", g.keplerian.a);
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
+
+    let iod_params = IODParams::builder().build()?;
+    let dc_config = DifferentialCorrectionConfig::default();
+
+    let mut rng = StdRng::seed_from_u64(42);
+
+    // Run IOD + differential correction for every trajectory.
+    let results = dataset.fit_lsq(
+        &jpl,
+        &ut1,
+        ObsErrorModel::FCCT14,
+        &iod_params,
+        &dc_config,
+        None,   // no pre-computed initial orbits
+        &mut rng,
+    )?;
+
+    for (traj_id, res) in &results {
+        match res {
+            Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.normalised_rms()),
+            Err(e)  => eprintln!("{traj_id} → error: {e}"),
+        }
+    }
+    Ok(())
 }
 ```
 
-Errors are explicit (no `Option` inside `Result`); pathological numeric scores (`NaN`, `inf`) surface as `OutfitError::NonFiniteScore`.
+---
+
+## Uncertainty Propagation
+
+Outfit tracks orbital uncertainties throughout the full pipeline — from the least-squares fit through to element representation conversions.
+
+### Generation from differential correction
+
+The covariance matrix is produced directly by the `FitLSQ` pipeline. At the end of each Newton–Raphson convergence, `solve_weighted_least_squares` builds the **normal matrix** G⊤WG and inverts it (Cholesky, with QR fallback) to obtain the **6×6 covariance matrix** Γ = (G⊤WG)⁻¹ in equinoctial element space:
+
+```
+Γ[j,k] = (G⊤WG)⁻¹[j,k]    (6×6, equinoctial basis)
+```
+
+This raw covariance is then **rescaled** by a posterior inflation factor μ that accounts for the degrees of freedom and the quality of the fit:
+
+- if normalised RMS ≤ 1 (good fit): μ = √(n_measurements / (n_measurements − n_free))
+- if normalised RMS > 1 (poor fit): μ = normalised_rms × √(n_measurements / (n_measurements − n_free))
+
+The final covariance is stored in `DifferentialCorrectionOutput::uncertainty` and embedded in the returned `OrbitalElements::Equinoctial` variant.
+
+### Propagation between element representations
+
+Each `OrbitalElements` variant carries an optional `covariance: Option<OrbitalCovariance>` and an optional `uncertainty: Option<*Uncertainty>` (per-element 1-σ standard deviations). When converting between representations, the covariance is propagated via **first-order linear (Jacobian) propagation**:
+
+```
+Σ_y = J · Σ_x · Jᵀ
+```
+
+where J = ∂y/∂x is the 6×6 Jacobian of the transformation evaluated at the nominal elements. The following Jacobians are computed analytically:
+
+| Conversion | Jacobian |
+|---|---|
+| Keplerian → Equinoctial | ∂(a,h,k,p,q,λ) / ∂(a,e,i,Ω,ω,M) |
+| Equinoctial → Keplerian | ∂(a,e,i,Ω,ω,M) / ∂(a,h,k,p,q,λ) |
+| Cometary → Keplerian    | ∂(a,e,i,Ω,ω,M) / ∂(q,e,i,Ω,ω,ν) |
+| Cometary → Equinoctial  | chain rule via Keplerian             |
+
+Conversions near singularities (e → 0 for Keplerian, i → 0 for equatorial) set undefined partial derivatives to zero; **equinoctial elements** are preferred for nearly circular or equatorial orbits to avoid these singular regions.
+
+```rust,no_run
+use outfit::orbit_type::{OrbitalElements, keplerian_element::KeplerianElements};
+use outfit::orbit_type::uncertainty::{KeplerianUncertainty, OrbitalCovariance};
+use nalgebra::Matrix6;
+
+// Keplerian elements with a diagonal covariance (simplified example).
+let cov = OrbitalCovariance { matrix: Matrix6::from_diagonal_element(1e-6) };
+let oe = OrbitalElements::Keplerian {
+    elements: kep,
+    uncertainty: Some(KeplerianUncertainty::from_covariance(&cov)),
+    covariance: Some(cov),
+};
+
+// Convert to equinoctial — covariance is automatically propagated via Jacobian.
+let oe_eq = oe.to_equinoctial().unwrap();
+
+if let OrbitalElements::Equinoctial { uncertainty, .. } = oe_eq {
+    if let Some(unc) = uncertainty {
+        println!("σ(h) = {:.2e}", unc.eccentricity_sin_lon);
+    }
+}
+```
 
 ---
 
-## Observers & Reference Frames
+## Ephemeris Generation
 
-- Observer lookup by **MPC code**.
-- Geocentric and heliocentric positions in **AU**, **J2000** (equatorial).
-- Earth orientation (nutation, precession) and **aberration** corrections via internal reference-system utilities.
+Given any `OrbitalElements`, outfit can predict the apparent sky position and geometric state of the body as seen from one or more observers:
 
----
+```rust,no_run
+use outfit::{
+    OrbitalElements,
+    ephemeris::{EphemerisConfig, EphemerisMode, EphemerisRequest, request::Combined},
+};
+use hifitime::{Epoch, Duration};
 
-## Cargo Feature Flags
+// `elements` obtained from IOD or differential correction.
+let result = elements.compute(
+    &EphemerisRequest::<Combined>::new(EphemerisConfig::default())
+        .add(observer, EphemerisMode::Range {
+            start: Epoch::from_mjd_tt(60310.0),
+            end:   Epoch::from_mjd_tt(60340.0),
+            step:  Duration::from_days(1.0),
+        }),
+    &jpl,
+    &ut1,
+);
 
-The crate keeps the feature surface intentionally small and orthogonal. All core parsing (MPC 80-col, ADES XML, Parquet) and Gauss IOD logic are always compiled; features only toggle optional runtime dependencies.
+for entry in result.successes() {
+    let (pos, geo) = entry.result.as_ref().unwrap();
+    println!(
+        "{}: RA={:.4} Dec={:.4}  phase={:.2}°  elongation={:.2}°",
+        entry.epoch, pos.coord.ra, pos.coord.dec,
+        geo.phase_angle.to_degrees(), geo.solar_elongation.to_degrees(),
+    );
+}
+```
 
-| Feature        | Adds                                                    | Notes |
-|----------------|---------------------------------------------------------|-------|
-| `jpl-download` | `reqwest`, `tokio` (multi-thread RT), on-demand fetch   | Downloads and caches JPL ephemerides (e.g. DE440) in the user data dir on first access. Offline re-use afterward. |
-| `progress`     | `indicatif` progress bars + moving average timing       | Enabled in long batch IOD loops; zero cost when not used. |
-| `parallel`     | `rayon`                                                 | Enables `TrajectoryFit::estimate_all_orbits_in_batches_parallel`; set `IODParams.batch_size` to tune batch granularity. |
-
-Planned (not yet implemented): least-squares refinement and alternative IOD methods will likely get their own feature gates.
+The pipeline converts elements to **equinoctial form**, propagates with the selected propagator (two-body or N-body), rotates from ecliptic to equatorial J2000, and applies aberration correction. Errors at individual epochs are stored in the result rather than aborting the computation.
 
 ---
 
 ## Performance & Reproducibility
 
 - **Deterministic runs** by default (set RNG seeds explicitly when noise is used).
-- **Batch-friendly APIs** (Parquet; streaming triplets).
-- Avoid ephemeris I/O in hot paths by **precomputing observer positions**.
-- Benchmarks via **criterion** (see below).
-
-**Tips**
+- **Precompute observer positions** to avoid ephemeris I/O in hot paths.
 - Compile with `--release` for production.
-- Keep ephemerides cached locally (with `jpl-download` enabled) to avoid I/O stalls.
-- Use the `progress` feature to instrument long loops without cluttering core logic.
-- `ObservationBatch` conversions (deg/arcsec → rad) happen once; avoid re-normalizing angles inside tight loops.
-- Group observations by unique epoch to reuse cached observer positions (already done by built-in ingestion pipelines).
-- Handle errors rather than filtering silently: a non-finite RMS is raised early as `OutfitError::NonFiniteScore` to prevent propagating invalid states.
-- For very large trajectory sets, tune `IODParams.batch_size` (with `parallel`) so each batch fits comfortably in cache (start with 4–8 and benchmark).
+- Keep ephemerides cached locally to avoid I/O stalls on repeated runs.
+- For large trajectory sets, tune `IODParams.batch_size` (with `parallel`) so each batch fits comfortably in cache (start with 4–8 and benchmark).
+- Handle errors explicitly: a non-finite RMS surfaces as `OutfitError::NonFiniteScore`.
+
+---
+
+
+## Documentation
+
+To compile the documentation locally, run the following command in the terminal:
+```bash
+RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html" cargo doc --no-deps --all-features
+```
 
 ---
 
 ## Roadmap
 
-- **Full least-squares orbit fitting** across full arcs
 - **Hyperbolic & parabolic orbits** (e ≥ 1) for interstellar candidates
-- **Alternative IOD methods** (e.g., **Vaisala**)
-- **Ephemerides backends** (e.g., ANISE/SPICE integration)
+- **Vaisälä method** for short arcs
+- **Additional ephemerides backends** (e.g., ANISE/SPICE integration)
 
-See the issue tracker for the latest details and discussion.
+See the issue tracker for details and discussion.
 
 ---
 
@@ -257,7 +443,6 @@ A typical dev loop:
 cargo fmt --all
 cargo clippy --all-targets --all-features
 cargo test --all-features
-cargo bench --features jpl-download
 ~~~
 
 ---

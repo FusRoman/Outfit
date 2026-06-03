@@ -15,17 +15,17 @@
 //! These definitions are used by all main modules, including orbit determination, observers,
 //! and ephemerides.
 
-use crate::observations::Observation;
-use crate::observers::Observer;
-use smallvec::SmallVec;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::sync::Arc;
-
 // -------------------------------------------------------------------------------------------------
 // Physical constants and unit conversions
 // -------------------------------------------------------------------------------------------------
+
+use std::collections::HashMap;
+
+use ahash::RandomState;
+use nalgebra::{Matrix3, Vector3};
+use photom::TrajId;
+
+use crate::{GaussResult, OrbitalElements, OutfitError};
 
 /// 2π, useful for trigonometric conversions
 pub const DPI: f64 = 2. * std::f64::consts::PI;
@@ -78,189 +78,105 @@ pub const VLIGHT: f64 = 2.99792458e5;
 /// Speed of light in astronomical units per day
 pub const VLIGHT_AU: f64 = VLIGHT / AU * SECONDS_PER_DAY;
 
-// -------------------------------------------------------------------------------------------------
-// Type aliases
-// -------------------------------------------------------------------------------------------------
+// Angular velocity of Earth rotation (rad/day) on the z-axis.
+pub const EARTH_ROTATION: Vector3<f64> = Vector3::new(0.0, 0.0, DPI * 1.00273790934);
 
-/// Angle in degrees
-pub type Degree = f64;
-/// Angle in arcseconds
-pub type ArcSec = f64;
-/// Angle in radians
-pub type Radian = f64;
-/// Distance in kilometers
-pub type Kilometer = f64;
-/// Distance in meters
-pub type Meter = f64;
-/// MPC code identifying an observatory (3 characters)
-pub type MpcCode = String;
+// Hard coded rotation matrices for coordinate transformations between mean equatorial J2000 and mean ecliptic J2000 frames.
+// Can be computed using the rotpn function in the ref_system module
 
-/// Lookup table from MPC code to [`Observer`] metadata
-pub type MpcCodeObs = HashMap<MpcCode, Arc<Observer>>;
-
-/// Modified Julian Date (days)
-pub type MJD = f64;
-
-// -------------------------------------------------------------------------------------------------
-// Identifiers and data containers
-// -------------------------------------------------------------------------------------------------
-
-/// Identifier of a solar system object.
+/// Rotation matrix from mean equatorial J2000 to mean ecliptic J2000.
 ///
-/// This can be:
-/// - An asteroid number (e.g. `Int(1234)`)
-/// - A comet number (e.g. `"1234P"`)
-/// - A provisional designation (e.g. `"K25D50B"`)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ObjectNumber {
-    /// Integer-based MPC designation (e.g. 1, 433…)
-    Int(u32),
-    /// String-based designation (provisional, comet, etc.)
-    String(String),
+/// Rotation of $-\varepsilon$ around the X-axis, where $\varepsilon$ is the
+/// obliquity of the ecliptic at J2000.
+///
+/// Equivalent to `rotpn(RefSystem::Equm(RefEpoch::J2000), RefSystem::Eclm(RefEpoch::J2000))`.
+pub const ROT_EQUMJ2000_TO_ECLMJ2000: Matrix3<f64> = Matrix3::new(
+    1.0e0,
+    0.0e0,
+    0.0e0,
+    0.0e0,
+    9.174_820_620_691_818e-1,
+    3.977_771_559_319_137e-1,
+    0.0e0,
+    -3.977_771_559_319_137e-1,
+    9.174_820_620_691_818e-1,
+);
+
+/// Rotation matrix from mean ecliptic J2000 to mean equatorial J2000.
+///
+/// Rotation of $+\varepsilon$ around the X-axis (transpose / inverse of
+/// [`ROT_EQUMJ2000_TO_ECLMJ2000`]).
+///
+/// Equivalent to `rotpn(RefSystem::Eclm(RefEpoch::J2000), RefSystem::Equm(RefEpoch::J2000))`.
+pub const ROT_ECLMJ2000_TO_EQUMJ2000: Matrix3<f64> = Matrix3::new(
+    1.0e0,
+    0.0e0,
+    0.0e0,
+    0.0e0,
+    9.174_820_620_691_818e-1,
+    -3.977_771_559_319_137e-1,
+    0.0e0,
+    3.977_771_559_319_137e-1,
+    9.174_820_620_691_818e-1,
+);
+
+/// Modified Julian Date (Scale Ephemeris Time, ET)
+pub type MJDET = f64;
+
+/// Type alias for the RMS of normalized residuals from an IOD fit.
+/// This is a single scalar value representing the overall fit quality of the IOD solution.
+pub type IODRMS = f64;
+
+/// Type alias for the chi-squared value of a fit, used in differential correction.
+pub type Chi2 = f64;
+
+pub enum FitOrbitResult {
+    IODGauss((GaussResult, IODRMS)),
+    DifferentialCorrection((OrbitalElements, Chi2)),
 }
 
-impl std::fmt::Display for ObjectNumber {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl FitOrbitResult {
+    /// Returns a scalar measure of orbit quality for this fit result.
+    /// For IODGauss, this is the RMS of normalized residuals; for DifferentialCorrection, this is the chi-squared value.
+    ///
+    /// # Returns
+    /// - `f64` — a single scalar representing the fit quality.
+    pub fn orbit_quality(&self) -> f64 {
         match self {
-            ObjectNumber::Int(n) => write!(f, "{n}"),
-            ObjectNumber::String(s) => write!(f, "{s}"),
+            FitOrbitResult::IODGauss((_, rms)) => *rms,
+            FitOrbitResult::DifferentialCorrection((_, chi2)) => *chi2,
         }
     }
-}
 
-// --- Infallible conversions (enable `.into()` directly) ----------------------
-
-impl From<u32> for ObjectNumber {
-    #[inline]
-    fn from(n: u32) -> Self {
-        ObjectNumber::Int(n)
-    }
-}
-
-impl From<u16> for ObjectNumber {
-    #[inline]
-    fn from(n: u16) -> Self {
-        ObjectNumber::Int(n as u32)
-    }
-}
-
-impl From<u8> for ObjectNumber {
-    #[inline]
-    fn from(n: u8) -> Self {
-        ObjectNumber::Int(n as u32)
-    }
-}
-
-impl From<&u32> for ObjectNumber {
-    /// Convenience to allow `(&n).into()` without dereferencing at call sites.
-    #[inline]
-    fn from(n: &u32) -> Self {
-        ObjectNumber::Int(*n)
-    }
-}
-
-impl From<String> for ObjectNumber {
-    #[inline]
-    fn from(s: String) -> Self {
-        ObjectNumber::String(s)
-    }
-}
-
-impl From<&String> for ObjectNumber {
-    /// Clones the string to build a `String`-backed identifier.
-    #[inline]
-    fn from(s: &String) -> Self {
-        ObjectNumber::String(s.clone())
-    }
-}
-
-impl From<&str> for ObjectNumber {
-    /// Note: this **does not** parse numeric strings into `Int`. Use `FromStr` if you want
-    /// `"1234"` to become `ObjectNumber::Int(1234)`.
-    #[inline]
-    fn from(s: &str) -> Self {
-        ObjectNumber::String(s.to_string())
-    }
-}
-
-impl<'a> From<Cow<'a, str>> for ObjectNumber {
-    /// Accept both borrowed and owned `Cow<str>`.
-    #[inline]
-    fn from(c: Cow<'a, str>) -> Self {
-        match c {
-            Cow::Borrowed(s) => ObjectNumber::String(s.to_string()),
-            Cow::Owned(s) => ObjectNumber::String(s),
-        }
-    }
-}
-
-// --- Fallible conversions (use `.try_into()` to be overflow-safe) ------------
-
-impl TryFrom<usize> for ObjectNumber {
-    type Error = std::num::TryFromIntError;
-
-    /// Convert a `usize` into `Int(u32)` if it fits.
-    #[inline]
-    fn try_from(n: usize) -> Result<Self, Self::Error> {
-        Ok(ObjectNumber::Int(u32::try_from(n)?))
-    }
-}
-
-impl TryFrom<u64> for ObjectNumber {
-    type Error = std::num::TryFromIntError;
-
-    /// Convert a `u64` into `Int(u32)` if it fits.
-    #[inline]
-    fn try_from(n: u64) -> Result<Self, Self::Error> {
-        Ok(ObjectNumber::Int(u32::try_from(n)?))
-    }
-}
-
-impl TryFrom<i64> for ObjectNumber {
-    type Error = &'static str;
-
-    /// Convert a non-negative `i64` into `Int(u32)` if it fits.
-    #[inline]
-    fn try_from(n: i64) -> Result<Self, Self::Error> {
-        if n < 0 {
-            return Err("negative value is not a valid ObjectNumber::Int");
-        }
-        let n = u64::try_from(n).map_err(|_| "conversion failed")?;
-        let n = u32::try_from(n).map_err(|_| "value exceeds u32 range")?;
-        Ok(ObjectNumber::Int(n))
-    }
-}
-
-// --- Smart parsing from &str via `FromStr` (optional) ------------------------
-
-impl std::str::FromStr for ObjectNumber {
-    type Err = std::num::ParseIntError;
-
-    /// Try to parse an `ObjectNumber` from a string.
+    /// Returns a reference to the orbital elements associated with this fit result.
+    /// For `IODGauss`, this extracts the orbital elements from the `GaussResult`; for `DifferentialCorrection`, it returns the orbital elements directly.
     ///
-    /// Rules
-    /// -----
-    /// - Pure digits that fit in `u32` → `Int(u32)`.
-    /// - Otherwise                         → `String(String)`.
-    ///
-    /// Note
-    /// ----
-    /// If the string is *only* digits but **does not** fit in `u32`, this returns the
-    /// original `ParseIntError`. If you prefer to always fallback to `String` on
-    /// overflow, we can change the policy (but it’s usually better to fail loudly).
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.parse::<u32>() {
-            Ok(n) => Ok(ObjectNumber::Int(n)),
-            Err(e) => {
-                if s.chars().any(|c| !c.is_ascii_digit()) {
-                    Ok(ObjectNumber::String(s.to_string()))
-                } else {
-                    Err(e)
-                }
-            }
+    /// # Returns
+    /// - `&OrbitalElements` — a reference to the orbital elements of the fitted orbit.
+    pub fn orbital_elements(&self) -> &OrbitalElements {
+        match self {
+            FitOrbitResult::IODGauss((gauss_result, _)) => gauss_result.get_orbit(),
+            FitOrbitResult::DifferentialCorrection((orbital_elements, _)) => orbital_elements,
         }
     }
 }
 
-/// A small, inline-optimized container for observations of a single object.
-pub type Observations = SmallVec<[Observation; 6]>;
+/// Full batch orbit determination results.
+///
+/// Each entry maps an [`TrajId`] to the outcome of a full
+/// Initial Orbit Determination (IOD) attempt on its set of observations.
+///
+/// Internally, this is implemented as:
+///
+/// ```ignore
+/// HashMap<TrajId, Result<FitOrbitResult, OutfitError>, RandomState>
+/// ```
+///
+/// Return semantics
+/// -----------------
+/// * `Ok(FitOrbitResult::IODGauss((GaussResult, IODRMS)))` – a successful IOD with its RMS of normalized residuals.
+/// * `Ok(FitOrbitResult::DifferentialCorrection((OrbitalElements, Chi2)))` – a successful differential correction with its chi-squared value.
+/// * `Err(OutfitError)` – a failure isolated to that object.
+///
+/// Use RandomState from the ahash crate for efficient hashing of TrajId keys.
+pub type FullOrbitResult = HashMap<TrajId, Result<FitOrbitResult, OutfitError>, RandomState>;

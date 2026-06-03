@@ -40,7 +40,7 @@
 //! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_kepler_equation`]  
 //!   Solve the generalized Kepler equation in equinoctial form.
 //!
-//! - [`crate::orbit_type::equinoctial_element::EquinoctialElements::solve_two_body_problem`]  
+//! - `EquinoctialElements::propagate_to_epoch` (via [`crate::propagator::PropagatorKind`])  
 //!   Propagate an orbit from `t0` to `t1` using the two-body approximation,
 //!   returning position, velocity, and optionally Jacobians.
 //!
@@ -59,9 +59,41 @@
 //!
 //! ## Advantages of equinoctial elements
 //!
-//! * Avoid singularities when `e → 0` or `i → 0`
-//! * Smooth derivatives, ideal for gradient-based fitting
-//! * Directly compatible with least-squares adjustment and orbit uncertainty analysis
+//! Equinoctial elements provide several critical advantages over classical Keplerian elements:
+//!
+//! * **Non-singular for $e < 1$ and $0 \leq i < \pi$** — no undefined elements for circular
+//!   or equatorial orbits, unlike Keplerian $\omega$ and $\Omega$
+//!
+//! * **Smooth, well-conditioned derivatives** — Jacobian matrices remain well-behaved throughout
+//!   the valid domain, enabling robust numerical optimization and uncertainty propagation
+//!
+//! * **Ideal for orbit determination** — gradient-based least-squares fitting converges reliably
+//!   without special handling of degenerate cases
+//!
+//! * **Superior uncertainty propagation** — covariance matrices transform smoothly without
+//!   singular amplification near $e = 0$ or $i = 0$
+//!
+//! * **Compatible with two-body propagation** — Keplerian dynamics equations extend naturally
+//!   to equinoctial form with regular behavior
+//!
+//! ## Uncertainty representation
+//!
+//! Uncertainties in equinoctial elements are represented through:
+//!
+//! - **Standard deviations** on each element $(a, h, k, p, q, \lambda)$ via
+//!   [`EquinoctialUncertainty`](crate::orbit_type::uncertainty::EquinoctialUncertainty)
+//!
+//! - **Covariance matrices** capturing correlations between elements via
+//!   [`OrbitalCovariance`](crate::orbit_type::uncertainty::OrbitalCovariance)
+//!
+//! When converting to/from Keplerian elements, uncertainties are propagated using analytical
+//! Jacobian matrices:
+//!
+//! - [`jacobian_to_keplerian`](EquinoctialElements::jacobian_to_keplerian) —
+//!   $J_{\text{Eq} \to \text{Kep}} = \partial(a,e,i,\Omega,\omega,M) / \partial(a,h,k,p,q,\lambda)$
+//!
+//! These Jacobians handle singular points by zeroing derivatives when denominators vanish
+//! (threshold $\epsilon = 10^{-12}$), ensuring numerical stability at all orbital configurations.
 //!
 //! ## Example
 //!
@@ -81,7 +113,7 @@
 //! };
 //!
 //! // Propagate 10 days ahead using the two-body model
-//! let (pos, vel, _) = equ.solve_two_body_problem(59000.0, 59010.0, false).unwrap();
+//! let (pos, vel, _) = equ.propagate_twobody(59000.0, 59010.0, false).unwrap();
 //!
 //! // Convert to classical Keplerian elements
 //! let kep: KeplerianElements = equ.into();
@@ -91,10 +123,11 @@
 //!
 //! - [`KeplerianElements`](crate::orbit_type::keplerian_element::KeplerianElements)
 //! - Milani & Gronchi, *Theory of Orbit Determination* (2010).
+
 use core::f64;
 use std::{f64::consts::PI, fmt};
 
-use nalgebra::{Matrix3x6, Matrix6x3, Vector3};
+use nalgebra::{Matrix3x6, Matrix6, Matrix6x3, Vector3, Vector6};
 use roots::{find_root_newton_raphson, SimpleConvergency};
 
 use crate::{
@@ -102,13 +135,48 @@ use crate::{
     kepler::principal_angle,
     orbit_type::keplerian_element::KeplerianElements,
     outfit_errors::OutfitError,
+    propagator::{
+        nbody::{
+            build_augmented_initial_state, build_initial_state_jacobian, build_perturber_snapshots,
+            integrate_augmented_state, split_propagated_jacobian, NBodyOde, NBodyResult,
+        },
+        NBodyConfig,
+    },
+    JPLEphem,
 };
 
+/// Type alias for the result of two-body propagation from equinoctial elements.
+///
+/// The tuple contains:
+/// -   `Vector3<f64>`: Cartesian position vector (AU)
+/// -   `Vector3<f64>`: Cartesian velocity vector (AU/day)
+/// -   `Option<(Matrix6x3<f64>, Matrix6x3<f64>)>`: Optional Jacobian matrices of position and velocity with respect to the six equinoctial elements.
 pub type TwoBodyResult = (
     Vector3<f64>,
     Vector3<f64>,
     Option<(Matrix6x3<f64>, Matrix6x3<f64>)>,
 );
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EquinoctialLimits {
+    pub eccentricity_limit: f64,
+    min_semi_major_axis: f64,
+    max_semi_major_axis: f64,
+    min_periapsis_distance: f64,
+    max_apoapsis_distance: f64,
+}
+
+impl Default for EquinoctialLimits {
+    fn default() -> Self {
+        Self {
+            eccentricity_limit: 1.2, // Allow for some hyperbolic orbits (e > 1) but not extreme ones
+            min_semi_major_axis: 1e-6, // 1e-6 AU ~ 150 km
+            max_semi_major_axis: 1e4, // 10,000 AU
+            min_periapsis_distance: 1e-6, // 1e-6 AU ~ 150 km
+            max_apoapsis_distance: 1e4, // 10,000 AU
+        }
+    }
+}
 
 /// Equinoctial orbital elements.
 /// Units:
@@ -176,6 +244,27 @@ impl EquinoctialElements {
     /// * [`EquinoctialElements::squared_eccentricity`] – Returns `e²` directly.
     pub fn eccentricity(&self) -> f64 {
         self.squared_eccentricity().sqrt()
+    }
+
+    /// Check if the equinoctial elements represent a "bizarre" orbit based on specified limits.
+    ///
+    /// # Arguments
+    ///
+    /// - `limits` - An instance of `EquinoctialLimits` defining thresholds for eccentricity, semi-major axis, periapsis distance, and apoapsis distance.
+    ///
+    /// # Returns
+    ///
+    /// - `true` if the orbit is considered bizarre (e.g., too eccentric, too small/large semi-major axis, or extreme periapsis/apoapsis distances), otherwise `false`.
+    pub fn is_bizarre(&self, limits: &EquinoctialLimits) -> bool {
+        let e = self.eccentricity();
+        let periapsis = self.semi_major_axis * (1. - e); // periapsis distance
+        let apoapsis = self.semi_major_axis * (1. + e); // apoapsis distance
+
+        e > limits.eccentricity_limit
+            || self.semi_major_axis < limits.min_semi_major_axis
+            || self.semi_major_axis > limits.max_semi_major_axis
+            || periapsis < limits.min_periapsis_distance
+            || apoapsis > limits.max_apoapsis_distance
     }
 
     /// Create a new instance of `EquinoctialElements` from Keplerian elements.
@@ -546,12 +635,16 @@ impl EquinoctialElements {
     /// - Velocity: **UA/day**  
     /// - Time: **days**  
     /// - Angles: **radians**
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_cartesian_position_and_velocity(
         &self,
         mean_motion: f64,
         eccentric_anomaly: f64,
         eccentricity_pow2: f64,
         compute_derivatives: bool,
+        t0: f64,
+        t1: f64,
+        mean_longitude_t1: f64,
     ) -> TwoBodyResult {
         // -------------------------------------------------------------------------
         // 1. Compute auxiliary parameters
@@ -635,13 +728,13 @@ impl EquinoctialElements {
         // -------------------------------------------------------------------------
         if compute_derivatives {
             let (dxde_pos, dxde_vel) = self.compute_derivative(
-                self.reference_epoch,
-                self.reference_epoch,
+                t0,
+                t1,
                 mean_motion,
-                self.mean_longitude,
+                mean_longitude_t1,
                 eccentric_anomaly,
+                inv_u,
                 beta,
-                beta_ecc_term,
                 sin_ecc_anom,
                 cos_ecc_anom,
                 xe,
@@ -713,7 +806,7 @@ impl EquinoctialElements {
     /// * [`EquinoctialElements::compute_cartesian_position_and_velocity`] – projects equinoctial elements to 3D
     /// * [`EquinoctialElements::solve_kepler_equation`] – solves the generalized Kepler equation
     /// * [`principal_angle`] – normalizes an angle to [0, 2π)
-    pub fn solve_two_body_problem(
+    pub fn propagate_twobody(
         &self,
         t0: f64,
         t1: f64,
@@ -767,7 +860,282 @@ impl EquinoctialElements {
             eccentric_anomaly,
             eccentricity_pow2,
             compute_derivatives,
+            t0,
+            t1,
+            mean_longitude_t1,
         ))
+    }
+
+    /// Propagates `elements` from their reference epoch to `t1_mjd_tt` using
+    /// numerical N-body integration.
+    ///
+    /// Converts the equinoctial elements to a Cartesian initial state at t0, then
+    /// integrates the augmented state (position, velocity, and 6×6 STM) forward (or
+    /// backward) from t0 to t1 using the DOP853 integrator under the gravitational
+    /// influence of all bodies listed in `config.perturbing_bodies`.  On completion,
+    /// the propagated STM is combined with the initial element Jacobians to yield
+    /// `dpos_delem` and `dvel_delem` at t1.
+    ///
+    /// If `|t1 − t0| < 1 × 10⁻¹⁴` days the integration is skipped and the t0
+    /// Cartesian state and Jacobians are returned directly.
+    ///
+    /// # Arguments
+    ///
+    /// * `elements` – Equinoctial orbital elements of the small body, with
+    ///   `reference_epoch` (MJD-TT) acting as t0. Units: AU, radians.
+    /// * `t1_mjd_tt` – Target epoch expressed as Modified Julian Date in the
+    ///   Terrestrial Time (TT) scale. Units: days (MJD-TT).
+    /// * `jpl` – Opened JPL ephemeris file used to query the heliocentric positions
+    ///   of the perturbing bodies at t0.
+    /// * `config` – N-body configuration specifying the perturbing bodies and the
+    ///   DOP853 absolute/relative tolerances.
+    ///
+    /// # Returns
+    ///
+    /// An [`NBodyResult`] containing:
+    /// - `position`: heliocentric position at t1 (AU, ecliptic J2000),
+    /// - `velocity`: heliocentric velocity at t1 (AU/day, ecliptic J2000),
+    /// - `dpos_delem`: 6×3 Jacobian ∂pos(t1)/∂elem (rows = elements, cols = Cartesian),
+    /// - `dvel_delem`: 6×3 Jacobian ∂vel(t1)/∂elem (rows = elements, cols = Cartesian).
+    ///
+    /// # Errors
+    ///
+    /// - Returns [`OutfitError::NBodyPropagationFailed`] if the DOP853 integrator
+    ///   fails or produces no output steps.
+    /// - Returns [`OutfitError::EphemerisBodyNotSupported`] if a perturbing body
+    ///   listed in `config` cannot be found in the JPL ephemeris or has no GM entry
+    ///   in the static table.
+    pub fn propagate_nbody(
+        &self,
+        t1_mjd_tt: f64,
+        jpl: &JPLEphem,
+        config: &NBodyConfig,
+    ) -> Result<NBodyResult, OutfitError> {
+        let t0_mjd_tt = self.reference_epoch;
+        let time_span_days = t1_mjd_tt - t0_mjd_tt;
+
+        // Initial cartesian state and element Jacobian J0 = ∂(x0,v0)/∂elem
+        let (initial_position, initial_velocity, initial_jacobians) =
+            self.propagate_twobody(0.0, 0.0, true)?;
+        let (dpos_delem_at_t0, dvel_delem_at_t0) =
+            initial_jacobians.expect("propagate_twobody(0,0,true) must return jacobians");
+
+        // If dt ≈ 0 skip integration
+        if time_span_days.abs() < 1e-14 {
+            return Ok(NBodyResult {
+                position: initial_position,
+                velocity: initial_velocity,
+                dpos_delem: dpos_delem_at_t0,
+                dvel_delem: dvel_delem_at_t0,
+            });
+        }
+
+        let augmented_initial_state =
+            build_augmented_initial_state(initial_position, initial_velocity);
+
+        let epoch_t0 = hifitime::Epoch::from_mjd_in_time_scale(t0_mjd_tt, hifitime::TimeScale::TT);
+        let perturbers = build_perturber_snapshots(config, jpl, &epoch_t0)?;
+
+        let ode = NBodyOde { perturbers };
+
+        let augmented_final_state =
+            integrate_augmented_state(&ode, augmented_initial_state, time_span_days, config)?;
+
+        let final_position = Vector3::new(
+            augmented_final_state[0],
+            augmented_final_state[1],
+            augmented_final_state[2],
+        );
+        let final_velocity = Vector3::new(
+            augmented_final_state[3],
+            augmented_final_state[4],
+            augmented_final_state[5],
+        );
+        let stm_at_t1 = Matrix6::<f64>::from_column_slice(&augmented_final_state[6..42]);
+
+        let initial_state_jacobian =
+            build_initial_state_jacobian(&dpos_delem_at_t0, &dvel_delem_at_t0);
+        let propagated_state_jacobian = stm_at_t1 * initial_state_jacobian;
+        let (dpos_delem_at_t1, dvel_delem_at_t1) =
+            split_propagated_jacobian(propagated_state_jacobian);
+
+        Ok(NBodyResult {
+            position: final_position,
+            velocity: final_velocity,
+            dpos_delem: dpos_delem_at_t1,
+            dvel_delem: dvel_delem_at_t1,
+        })
+    }
+
+    /// Compute the Jacobian of the equinoctial-to-Keplerian transformation.
+    ///
+    /// Given the equinoctial element vector
+    /// $\mathbf{x} = [a, h, k, p, q, \lambda]^\top$,
+    /// this method returns the $6 \times 6$ matrix
+    ///
+    /// $$J = \frac{\partial \mathbf{y}}{\partial \mathbf{x}}, \quad
+    ///   \mathbf{y} = [a, e, i, \Omega, \omega, M]^\top$$
+    ///
+    /// where the column ordering matches the source vector $\mathbf{x}$ and
+    /// the row ordering matches the target vector $\mathbf{y}$.
+    ///
+    /// Derivation
+    /// ----------
+    /// The mapping relies on the intermediate quantities:
+    ///
+    /// $$e = \sqrt{h^2 + k^2}, \quad \varpi = \text{atan2}(h, k)$$
+    /// $$t = \sqrt{p^2 + q^2}, \quad \Omega = \text{atan2}(p, q)$$
+    /// $$i = 2\arctan(t), \quad \omega = \varpi - \Omega, \quad M = \lambda - \varpi$$
+    ///
+    /// The partial derivatives of $\varpi$ with respect to $h$ and $k$ are:
+    ///
+    /// $$\frac{\partial \varpi}{\partial h} = \frac{k}{e^2}, \quad
+    ///   \frac{\partial \varpi}{\partial k} = -\frac{h}{e^2}$$
+    ///
+    /// The partial derivatives of $i$ with respect to $p$ and $q$ are:
+    ///
+    /// $$\frac{\partial i}{\partial p} = \frac{2p}{t(1+t^2)}, \quad
+    ///   \frac{\partial i}{\partial q} = \frac{2q}{t(1+t^2)}$$
+    ///
+    /// Degenerate cases and regularization
+    /// ------------------------------------
+    ///
+    /// The transformation has singularities at certain orbital configurations:
+    ///
+    /// * **Near-circular orbits ($e \approx 0$)**: $\varpi = \text{atan2}(h, k)$ is undefined
+    ///   when $h^2 + k^2 \to 0$. Derivatives $\partial \varpi / \partial h$ and
+    ///   $\partial \varpi / \partial k$ involve $e^{-2}$, which diverges.
+    ///   
+    ///   **Regularization**: When $e < \epsilon$ (with $\epsilon = 10^{-12}$), these
+    ///   derivatives are set to zero. Physically, the periapsis direction has no meaning
+    ///   for a circular orbit.
+    ///
+    /// * **Near-equatorial orbits ($i \approx 0$, i.e., $t = \tan(i/2) \approx 0$)**:
+    ///   $\Omega = \text{atan2}(p, q)$ is undefined when $p^2 + q^2 \to 0$. Derivatives
+    ///   $\partial \Omega / \partial p$ and $\partial \Omega / \partial q$ involve $t^{-2}$,
+    ///   which diverges.
+    ///   
+    ///   **Regularization**: When $t < \epsilon$, these derivatives are set to zero.
+    ///   The ascending node direction is undefined for an equatorial orbit.
+    ///
+    /// These regularizations prevent numerical overflow but may **underestimate uncertainties**
+    /// in $\omega$ and $\Omega$ for degenerate orbits. For such cases, equinoctial elements
+    /// should remain the primary representation.
+    ///
+    /// ## Usage in uncertainty propagation
+    ///
+    /// This Jacobian transforms covariance matrices from equinoctial to Keplerian:
+    ///
+    /// $$
+    /// \Sigma_{\text{Kep}} = J \, \Sigma_{\text{Eq}} \, J^\top
+    /// $$
+    ///
+    /// See [`OrbitalCovariance::propagate`](crate::orbit_type::uncertainty::OrbitalCovariance::propagate)
+    /// and [`OrbitalElements::to_keplerian`](crate::orbit_type::OrbitalElements::to_keplerian).
+    ///
+    /// ## Arguments
+    ///
+    /// * `&self` – Equinoctial elements $(a, h, k, p, q, \lambda)$
+    ///
+    /// ## Return
+    ///
+    /// * `Matrix6<f64>` – The $6 \times 6$ Jacobian matrix $\partial\mathbf{y}/\partial\mathbf{x}$
+    ///   where rows correspond to $[a, e, i, \Omega, \omega, M]$ and columns to $[a, h, k, p, q, \lambda]$
+    ///
+    /// ## See also
+    ///
+    /// * [`KeplerianElements::jacobian_to_equinoctial`](crate::orbit_type::keplerian_element::KeplerianElements::jacobian_to_equinoctial) — Inverse Jacobian
+    /// * [`OrbitalElements::to_keplerian`](crate::orbit_type::OrbitalElements::to_keplerian) — High-level conversion with uncertainty
+    pub fn jacobian_to_keplerian(&self) -> Matrix6<f64> {
+        let h = self.eccentricity_sin_lon;
+        let k = self.eccentricity_cos_lon;
+        let p = self.tan_half_incl_sin_node;
+        let q = self.tan_half_incl_cos_node;
+
+        let eps = 1.0e-12;
+
+        // --- eccentricity and longitude of periapsis ---
+        let e = (h * h + k * k).sqrt();
+        let e_sq = e * e;
+
+        // ∂varpi/∂h = k/e², ∂varpi/∂k = -h/e²  (zero when e ≈ 0)
+        let (d_varpi_dh, d_varpi_dk) = if e < eps {
+            (0.0, 0.0)
+        } else {
+            (k / e_sq, -h / e_sq)
+        };
+
+        // --- inclination node ---
+        let t = (p * p + q * q).sqrt();
+        let t_sq = t * t;
+
+        // ∂i/∂p = 2p / (t(1+t²)),  ∂i/∂q = 2q / (t(1+t²))  (zero when t ≈ 0)
+        let (d_i_dp, d_i_dq) = if t < eps {
+            (0.0, 0.0)
+        } else {
+            let denom = t * (1.0 + t_sq);
+            (2.0 * p / denom, 2.0 * q / denom)
+        };
+
+        // ∂Ω/∂p = q/t²,  ∂Ω/∂q = -p/t²  (zero when t ≈ 0)
+        let (d_omega_node_dp, d_omega_node_dq) = if t < eps {
+            (0.0, 0.0)
+        } else {
+            (q / t_sq, -p / t_sq)
+        };
+
+        // Each Vector6 is one column: ∂y/∂x_j for source variable x_j.
+        // Row ordering (target):    [a, e, i, Ω, ω, M]
+        // Column ordering (source): [a, h, k, p, q, λ]
+
+        let col_a = Vector6::new(1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+        let col_h = Vector6::new(
+            0.0,            // ∂a/∂h
+            h / e.max(eps), // ∂e/∂h = h/e
+            0.0,            // ∂i/∂h
+            0.0,            // ∂Ω/∂h
+            d_varpi_dh,     // ∂ω/∂h = ∂varpi/∂h  (∂Ω/∂h = 0)
+            -d_varpi_dh,    // ∂M/∂h = -∂varpi/∂h
+        );
+
+        let col_k = Vector6::new(
+            0.0,            // ∂a/∂k
+            k / e.max(eps), // ∂e/∂k = k/e
+            0.0,            // ∂i/∂k
+            0.0,            // ∂Ω/∂k
+            d_varpi_dk,     // ∂ω/∂k = ∂varpi/∂k
+            -d_varpi_dk,    // ∂M/∂k = -∂varpi/∂k
+        );
+
+        let col_p = Vector6::new(
+            0.0,              // ∂a/∂p
+            0.0,              // ∂e/∂p
+            d_i_dp,           // ∂i/∂p
+            d_omega_node_dp,  // ∂Ω/∂p
+            -d_omega_node_dp, // ∂ω/∂p = -∂Ω/∂p  (varpi independent of p)
+            0.0,              // ∂M/∂p
+        );
+
+        let col_q = Vector6::new(
+            0.0,              // ∂a/∂q
+            0.0,              // ∂e/∂q
+            d_i_dq,           // ∂i/∂q
+            d_omega_node_dq,  // ∂Ω/∂q
+            -d_omega_node_dq, // ∂ω/∂q = -∂Ω/∂q
+            0.0,              // ∂M/∂q
+        );
+
+        let col_lambda = Vector6::new(
+            0.0, // ∂a/∂λ
+            0.0, // ∂e/∂λ
+            0.0, // ∂i/∂λ
+            0.0, // ∂Ω/∂λ
+            0.0, // ∂ω/∂λ
+            1.0, // ∂M/∂λ
+        );
+
+        Matrix6::from_columns(&[col_a, col_h, col_k, col_p, col_q, col_lambda])
     }
 }
 
@@ -802,11 +1170,7 @@ impl From<&EquinoctialElements> for KeplerianElements {
 impl fmt::Display for EquinoctialElements {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let rad_to_deg = 180.0 / std::f64::consts::PI;
-        writeln!(
-            f,
-            "Equinoctial Elements @ epoch (MJD): {:.6}",
-            self.reference_epoch
-        )?;
+        writeln!(f, "Elements @ epoch (MJD): {:.6}", self.reference_epoch)?;
         writeln!(f, "------------------------------------------------")?;
         writeln!(
             f,
@@ -845,6 +1209,32 @@ impl fmt::Display for EquinoctialElements {
 #[cfg(test)]
 mod test_equinoctial_element {
     use super::*;
+
+    #[test]
+    fn test_is_bizarre() {
+        let equ = EquinoctialElements {
+            reference_epoch: 0.0,
+            semi_major_axis: 1.8017360713,
+            eccentricity_sin_lon: 0.2693736809404963,
+            eccentricity_cos_lon: 0.08856415260522467,
+            tan_half_incl_sin_node: 0.0008089970142830734,
+            tan_half_incl_cos_node: 0.10168201110394352,
+            mean_longitude: 1.693697008,
+        };
+        let limits = EquinoctialLimits::default();
+        assert!(!equ.is_bizarre(&limits));
+
+        let bad_equ = EquinoctialElements {
+            reference_epoch: 0.0,
+            semi_major_axis: 0.000001, // too small
+            eccentricity_sin_lon: 0.2693736809404963,
+            eccentricity_cos_lon: 0.08856415260522467,
+            tan_half_incl_sin_node: 0.0008089970142830734,
+            tan_half_incl_cos_node: 0.10168201110394352,
+            mean_longitude: 1.693697008 + 2. * std::f64::consts::PI, // out of range
+        };
+        assert!(bad_equ.is_bizarre(&limits));
+    }
 
     #[test]
     fn test_equinoctial_conversion() {
@@ -907,7 +1297,7 @@ mod test_equinoctial_element {
         };
 
         let (pos, vel, _) = equ
-            .solve_two_body_problem(0., 21.019733018845727, false)
+            .propagate_twobody(0., 21.019733018845727, false)
             .unwrap();
         assert_eq!(
             pos,
@@ -1191,6 +1581,164 @@ mod test_equinoctial_element {
                          - std::f64::consts::PI;
 
                 prop_assert!(diff.abs() < 1e-10, "F={}, target(E+ϖ)={}, diff={}", got, target, diff);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_jacobian_equinoctial_to_keplerian {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    fn fd_jacobian_eq_to_kep(eq: &EquinoctialElements, eps: f64) -> Matrix6<f64> {
+        let fields = [
+            eq.semi_major_axis,
+            eq.eccentricity_sin_lon,
+            eq.eccentricity_cos_lon,
+            eq.tan_half_incl_sin_node,
+            eq.tan_half_incl_cos_node,
+            eq.mean_longitude,
+        ];
+
+        let kep_to_arr = |k: KeplerianElements| {
+            [
+                k.semi_major_axis,
+                k.eccentricity,
+                k.inclination,
+                k.ascending_node_longitude,
+                k.periapsis_argument,
+                k.mean_anomaly,
+            ]
+        };
+
+        let make_eq = |f: [f64; 6]| EquinoctialElements {
+            reference_epoch: eq.reference_epoch,
+            semi_major_axis: f[0],
+            eccentricity_sin_lon: f[1],
+            eccentricity_cos_lon: f[2],
+            tan_half_incl_sin_node: f[3],
+            tan_half_incl_cos_node: f[4],
+            mean_longitude: f[5],
+        };
+
+        let mut columns = [[0.0f64; 6]; 6];
+
+        for col in 0..6 {
+            let mut fwd = fields;
+            let mut bwd = fields;
+            fwd[col] += eps;
+            bwd[col] -= eps;
+
+            let kep_fwd = kep_to_arr(KeplerianElements::from(&make_eq(fwd)));
+            let kep_bwd = kep_to_arr(KeplerianElements::from(&make_eq(bwd)));
+
+            for row in 0..6 {
+                columns[col][row] = (kep_fwd[row] - kep_bwd[row]) / (2.0 * eps);
+            }
+        }
+
+        Matrix6::from_fn(|row, col| columns[col][row])
+    }
+
+    #[test]
+    fn test_jacobian_to_keplerian_against_finite_differences() {
+        let eq = EquinoctialElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 2.5,
+            eccentricity_sin_lon: 0.15,
+            eccentricity_cos_lon: 0.25,
+            tan_half_incl_sin_node: 0.10,
+            tan_half_incl_cos_node: 0.20,
+            mean_longitude: 1.8,
+        };
+
+        let analytical = eq.jacobian_to_keplerian();
+        let numerical = fd_jacobian_eq_to_kep(&eq, 1e-6);
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(
+                    analytical[(row, col)],
+                    numerical[(row, col)],
+                    epsilon = 1e-7
+                );
+            }
+        }
+    }
+
+    /// Near-circular orbit: e ≈ 0, degenerate 1/e² derivatives should be zeroed.
+    #[test]
+    fn test_jacobian_to_keplerian_near_circular() {
+        // Use h=k small enough that e = sqrt(h²+k²) < eps (1e-12) in the Jacobian,
+        // triggering the degenerate-zero branch for ∂ω/∂h, ∂ω/∂k, ∂M/∂h, ∂M/∂k.
+        // Note: ∂e/∂h = h/e → 1/√2 for h=k, which is well-defined and NOT zero.
+        let eq = EquinoctialElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 1.0,
+            eccentricity_sin_lon: 1e-13,
+            eccentricity_cos_lon: 1e-13,
+            tan_half_incl_sin_node: 0.10,
+            tan_half_incl_cos_node: 0.20,
+            mean_longitude: 1.0,
+        };
+
+        let j = eq.jacobian_to_keplerian();
+
+        // Only the 1/e²-diverging derivatives are zeroed by the regularisation
+        assert_abs_diff_eq!(j[(4, 1)], 0.0, epsilon = 1e-10); // ∂ω/∂h
+        assert_abs_diff_eq!(j[(4, 2)], 0.0, epsilon = 1e-10); // ∂ω/∂k
+        assert_abs_diff_eq!(j[(5, 1)], 0.0, epsilon = 1e-10); // ∂M/∂h
+        assert_abs_diff_eq!(j[(5, 2)], 0.0, epsilon = 1e-10); // ∂M/∂k
+    }
+
+    /// Near-equatorial orbit: t ≈ 0, degenerate 1/t²-node derivatives should be zeroed.
+    #[test]
+    fn test_jacobian_to_keplerian_near_equatorial() {
+        // Use p=q small enough that t = sqrt(p²+q²) < eps (1e-12), triggering the
+        // degenerate-zero branch for ∂i/∂p, ∂Ω/∂p, ∂ω/∂p (and their q-counterparts).
+        let eq = EquinoctialElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 1.5,
+            eccentricity_sin_lon: 0.10,
+            eccentricity_cos_lon: 0.20,
+            tan_half_incl_sin_node: 1e-13,
+            tan_half_incl_cos_node: 1e-13,
+            mean_longitude: 2.0,
+        };
+
+        let j = eq.jacobian_to_keplerian();
+
+        // Both the bounded (∂i/∂p) and diverging (∂Ω/∂p, ∂ω/∂p) entries are zeroed
+        assert_abs_diff_eq!(j[(2, 3)], 0.0, epsilon = 1e-10); // ∂i/∂p
+        assert_abs_diff_eq!(j[(3, 3)], 0.0, epsilon = 1e-10); // ∂Ω/∂p
+        assert_abs_diff_eq!(j[(4, 3)], 0.0, epsilon = 1e-10); // ∂ω/∂p
+    }
+
+    /// Round-trip consistency: J_kep_to_eq · J_eq_to_kep ≈ I₆.
+    #[test]
+    fn test_jacobian_round_trip_identity() {
+        let eq = EquinoctialElements {
+            reference_epoch: 60000.0,
+            semi_major_axis: 2.5,
+            eccentricity_sin_lon: 0.15,
+            eccentricity_cos_lon: 0.25,
+            tan_half_incl_sin_node: 0.10,
+            tan_half_incl_cos_node: 0.20,
+            mean_longitude: 1.8,
+        };
+
+        let kep = KeplerianElements::from(&eq);
+
+        let j_eq_to_kep = eq.jacobian_to_keplerian();
+        let j_kep_to_eq = kep.jacobian_to_equinoctial();
+
+        let product = j_eq_to_kep * j_kep_to_eq;
+        let identity = Matrix6::identity();
+
+        for row in 0..6 {
+            for col in 0..6 {
+                assert_abs_diff_eq!(product[(row, col)], identity[(row, col)], epsilon = 1e-10);
             }
         }
     }

@@ -74,9 +74,10 @@
 //! - [`crate::ref_system`] for frame transformations that use these models.
 //! - **Theory of Orbit Determination** by Milani & Gronchi (2010).
 use nalgebra::Matrix3;
+use photom::{Arcseconds, Radians, MJDTT};
 
 use crate::{
-    constants::{ArcSec, Radian, RADEG, RADSEC, T2000},
+    constants::{RADEG, RADSEC, T2000},
     ref_system::rotmt,
 };
 
@@ -115,7 +116,7 @@ use crate::{
 /// # See also
 /// * [`rotmt`] – constructs rotation matrices using this obliquity
 /// * [`rotpn`](crate::ref_system::rotpn) – applies obliquity rotation when transforming between ecliptic and equatorial frames
-pub fn obleq(tjm: f64) -> Radian {
+pub fn obleq(tjm: MJDTT) -> Radians {
     // Obliquity coefficients
     let ob0 = ((23.0 * 3600.0 + 26.0 * 60.0) + 21.448) * RADSEC;
     let ob1 = -46.815 * RADSEC;
@@ -166,7 +167,7 @@ pub fn obleq(tjm: f64) -> Radian {
 /// * [`rnut80`] – uses these angles to build the nutation rotation matrix
 /// * [`rotpn`](crate::ref_system::rotpn) – applies nutation when transforming between Equt and Equm systems
 #[inline(always)]
-pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
+pub fn nutn80(tjm: MJDTT) -> (Arcseconds, Arcseconds) {
     // ---- time powers (Julian centuries from J2000)
     let t = (tjm - T2000) / 36525.0;
     let t2 = t * t;
@@ -455,7 +456,7 @@ pub fn nutn80(tjm: f64) -> (ArcSec, ArcSec) {
 /// * [`obleq`] – computes the mean obliquity ε (radians)
 /// * [`rotmt`] – builds the individual axis rotation matrices
 /// * [`rotpn`](crate::ref_system::rotpn) – uses `rnut80` to transform between Equm and Equt systems
-pub fn rnut80(tjm: f64) -> Matrix3<f64> {
+pub fn rnut80(tjm: MJDTT) -> Matrix3<f64> {
     // Mean obliquity of the ecliptic at date (ε)
     let epsm = obleq(tjm);
 
@@ -504,7 +505,7 @@ pub fn rnut80(tjm: f64) -> Matrix3<f64> {
 /// # See also
 /// * [`obleq`] – Computes the mean obliquity of the ecliptic.
 /// * [`nutn80`] – Computes the 1980 IAU nutation model (Δψ and Δε).
-pub fn equequ(tjm: f64) -> f64 {
+pub fn equequ(tjm: MJDTT) -> Radians {
     // Compute the mean obliquity of the ecliptic (ε, in radians)
     let oblm = obleq(tjm);
 
@@ -557,7 +558,7 @@ pub fn equequ(tjm: f64) -> f64 {
 /// # See also
 /// * [`rotmt`] – constructs the rotation matrices used here
 /// * [`rotpn`](crate::ref_system::rotpn) – uses `prec` when converting between epochs `"OFDATE"` and `"J2000"`
-pub fn prec(tjm: f64) -> Matrix3<f64> {
+pub fn prec(tjm: MJDTT) -> Matrix3<f64> {
     // Precession polynomial coefficients (in radians)
     let zed = 0.6406161 * RADEG;
     let zd = 0.6406161 * RADEG;
