@@ -30,7 +30,7 @@ A fast, safe, and modular Rust library for **orbit determination** of Solar Syst
 </p>
 
 > **Ecosystem split**  
-> Outfit v3 is a focused **orbital dynamics engine**. Everything related to observation loading (MPC 80-column, ADES XML, Parquet), observer management, and astrometric data structures now lives in the separate **[photom](https://crates.io/crates/photom)** crate. Outfit depends on `photom` and exposes the `FitIOD` trait that bridges photom's `ObsDataset` into the IOD pipeline.
+> Outfit v3 is a focused **orbital dynamics engine**. Everything related to observation loading (MPC 80-column, ADES XML, Parquet), observer management, and astrometric data structures now lives in the separate **[photom](https://crates.io/crates/photom)** crate. Outfit depends on `photom` and exposes the `FitIOD` trait that bridges photom's `ObsDataset` into the orbit fitting pipeline.
 
 ---
 
