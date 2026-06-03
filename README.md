@@ -5,7 +5,7 @@
 <div align="center">
 <h1>Outfit</h1>
 
-A fast, safe, and modular Rust library for **initial orbit determination (IOD)** of Solar System small bodies. Outfit focuses exclusively on **orbital dynamics and computation**: Gauss IOD, Keplerian propagation, reference frame transformations, and JPL ephemeris support. Observation I/O and data structures are provided by the companion crate [**photom**](https://crates.io/crates/photom).
+A fast, safe, and modular Rust library for **orbit determination** of Solar System small bodies. Outfit focuses exclusively on **orbital dynamics and computation**: Gauss IOD, differential orbit correction, ephemeris generation, Keplerian propagation, reference frame transformations, and JPL ephemeris support. Observation I/O and data structures are provided by the companion crate [**photom**](https://crates.io/crates/photom).
 </div>
 
 <p align="center">
@@ -41,6 +41,9 @@ A fast, safe, and modular Rust library for **initial orbit determination (IOD)**
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Initial Orbit Determination](#initial-orbit-determination)
+- [Differential Orbit Correction](#differential-orbit-correction)
+- [Uncertainty Propagation](#uncertainty-propagation)
+- [Ephemeris Generation](#ephemeris-generation)
 - [Cargo Feature Flags](#cargo-feature-flags)
 - [Performance & Reproducibility](#performance--reproducibility)
 - [Roadmap](#roadmap)
@@ -57,19 +60,34 @@ A fast, safe, and modular Rust library for **initial orbit determination (IOD)**
   - Iterative velocity correction with Lagrange coefficients
   - Dynamic acceptability filters (perihelion, eccentricity, geometry)
   - RMS evaluation on extended arcs
+- **Differential Orbit Correction**
+  - Iterative **Newton–Raphson least-squares** refinement of equinoctial elements
+  - Projection-based **outlier rejection** loop (chi-squared per observation)
+  - Covariance matrix estimation with posterior uncertainty rescaling
+  - Configurable free/fixed element mask (useful for short arcs)
+  - Stagnation and divergence detection with typed error variants
+  - `FitLSQ` trait: per-trajectory pipeline (IOD seed → differential correction) on any `ObsDataset`
+- **Ephemeris generation**
+  - Predict apparent sky positions `(RA, Dec)` and distances from any `OrbitalElements`
+  - Compute geometric quantities: **phase angle**, **solar elongation**, **radial velocity**, apparent angular rates
+  - Combined mode computes position and geometry in a single propagation
+  - Three generation modes per observer: `Single`, `Range` (uniform grid), `At` (arbitrary epoch list)
+  - Multiple observers in one typed `EphemerisRequest`; per-epoch errors collected without aborting the batch
+  - Choice of **two-body (Keplerian)** or **N-body (DOP853)** propagator; first- or second-order aberration correction
 - **Orbital elements**
   - Classical **Keplerian elements**
   - **Equinoctial elements** with conversions and two-body solver
   - **Cometary elements**
-- **Ephemerides**
+- **JPL ephemerides**
   - Interface with **JPL DE440** (Horizons and NAIF/SPICE formats)
 - **Reference frames & preprocessing**
   - Precession, nutation (IAU 1980), aberration, light-time correction
   - Ecliptic ↔ equatorial conversions, RA/DEC parsing, time systems
 - **Observer geometry**
   - Geocentric and heliocentric observer positions in AU, J2000
-- **Batch IOD**
+- **Batch processing**
   - Single-trajectory and full-dataset IOD via the `FitIOD` trait
+  - Full least-squares fitting for all trajectories via the `FitLSQ` trait
   - Optional parallel batch execution with Rayon (`parallel` feature)
 
 ---
@@ -81,13 +99,14 @@ Outfit is one half of a two-crate pipeline:
 | Crate | Responsibility |
 |-------|---------------|
 | [**photom**](https://crates.io/crates/photom) | Observation I/O (MPC 80-col, ADES XML, Parquet), data structures (`ObsDataset`, `Observer`, error models), trajectory grouping |
-| **outfit** | Pure orbital computation: Gauss IOD, Keplerian/equinoctial elements, JPL ephemerides, reference frames, residuals |
+| **outfit** | Pure orbital computation: Gauss IOD, differential correction, ephemeris generation, Keplerian/equinoctial elements, JPL ephemerides, reference frames, residuals |
 
 A typical workflow:
 
 1. Use **photom** to load observations into an `ObsDataset`.
-2. Call **outfit**'s `FitIOD::fit_iod` (single trajectory) or `FitIOD::fit_full_iod` (all trajectories) on the dataset.
-3. Inspect the returned `GaussResult` and RMS values.
+2. Call **outfit**'s `FitIOD::fit_iod` / `FitIOD::fit_full_iod` for initial orbit determination, or `FitLSQ::fit_lsq` for a full least-squares fit.
+3. Inspect the returned `GaussResult` / `DifferentialCorrectionOutput` and RMS values.
+4. Optionally, call `OrbitalElements::compute` with an `EphemerisRequest` to generate predicted positions.
 
 ---
 
@@ -220,6 +239,163 @@ Designed for **robustness and speed** in survey-scale use (LSST, ZTF, ...).
 
 ---
 
+## Differential Orbit Correction
+
+Starting from an initial orbit (e.g. from the Gauss IOD step), outfit can refine the solution via **weighted least-squares differential correction**:
+
+1. Compute predicted `(RA, Dec)` for each observation using the current elements.
+2. Form the **design matrix** of partial derivatives of the predicted coordinates with respect to the six equinoctial elements.
+3. Solve the **normal equations** to obtain the element correction vector δx.
+4. Apply the correction, check convergence (`‖δx‖ < threshold`), and iterate (Newton–Raphson).
+5. After convergence, apply **projection-based outlier rejection**: observations whose chi-squared contribution exceeds the configured threshold are flagged and the inner loop is re-run on the reduced set. Iterate until the selection is stable.
+6. Rescale the **covariance matrix** by the posterior normalised RMS.
+
+The `FitLSQ` trait exposes this pipeline at the dataset level:
+
+```rust,no_run
+use photom::observation_dataset::ObsDataset;
+use photom::observer::error_model::ObsErrorModel;
+use hifitime::ut1::Ut1Provider;
+use rand::{rngs::StdRng, SeedableRng};
+use outfit::differential_orbit_correction::{DifferentialCorrectionConfig, FitLSQ};
+use outfit::jpl_ephem::{download_jpl_file::EphemFileSource, JPLEphem};
+use outfit::IODParams;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dataset = ObsDataset::from_mpc_80_col("tests/data/2015AB.obs")?;
+
+    let jpl_source: EphemFileSource = "horizon:DE440".try_into()?;
+    let jpl = JPLEphem::new(&jpl_source)?;
+    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long")?;
+
+    let iod_params = IODParams::builder().build()?;
+    let dc_config = DifferentialCorrectionConfig::default();
+
+    let mut rng = StdRng::seed_from_u64(42);
+
+    // Run IOD + differential correction for every trajectory.
+    let results = dataset.fit_lsq(
+        &jpl,
+        &ut1,
+        ObsErrorModel::FCCT14,
+        &iod_params,
+        &dc_config,
+        None,   // no pre-computed initial orbits
+        &mut rng,
+    )?;
+
+    for (traj_id, res) in &results {
+        match res {
+            Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.normalised_rms()),
+            Err(e)  => eprintln!("{traj_id} → error: {e}"),
+        }
+    }
+    Ok(())
+}
+```
+
+---
+
+## Uncertainty Propagation
+
+Outfit tracks orbital uncertainties throughout the full pipeline — from the least-squares fit through to element representation conversions.
+
+### Generation from differential correction
+
+The covariance matrix is produced directly by the `FitLSQ` pipeline. At the end of each Newton–Raphson convergence, `solve_weighted_least_squares` builds the **normal matrix** G⊤WG and inverts it (Cholesky, with QR fallback) to obtain the **6×6 covariance matrix** Γ = (G⊤WG)⁻¹ in equinoctial element space:
+
+```
+Γ[j,k] = (G⊤WG)⁻¹[j,k]    (6×6, equinoctial basis)
+```
+
+This raw covariance is then **rescaled** by a posterior inflation factor μ that accounts for the degrees of freedom and the quality of the fit:
+
+- if normalised RMS ≤ 1 (good fit): μ = √(n_measurements / (n_measurements − n_free))
+- if normalised RMS > 1 (poor fit): μ = normalised_rms × √(n_measurements / (n_measurements − n_free))
+
+The final covariance is stored in `DifferentialCorrectionOutput::uncertainty` and embedded in the returned `OrbitalElements::Equinoctial` variant.
+
+### Propagation between element representations
+
+Each `OrbitalElements` variant carries an optional `covariance: Option<OrbitalCovariance>` and an optional `uncertainty: Option<*Uncertainty>` (per-element 1-σ standard deviations). When converting between representations, the covariance is propagated via **first-order linear (Jacobian) propagation**:
+
+```
+Σ_y = J · Σ_x · Jᵀ
+```
+
+where J = ∂y/∂x is the 6×6 Jacobian of the transformation evaluated at the nominal elements. The following Jacobians are computed analytically:
+
+| Conversion | Jacobian |
+|---|---|
+| Keplerian → Equinoctial | ∂(a,h,k,p,q,λ) / ∂(a,e,i,Ω,ω,M) |
+| Equinoctial → Keplerian | ∂(a,e,i,Ω,ω,M) / ∂(a,h,k,p,q,λ) |
+| Cometary → Keplerian    | ∂(a,e,i,Ω,ω,M) / ∂(q,e,i,Ω,ω,ν) |
+| Cometary → Equinoctial  | chain rule via Keplerian             |
+
+Conversions near singularities (e → 0 for Keplerian, i → 0 for equatorial) set undefined partial derivatives to zero; **equinoctial elements** are preferred for nearly circular or equatorial orbits to avoid these singular regions.
+
+```rust,no_run
+use outfit::orbit_type::{OrbitalElements, keplerian_element::KeplerianElements};
+use outfit::orbit_type::uncertainty::{KeplerianUncertainty, OrbitalCovariance};
+use nalgebra::Matrix6;
+
+// Keplerian elements with a diagonal covariance (simplified example).
+let cov = OrbitalCovariance { matrix: Matrix6::from_diagonal_element(1e-6) };
+let oe = OrbitalElements::Keplerian {
+    elements: kep,
+    uncertainty: Some(KeplerianUncertainty::from_covariance(&cov)),
+    covariance: Some(cov),
+};
+
+// Convert to equinoctial — covariance is automatically propagated via Jacobian.
+let oe_eq = oe.to_equinoctial().unwrap();
+
+if let OrbitalElements::Equinoctial { uncertainty, .. } = oe_eq {
+    if let Some(unc) = uncertainty {
+        println!("σ(h) = {:.2e}", unc.eccentricity_sin_lon);
+    }
+}
+```
+
+---
+
+## Ephemeris Generation
+
+Given any `OrbitalElements`, outfit can predict the apparent sky position and geometric state of the body as seen from one or more observers:
+
+```rust,no_run
+use outfit::{
+    OrbitalElements,
+    ephemeris::{EphemerisConfig, EphemerisMode, EphemerisRequest, request::Combined},
+};
+use hifitime::{Epoch, Duration};
+
+// `elements` obtained from IOD or differential correction.
+let result = elements.compute(
+    &EphemerisRequest::<Combined>::new(EphemerisConfig::default())
+        .add(observer, EphemerisMode::Range {
+            start: Epoch::from_mjd_tt(60310.0),
+            end:   Epoch::from_mjd_tt(60340.0),
+            step:  Duration::from_days(1.0),
+        }),
+    &jpl,
+    &ut1,
+);
+
+for entry in result.successes() {
+    let (pos, geo) = entry.result.as_ref().unwrap();
+    println!(
+        "{}: RA={:.4} Dec={:.4}  phase={:.2}°  elongation={:.2}°",
+        entry.epoch, pos.coord.ra, pos.coord.dec,
+        geo.phase_angle.to_degrees(), geo.solar_elongation.to_degrees(),
+    );
+}
+```
+
+The pipeline converts elements to **equinoctial form**, propagates with the selected propagator (two-body or N-body), rotates from ecliptic to equatorial J2000, and applies aberration correction. Errors at individual epochs are stored in the result rather than aborting the computation.
+
+---
+
 ## Performance & Reproducibility
 
 - **Deterministic runs** by default (set RNG seeds explicitly when noise is used).
@@ -243,7 +419,6 @@ RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html" cargo doc --no-deps --a
 
 ## Roadmap
 
-- **Full least-squares orbit fitting** across full arcs
 - **Hyperbolic & parabolic orbits** (e ≥ 1) for interstellar candidates
 - **Vaisälä method** for short arcs
 - **Additional ephemerides backends** (e.g., ANISE/SPICE integration)
