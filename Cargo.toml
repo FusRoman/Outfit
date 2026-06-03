@@ -22,6 +22,8 @@ exclude = [
     ".github/",
     "examples/",
     "tests/",
+    ".opencode/",
+    ".husky/"
 ]
 
 [dependencies]
