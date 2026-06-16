@@ -237,6 +237,14 @@ pub enum OrbitalElements {
 }
 
 impl OrbitalElements {
+    pub fn ref_epoch(&self) -> f64 {
+        match self {
+            OrbitalElements::Keplerian { elements, .. } => elements.reference_epoch,
+            OrbitalElements::Equinoctial { elements, .. } => elements.reference_epoch,
+            OrbitalElements::Cometary { elements, .. } => elements.reference_epoch,
+        }
+    }
+
     /// Build orbital elements from a heliocentric Cartesian state vector.
     ///
     /// This constructor converts a position–velocity pair `[r, v]` in the J2000

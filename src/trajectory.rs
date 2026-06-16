@@ -33,7 +33,7 @@ use crate::{
     EquinoctialElements, GaussResult, IODParams, JPLEphem, OutfitError,
 };
 
-pub(crate) trait TrajectoryFit {
+pub trait TrajectoryFit {
     /// Extract astrometric uncertainties (RA and DEC) for a set of three observations.
     ///
     /// Given a triplet of observation indices, this function retrieves the corresponding
@@ -273,7 +273,7 @@ pub(crate) trait TrajectoryFit {
     ) -> Result<FitOrbitResult, OutfitError>;
 }
 
-impl TrajectoryFit for Vec<&Observation> {
+impl TrajectoryFit for [&Observation] {
     fn extract_errors(&self, idx_obs: Vector3<usize>) -> (Vector3<Radians>, Vector3<Radians>) {
         let [i, j, k] = [idx_obs[0], idx_obs[1], idx_obs[2]];
         let [c1, c2, c3] = [

@@ -2,6 +2,37 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-06-15
+
+### Added
+
+- **`differential_correction` public entry point**
+  - New standalone `differential_correction` function exposed in the
+    `differential_orbit_correction` module.
+  - Enables calling the differential correction pipeline directly on a single
+    trajectory, outside of the `FitLSQ` trait machinery.
+  - Useful for custom pipeline construction or one-off corrections without
+    going through `ObsDataset`.
+
+- **`OrbitalElements::ref_epoch`**
+  - New method returning the reference epoch of any `OrbitalElements` variant
+    (Keplerian, equinoctial, etc.).
+  - Provides a uniform accessor regardless of the underlying orbit
+    representation.
+
+- **`FitOrbitResult::epoch`**
+  - New method returning the epoch associated with a `FitOrbitResult`.
+  - Mirrors `OrbitalElements::ref_epoch` at the result level for convenience.
+
+### Changed
+
+- **`TrajectoryFit` trait is now public**
+  - Previously a crate-internal trait; now exposed as `pub` for downstream
+    users who need finer control over the fitting pipeline.
+  - **Note**: the exposed methods are low-level and intended for advanced use
+    only. Prefer `FitLSQ` for standard orbit fitting workflows.
+
+
 ## [3.0.0] - 2026-06-03
 
 ### Added

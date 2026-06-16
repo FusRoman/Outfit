@@ -286,7 +286,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for (traj_id, res) in &results {
         match res {
-            Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.normalised_rms()),
+            Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.orbit_quality()),
             Err(e)  => eprintln!("{traj_id} → error: {e}"),
         }
     }
