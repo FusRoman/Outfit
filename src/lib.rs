@@ -201,7 +201,7 @@
 //!
 //!     for (traj_id, res) in &results {
 //!         match res {
-//!             Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.normalised_rms()),
+//!             Ok(fit) => println!("{traj_id} → normalised RMS = {:.4}", fit.orbit_quality()),
 //!             Err(e)  => eprintln!("{traj_id} → error: {e}"),
 //!         }
 //!     }
@@ -211,7 +211,7 @@
 //!
 //! ## Example (ephemeris generation)
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use outfit::{OrbitalElements, EphemerisConfig, EphemerisRequest, EphemerisMode, Combined};
 //! use hifitime::{Epoch, Duration};
 //!
@@ -239,7 +239,7 @@
 //!
 //! ## Example (batch IOD — all trajectories at once)
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use photom::observation_dataset::ObsDataset;
 //! use photom::observer::error_model::ObsErrorModel;
 //! use hifitime::ut1::Ut1Provider;

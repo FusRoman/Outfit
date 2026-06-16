@@ -22,10 +22,9 @@ use crate::{
     cache::OutfitCache,
     constants::FitOrbitResult,
     differential_orbit_correction::{
-        diff_cor::{run_differential_correction, DifferentialCorrectionConfig},
-        obs_fit_data::ObsFitData,
+        diff_cor::DifferentialCorrectionConfig, differential_correction,
     },
-    initial_orbit_determination::{obs_dataset_api::run_iod_on_observations, IODParams},
+    initial_orbit_determination::IODParams,
     FullOrbitResult, JPLEphem, OutfitError,
 };
 use hifitime::ut1::Ut1Provider;
@@ -70,6 +69,11 @@ pub trait FitLSQ {
     ///   orbit.  Trajectories absent from this map (or when the map is `None`)
     ///   will be initialised via IOD.
     /// - `rng` — source of randomness for IOD noise sampling.
+    ///
+    /// # Returns
+    ///
+    /// - Ok(FullOrbitResult) — The successfull fitted orbit or the initial orbit if the differential correction failed
+    /// - Err(OutfitError) — Any errors involved during the fitting process
     ///
     /// # Quality metric — normalised RMS
     ///
@@ -162,7 +166,6 @@ impl FitLSQ for ObsDataset {
                 &corrected_dataset,
                 &cache,
                 jpl,
-                ut1_provider,
                 iod_params,
                 diff_cor_config,
                 initial_orbits,
@@ -191,7 +194,6 @@ fn run_differential_correction_for_trajectory(
     dataset: &ObsDataset,
     cache: &OutfitCache,
     jpl: &JPLEphem,
-    _ut1_provider: &Ut1Provider,
     iod_params: &IODParams,
     diff_cor_config: &DifferentialCorrectionConfig,
     initial_orbits: Option<&FullOrbitResult>,
@@ -206,54 +208,17 @@ fn run_differential_correction_for_trajectory(
     obs_refs.sort_by(|a, b| a.mjd_tt().total_cmp(&b.mjd_tt()));
     let observations: Vec<Observation> = obs_refs.into_iter().cloned().collect();
 
-    // ── Obtain the starting equinoctial elements ──────────────────────────────
-    let initial_equinoctial = match initial_orbits.and_then(|map| map.get(traj_id)) {
-        Some(Ok(orbital_elements)) => {
-            // Caller provided an initial orbit — convert to equinoctial.
-            orbital_elements
-                .orbital_elements()
-                .to_equinoctial()?
-                .as_equinoctial()
-                .ok_or(OutfitError::InvalidConversion(
-                    "Conversion to equinoctial elements failed".to_string(),
-                ))?
-        }
-        Some(Err(_)) | None => {
-            // No initial orbit — run IOD directly on the already-corrected
-            // observations, reusing the cache that was built for the full
-            // dataset.  This avoids reconstructing an ObsDataset and
-            // rebuilding the cache.
-            let iod_result = run_iod_on_observations(&observations, cache, jpl, iod_params, rng)?;
-            iod_result
-                .orbital_elements()
-                .to_equinoctial()?
-                .as_equinoctial()
-                .ok_or(OutfitError::InvalidConversion(
-                    "Conversion to equinoctial elements failed".to_string(),
-                ))?
-        }
-    };
+    let orbit = initial_orbits
+        .and_then(|map| map.get(traj_id))
+        .and_then(|r| r.as_ref().ok());
 
-    // ── Build per-observation fit data from the error-model uncertainties ─────
-    let obs_fit_data: Vec<ObsFitData> = observations
-        .iter()
-        .map(|obs| ObsFitData::new(obs.equ_coord().ra_error, obs.equ_coord().dec_error))
-        .collect();
-
-    // ── Run the differential-correction loop ──────────────────────────────────
-    let dc_output = run_differential_correction(
-        &observations,
-        &obs_fit_data,
-        &initial_equinoctial,
+    differential_correction(
+        observations.as_slice(),
         cache,
         jpl,
+        iod_params,
         diff_cor_config,
-    )?;
-
-    // ── Package the result ────────────────────────────────────────────────────
-    let normalised_rms = dc_output.normalised_rms;
-    Ok(FitOrbitResult::DifferentialCorrection((
-        dc_output.into(),
-        normalised_rms,
-    )))
+        orbit,
+        rng,
+    )
 }

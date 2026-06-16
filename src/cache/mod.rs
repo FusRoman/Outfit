@@ -89,7 +89,8 @@ pub struct OutfitCache {
     /// Per-observation centric cache. Length equals the number of observations
     /// in the dataset. Indexed by [`ObsIndex`].
     observer_centric: CentricObserverCache,
-    /// Per-observer body-fixed cache. Indexed by [`ObserverId`].
+    /// Per-observer body-fixed cache. Lenght equals the number of observers
+    /// in the dataset. Indexed by [`ObserverId`].
     observer_fixed: BodyFixedObserverCache,
 }
 

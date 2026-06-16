@@ -130,17 +130,30 @@ pub type IODRMS = f64;
 /// Type alias for the chi-squared value of a fit, used in differential correction.
 pub type Chi2 = f64;
 
+#[derive(Clone, Debug)]
 pub enum FitOrbitResult {
     IODGauss((GaussResult, IODRMS)),
     DifferentialCorrection((OrbitalElements, Chi2)),
 }
 
 impl FitOrbitResult {
+    pub fn epoch(&self) -> f64 {
+        match self {
+            FitOrbitResult::IODGauss((gauss_result, _)) => gauss_result.get_orbit().ref_epoch(),
+            FitOrbitResult::DifferentialCorrection((orbit, _)) => orbit.ref_epoch(),
+        }
+    }
+
     /// Returns a scalar measure of orbit quality for this fit result.
     /// For IODGauss, this is the RMS of normalized residuals; for DifferentialCorrection, this is the chi-squared value.
     ///
     /// # Returns
     /// - `f64` — a single scalar representing the fit quality.
+    ///
+    /// # Notes
+    ///
+    /// - If IODGauss — rms score
+    /// - If DifferentialCorrection — chi2 score
     pub fn orbit_quality(&self) -> f64 {
         match self {
             FitOrbitResult::IODGauss((_, rms)) => *rms,
