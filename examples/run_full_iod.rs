@@ -59,6 +59,8 @@ fn outfit_error_label(err: &OutfitError) -> &'static str {
         OutfitError::DifferentialCorrectionFailed(_) => "DifferentialCorrectionFailed",
         OutfitError::EphemerisBodyNotSupported(_) => "EphemerisBodyNotSupported",
         OutfitError::NBodyPropagationFailed(_) => "NBodyPropagationFailed",
+        OutfitError::DegenerateState(_) => "DegenerateState",
+        OutfitError::KeplerConvergence => "KeplerConvergence",
     }
 }
 
