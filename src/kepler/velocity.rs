@@ -3,11 +3,11 @@
 use nalgebra::Vector3;
 
 use crate::constants::GAUSS_GRAV_SQUARED;
+use crate::kepler::params::SolverType;
 use crate::orb_elem::eccentricity_control;
 use crate::outfit_errors::OutfitError;
 
 use super::params::UniversalKeplerParams;
-use super::solver::solve_kepuni_with_guess;
 
 /// Apply velocity correction using Lagrange f–g coefficients.
 ///
@@ -124,13 +124,17 @@ pub fn velocity_correction_with_guess(
         mu: gravitational_parameter,
         alpha: 2.0 * specific_orbital_energy, // specific orbital energy -> alpha
         e0: eccentricity,
+        solver_type: SolverType::NewtonRaphson {
+            convergency: Some(eps),
+            psi_guess: chi_guess,
+            max_iter_prelim_kepuni: None,
+        },
     };
 
     // Step 3: solve the universal Kepler equation (with optional chi warm-start).
-    let (universal_anomaly, _, _, s2, s3) = solve_kepuni_with_guess(&params, Some(eps), chi_guess)
-        .ok_or(OutfitError::VelocityCorrectionError(
-            "Universal Kepler solver did not converge".into(),
-        ))?;
+    let kepler_solution = params.solve()?;
+
+    let (_, _, s2, s3) = kepler_solution.as_raw_stumpff();
 
     // Step 4: compute the Lagrange coefficients f and g.
     let f_coefficient = 1.0 - (gravitational_parameter * s2) / radius_at_t2;
@@ -146,7 +150,7 @@ pub fn velocity_correction_with_guess(
         corrected_velocity,
         f_coefficient,
         g_coefficient,
-        universal_anomaly,
+        kepler_solution.universal_anomaly,
     ))
 }
 

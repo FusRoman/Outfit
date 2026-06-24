@@ -2,11 +2,11 @@
 
 use nalgebra::Vector3;
 
+use crate::kepler::params::SolverType;
 use crate::outfit_errors::OutfitError;
 use crate::GAUSS_GRAV;
 
 use super::params::UniversalKeplerParams;
-use super::solver::solve_kepuni_with_guess;
 
 /// Output of the universal-variable two-body propagator.
 pub struct UniversalPropagResult {
@@ -76,7 +76,7 @@ pub struct UniversalPropagResult {
 /// * `convergency` – Optional solver tolerance for [`solve_kepuni_with_guess`](crate::kepler::solve_kepuni_with_guess).
 ///   Defaults to $100 \varepsilon$ if `None`.
 /// * `psi_guess` – Optional warm-start for the universal anomaly $\psi$.
-///   Pass `None` to use the heuristic from [`prelim_kepuni`](crate::kepler::prelim_kepuni).
+///   Pass `None` to use the heuristic from [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni).
 ///
 /// Return
 /// ------
@@ -103,8 +103,7 @@ pub fn propagate_universal(
     velocity: &Vector3<f64>,
     t0: f64,
     t1: f64,
-    convergency: Option<f64>,
-    psi_guess: Option<f64>,
+    solver_type: SolverType,
 ) -> Result<UniversalPropagResult, OutfitError> {
     let gravitational_parameter = GAUSS_GRAV * GAUSS_GRAV;
 
@@ -127,10 +126,12 @@ pub fn propagate_universal(
         alpha: energy_parameter,
         dt: time_of_flight,
         e0: eccentricity,
+        solver_type,
     };
 
-    let (_, s0, s1, s2, _) = solve_kepuni_with_guess(&params, convergency, psi_guess)
-        .ok_or_else(|| OutfitError::KeplerConvergence)?;
+    let kepler_solution = params.solve()?;
+
+    let (s0, s1, s2, _) = kepler_solution.as_raw_stumpff();
 
     let propagated_radius =
         initial_radius * s0 + radial_velocity_proxy * s1 + gravitational_parameter * s2;

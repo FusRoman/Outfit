@@ -11,7 +11,7 @@
 //!   via [`s_funct`](crate::kepler::s_funct),
 //! - Practical **preliminary solvers** for the universal anomaly ψ in both
 //!   elliptic and hyperbolic regimes ([`prelim_elliptic`](crate::kepler::prelim_elliptic), [`prelim_hyperbolic`](crate::kepler::prelim_hyperbolic),
-//!   wrapped by [`prelim_kepuni`](crate::kepler::prelim_kepuni)),
+//!   wrapped by [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni)),
 //! - A Newton–Raphson **universal Kepler solver** [`solve_kepuni`](crate::kepler::solve_kepuni) that returns
 //!   ψ and the Stumpff tuple (s0, s1, s2, s3),
 //! - A high‑level **velocity correction** routine [`velocity_correction`](crate::kepler::velocity_correction) that
@@ -74,7 +74,7 @@
 //! - [`UniversalKeplerParams`](crate::kepler::UniversalKeplerParams): bundle of inputs `(dt, r0, sig0, mu, alpha, e0)`.
 //! - [`s_funct`](crate::kepler::s_funct): compute `(s0, s1, s2, s3)` and satisfy `s0 = 1 + α s2`, `s1 = ψ + α s3`.
 //! - [`principal_angle`](crate::kepler::principal_angle), [`angle_diff`](crate::kepler::angle_diff): angle normalization helpers.
-//! - [`prelim_kepuni`](crate::kepler::prelim_kepuni): dispatch to [`prelim_elliptic`](crate::kepler::prelim_elliptic) / [`prelim_hyperbolic`](crate::kepler::prelim_hyperbolic) for ψ guess.
+//! - [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni): dispatch to [`prelim_elliptic`](crate::kepler::prelim_elliptic) / [`prelim_hyperbolic`](crate::kepler::prelim_hyperbolic) for ψ guess.
 //! - [`solve_kepuni`](crate::kepler::solve_kepuni): universal Kepler solver → `(ψ, s0, s1, s2, s3)`.
 //! - [`velocity_correction`](crate::kepler::velocity_correction): apply f–g to update velocity `(v₂_corrected, f, g)`.
 //!
@@ -108,7 +108,7 @@
 //! ### Solve universal Kepler for ψ and Stumpff functions
 //! ```rust, no_run
 //! use nalgebra::Vector3;
-//! use outfit::kepler::{UniversalKeplerParams, solve_kepuni};
+//! use outfit::kepler::{UniversalKeplerParams, solve_kepuni, UniversalKeplerSolution, SolverType};
 //!
 //! let params = UniversalKeplerParams {
 //!     dt: 0.25,          // days
@@ -117,9 +117,14 @@
 //!     mu: 0.00029591220828559115, // GAUSS_GRAV^2
 //!     alpha: -1.0,       // elliptic
 //!     e0: 0.1,
+//!     solver_type: SolverType::NewtonRaphson {
+//!         convergency: Some(1e-10),
+//!         psi_guess: None,
+//!         max_iter_prelim_kepuni: None
+//!     }
 //! };
 //!
-//! let (psi, s0, s1, s2, s3) = solve_kepuni(&params, None)
+//! let kepler_solution: UniversalKeplerSolution = solve_kepuni(&params, None)
 //!     .expect("converged");
 //! // Use (psi, s0..s3) to build f, g or propagate state.
 //! ```
@@ -143,25 +148,28 @@
 //! ------------
 //! * [`velocity_correction`](crate::kepler::velocity_correction) – Lagrange‑based velocity update.
 //! * [`solve_kepuni`](crate::kepler::solve_kepuni) – Universal Kepler solver returning (ψ, s0..s3).
-//! * [`prelim_elliptic`](crate::kepler::prelim_elliptic), [`prelim_hyperbolic`](crate::kepler::prelim_hyperbolic), [`prelim_kepuni`](crate::kepler::prelim_kepuni) – Initial guesses for ψ.
+//! * [`prelim_elliptic`](crate::kepler::prelim_elliptic), [`prelim_hyperbolic`](crate::kepler::prelim_hyperbolic), [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni) – Initial guesses for ψ.
 //! * [`s_funct`](crate::kepler::s_funct) – Stumpff‑like functions and invariants.
 //! * [`eccentricity_control`](crate::orb_elem::eccentricity_control) – Eccentricity and energy checks.
 //! * [`GAUSS_GRAV`](crate::constants::GAUSS_GRAV), [`DPI`](crate::constants::DPI) – Constants.
 
 mod angles;
+mod brent_dekker_solver;
+mod newton_solver;
 mod orbit_type;
 mod params;
 mod preliminary_guess;
 mod propagation;
-mod solver;
 mod stumpff;
+mod universal_kepler_solution;
 mod velocity;
 
 pub use angles::{angle_diff, principal_angle};
+pub use newton_solver::{solve_kepuni, solve_kepuni_with_guess};
 pub use orbit_type::OrbitType;
-pub use params::UniversalKeplerParams;
-pub use preliminary_guess::{prelim_elliptic, prelim_hyperbolic, prelim_kepuni};
+pub use params::{SolverType, UniversalKeplerParams};
+pub use preliminary_guess::{prelim_elliptic, prelim_hyperbolic};
 pub use propagation::{propagate_universal, UniversalPropagResult};
-pub use solver::{solve_kepuni, solve_kepuni_with_guess};
 pub use stumpff::s_funct;
+pub use universal_kepler_solution::UniversalKeplerSolution;
 pub use velocity::{velocity_correction, velocity_correction_with_guess};

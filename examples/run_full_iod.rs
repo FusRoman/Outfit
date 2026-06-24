@@ -60,7 +60,8 @@ fn outfit_error_label(err: &OutfitError) -> &'static str {
         OutfitError::EphemerisBodyNotSupported(_) => "EphemerisBodyNotSupported",
         OutfitError::NBodyPropagationFailed(_) => "NBodyPropagationFailed",
         OutfitError::DegenerateState(_) => "DegenerateState",
-        OutfitError::KeplerConvergence => "KeplerConvergence",
+        OutfitError::NewtonRaphsonKeplerConvergence => "KeplerConvergence",
+        OutfitError::BrentDekkerKeplerConvergence => "BrettDekkerKeplerConvergence",
     }
 }
 
