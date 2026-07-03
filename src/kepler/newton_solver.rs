@@ -150,17 +150,13 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 /// * [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni) – Heuristic initial guess.
 pub fn solve_kepuni_with_guess(
     params: &UniversalKeplerParams,
-    convergency: Option<f64>,
     psi_guess: Option<f64>,
 ) -> Option<UniversalKeplerSolution> {
-    let step_tolerance = convergency.unwrap_or(100.0 * f64::EPSILON);
     let residual_tolerance = compute_residual_tolerance(params.dt);
-
-    params.reject_parabolic_orbit()?;
 
     let psi_initial = psi_guess.map_or_else(|| params.prelim_kepuni(), Some)?;
 
-    run_newton(psi_initial, params, step_tolerance, residual_tolerance)
+    run_newton(psi_initial, params, residual_tolerance)
 }
 
 /// Solve the universal Kepler equation without a warm-start guess.
@@ -189,11 +185,8 @@ pub fn solve_kepuni_with_guess(
 /// # See also
 ///
 /// * [`solve_kepuni_with_guess`] – Extended variant with warm-start support.
-pub fn solve_kepuni(
-    params: &UniversalKeplerParams,
-    convergency: Option<f64>,
-) -> Option<UniversalKeplerSolution> {
-    solve_kepuni_with_guess(params, convergency, None)
+pub fn solve_kepuni(params: &UniversalKeplerParams) -> Option<UniversalKeplerSolution> {
+    solve_kepuni_with_guess(params, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +234,6 @@ fn kepler_residual_and_derivative(
 fn run_newton(
     psi_initial: f64,
     params: &UniversalKeplerParams,
-    step_tolerance: f64,
     residual_tolerance: f64,
 ) -> Option<UniversalKeplerSolution> {
     let mut psi = psi_initial;
@@ -268,7 +260,13 @@ fn run_newton(
 
         psi = psi_candidate;
 
-        check_step_convergence(psi, newton_step, stumpff, step_tolerance, params.alpha)
+        check_step_convergence(
+            psi,
+            newton_step,
+            stumpff,
+            params.solver_type.params.convergency,
+            params.alpha,
+        )
     })
 }
 

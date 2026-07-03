@@ -661,8 +661,6 @@ fn test_diff_cor_nbody_nonregression() {
             }),
         };
 
-        println!("{:?}", orbit.orbital_elements());
-
         assert!(
             approx_equal(&expected, orbit.orbital_elements(), tol),
             "8467 N-body orbital elements differ from oracle beyond tolerance {tol}"

@@ -2,7 +2,9 @@
 
 use crate::{
     kepler::{
-        brent_dekker_solver::solve_kepuni_brent_dekker, prelim_elliptic, prelim_hyperbolic,
+        brent_dekker_solver::solve_kepuni_brent_dekker,
+        prelim_elliptic, prelim_hyperbolic,
+        prelim_kepler::prelim_parabolic::{prelim_parabolic, ParabolicPrelimMethod},
         solve_kepuni_with_guess, UniversalKeplerSolution,
     },
     OutfitError,
@@ -10,22 +12,55 @@ use crate::{
 
 use super::orbit_type::OrbitType;
 
+/// Common tuning parameters shared by all Kepler equation solvers.
 #[derive(Debug, Clone, Copy)]
-pub enum SolverType {
-    NewtonRaphson {
-        convergency: Option<f64>,
-        psi_guess: Option<f64>,
-        max_iter_prelim_kepuni: Option<usize>,
-    },
-    BrentDecker {
-        convergency: Option<f64>,
-        max_iter_prelim_kepuni: Option<usize>,
-    },
-    Auto {
-        convergency: Option<f64>,
-        psi_guess: Option<f64>,
-        max_iter_prelim_kepuni: Option<usize>,
-    },
+pub struct SolverParams {
+    /// Convergence threshold on the solved variable.
+    pub convergency: f64,
+    /// Initial guess for the universal anomaly $\psi$.
+    pub psi_guess: Option<f64>,
+    /// Maximum number of iterations for the preliminary `kepuni` step.
+    pub max_iter_prelim_kepuni: usize,
+    /// Choose between the exact analytical method or Newton-Raphson minimization
+    pub parabolic_solving_method: ParabolicPrelimMethod,
+}
+
+impl Default for SolverParams {
+    fn default() -> Self {
+        Self {
+            convergency: 100.0 * f64::EPSILON,
+            psi_guess: None,
+            max_iter_prelim_kepuni: 20,
+            parabolic_solving_method: ParabolicPrelimMethod::Cardano,
+        }
+    }
+}
+
+/// Selects which root-finding algorithm is used to solve Kepler's equation.
+#[derive(Debug, Clone, Copy)]
+pub enum SolverKind {
+    /// Newton-Raphson iteration.
+    NewtonRaphson,
+    /// Brent-Decker's bracketing method.
+    BrentDecker,
+    /// Automatically selects between available solvers.
+    Auto,
+}
+
+/// Full solver configuration: algorithm choice plus its tuning parameters.
+#[derive(Debug, Clone, Copy)]
+pub struct SolverType {
+    pub kind: SolverKind,
+    pub params: SolverParams,
+}
+
+impl Default for SolverType {
+    fn default() -> Self {
+        Self {
+            kind: SolverKind::NewtonRaphson,
+            params: Default::default(),
+        }
+    }
 }
 
 /// Parameters required to solve the universal Kepler equation.
@@ -81,23 +116,16 @@ impl UniversalKeplerParams {
     }
 
     pub fn solve(&self) -> Result<UniversalKeplerSolution, OutfitError> {
-        match self.solver_type {
-            SolverType::NewtonRaphson {
-                convergency,
-                psi_guess,
-                ..
-            } => solve_kepuni_with_guess(self, convergency, psi_guess)
-                .ok_or(OutfitError::NewtonRaphsonKeplerConvergence),
-            SolverType::BrentDecker { convergency, .. } => {
-                solve_kepuni_brent_dekker(self, convergency)
-                    .ok_or(OutfitError::BrentDekkerKeplerConvergence)
+        match self.solver_type.kind {
+            SolverKind::NewtonRaphson => {
+                solve_kepuni_with_guess(self, self.solver_type.params.psi_guess)
+                    .ok_or(OutfitError::NewtonRaphsonKeplerConvergence)
             }
-            SolverType::Auto {
-                convergency,
-                psi_guess,
-                ..
-            } => solve_kepuni_with_guess(self, convergency, psi_guess)
-                .or_else(|| solve_kepuni_brent_dekker(self, convergency))
+            SolverKind::BrentDecker => {
+                solve_kepuni_brent_dekker(self).ok_or(OutfitError::BrentDekkerKeplerConvergence)
+            }
+            SolverKind::Auto => solve_kepuni_with_guess(self, self.solver_type.params.psi_guess)
+                .or_else(|| solve_kepuni_brent_dekker(self))
                 .ok_or(OutfitError::BrentDekkerKeplerConvergence),
         }
     }
@@ -121,9 +149,9 @@ impl UniversalKeplerParams {
     /// The tolerance passed to the preliminary Newton–Raphson sub-iterations is
     /// extracted from [`SolverType`]:
     ///
-    /// - [`SolverType::NewtonRaphson`] and [`SolverType::Auto`] — uses the
+    /// - [`SolverKind::NewtonRaphson`] and [`SolverKind::Auto`] — uses the
     ///   `convergency` field directly, defaulting to $100\varepsilon$ if `None`.
-    /// - [`SolverType::BrentDecker`] — same extraction, since the preliminary
+    /// - [`SolverKind::BrentDecker`] — same extraction, since the preliminary
     ///   guess is solver-agnostic.
     ///
     /// # Return
@@ -144,30 +172,10 @@ impl UniversalKeplerParams {
     /// * [`prelim_hyperbolic`] — hyperbolic branch.
     /// * [`UniversalKeplerParams::solve`] — main solver entry point.
     pub fn prelim_kepuni(&self) -> Option<f64> {
-        let (convergency, max_iter) = match self.solver_type {
-            SolverType::NewtonRaphson {
-                convergency,
-                max_iter_prelim_kepuni,
-                ..
-            }
-            | SolverType::BrentDecker {
-                convergency,
-                max_iter_prelim_kepuni,
-            }
-            | SolverType::Auto {
-                convergency,
-                max_iter_prelim_kepuni,
-                ..
-            } => (
-                convergency.unwrap_or(100.0 * f64::EPSILON),
-                max_iter_prelim_kepuni.unwrap_or(20),
-            ),
-        };
-
         match self.orbit_type() {
-            OrbitType::Elliptic => Some(prelim_elliptic(self, convergency, max_iter)),
-            OrbitType::Hyperbolic => Some(prelim_hyperbolic(self, convergency, max_iter)),
-            OrbitType::Parabolic => None,
+            OrbitType::Elliptic => Some(prelim_elliptic(self)),
+            OrbitType::Hyperbolic => Some(prelim_hyperbolic(self)),
+            OrbitType::Parabolic => Some(prelim_parabolic(self)),
         }
     }
 }
@@ -201,7 +209,7 @@ mod kepler_params_tests {
     ///
     /// Uses a semi-major axis `a` (AU) to derive `alpha` and a nearly-zero
     /// radial velocity proxy.
-    fn elliptic_params(dt: f64, a: f64, solver: SolverType) -> UniversalKeplerParams {
+    fn elliptic_params(dt: f64, a: f64, kind: SolverKind) -> UniversalKeplerParams {
         // alpha = -mu / a  (twice specific orbital energy for elliptic orbit)
         let alpha = -MU_SUN / a;
         // r0 ~ a for a near-circular orbit.
@@ -215,7 +223,10 @@ mod kepler_params_tests {
             mu: MU_SUN,
             alpha,
             e0: 0.01,
-            solver_type: solver,
+            solver_type: SolverType {
+                kind,
+                params: SolverParams::default(),
+            },
         }
     }
 
@@ -223,7 +234,7 @@ mod kepler_params_tests {
     ///
     /// Uses a characteristic energy $C_3 > 0$ (AU²/day²) so that
     /// $\alpha = C_3 > 0$.
-    fn hyperbolic_params(dt: f64, c3: f64, solver: SolverType) -> UniversalKeplerParams {
+    fn hyperbolic_params(dt: f64, c3: f64, kind: SolverKind) -> UniversalKeplerParams {
         let alpha = c3; // positive energy -> hyperbolic
         let r0 = 1.5; // AU
         let sig0 = 0.001;
@@ -234,7 +245,10 @@ mod kepler_params_tests {
             mu: MU_SUN,
             alpha,
             e0: 1.5,
-            solver_type: solver,
+            solver_type: SolverType {
+                kind,
+                params: SolverParams::default(),
+            },
         }
     }
 
@@ -247,11 +261,7 @@ mod kepler_params_tests {
         let params = elliptic_params(
             10.0, // 10 days
             1.0,  // 1 AU semi-major axis (Earth-like)
-            SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
+            SolverKind::NewtonRaphson,
         );
         let sol = params
             .solve()
@@ -266,15 +276,7 @@ mod kepler_params_tests {
     #[test]
     fn newton_solves_elliptic_full_orbit() {
         // Propagate for approximately one full period of an Earth-like orbit (~365 days).
-        let params = elliptic_params(
-            365.0,
-            1.0,
-            SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = elliptic_params(365.0, 1.0, SolverKind::NewtonRaphson);
         let sol = params
             .solve()
             .expect("Newton should converge on full elliptic orbit");
@@ -288,15 +290,7 @@ mod kepler_params_tests {
     #[test]
     fn newton_solves_elliptic_negative_dt() {
         // Backward propagation: dt < 0 should be handled symmetrically.
-        let params = elliptic_params(
-            -30.0,
-            1.0,
-            SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = elliptic_params(-30.0, 1.0, SolverKind::NewtonRaphson);
         let sol = params
             .solve()
             .expect("Newton should converge for negative dt");
@@ -308,11 +302,7 @@ mod kepler_params_tests {
         let params = hyperbolic_params(
             5.0,
             1e-5, // small positive C3 -> mildly hyperbolic
-            SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
+            SolverKind::NewtonRaphson,
         );
         let sol = params
             .solve()
@@ -326,22 +316,16 @@ mod kepler_params_tests {
 
     #[test]
     fn newton_warm_start_consistent_with_cold_start() {
-        let mut cold = elliptic_params(
-            50.0,
-            2.0,
-            SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let mut cold = elliptic_params(50.0, 2.0, SolverKind::NewtonRaphson);
         let sol_cold = cold.solve().expect("cold start should converge");
 
         // Feed the cold-start solution as a warm-start guess.
-        cold.solver_type = SolverType::NewtonRaphson {
-            convergency: None,
-            psi_guess: Some(sol_cold.universal_anomaly),
-            max_iter_prelim_kepuni: None,
+        cold.solver_type = SolverType {
+            kind: SolverKind::NewtonRaphson,
+            params: SolverParams {
+                psi_guess: Some(sol_cold.universal_anomaly),
+                ..Default::default()
+            },
         };
         let sol_warm = cold.solve().expect("warm start should converge");
 
@@ -352,41 +336,13 @@ mod kepler_params_tests {
         );
     }
 
-    #[test]
-    fn newton_returns_error_for_parabolic() {
-        let params = UniversalKeplerParams {
-            dt: 10.0,
-            r0: 1.0,
-            sig0: 0.0,
-            mu: MU_SUN,
-            alpha: 0.0, // exactly parabolic
-            e0: 1.0,
-            solver_type: SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None,
-            },
-        };
-        assert!(
-            params.solve().is_err(),
-            "parabolic orbit should return an error"
-        );
-    }
-
     // -----------------------------------------------------------------------
     // Unit tests — Brent–Dekker
     // -----------------------------------------------------------------------
 
     #[test]
     fn brent_solves_elliptic_short_arc() {
-        let params = elliptic_params(
-            10.0,
-            1.0,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = elliptic_params(10.0, 1.0, SolverKind::BrentDecker);
         let sol = params
             .solve()
             .expect("Brent should converge on elliptic short arc");
@@ -399,14 +355,7 @@ mod kepler_params_tests {
 
     #[test]
     fn brent_solves_elliptic_full_orbit() {
-        let params = elliptic_params(
-            365.0,
-            1.0,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = elliptic_params(365.0, 1.0, SolverKind::BrentDecker);
         let sol = params
             .solve()
             .expect("Brent should converge on full elliptic orbit");
@@ -415,14 +364,7 @@ mod kepler_params_tests {
 
     #[test]
     fn brent_solves_elliptic_negative_dt() {
-        let params = elliptic_params(
-            -30.0,
-            1.0,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = elliptic_params(-30.0, 1.0, SolverKind::BrentDecker);
         let sol = params
             .solve()
             .expect("Brent should converge for negative dt");
@@ -431,14 +373,7 @@ mod kepler_params_tests {
 
     #[test]
     fn brent_solves_hyperbolic() {
-        let params = hyperbolic_params(
-            5.0,
-            1e-5,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        );
+        let params = hyperbolic_params(5.0, 1e-5, SolverKind::BrentDecker);
         let sol = params
             .solve()
             .expect("Brent should converge on hyperbolic orbit");
@@ -447,23 +382,6 @@ mod kepler_params_tests {
             "residual: {}",
             kepler_residual(&sol, &params)
         );
-    }
-
-    #[test]
-    fn brent_returns_error_for_parabolic() {
-        let params = UniversalKeplerParams {
-            dt: 10.0,
-            r0: 1.0,
-            sig0: 0.0,
-            mu: MU_SUN,
-            alpha: 0.0,
-            e0: 1.0,
-            solver_type: SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        };
-        assert!(params.solve().is_err());
     }
 
     // -----------------------------------------------------------------------
@@ -476,17 +394,10 @@ mod kepler_params_tests {
 
     fn assert_solvers_consistent(params_template: UniversalKeplerParams) {
         let mut newton_params = params_template;
-        newton_params.solver_type = SolverType::NewtonRaphson {
-            convergency: None,
-            psi_guess: None,
-            max_iter_prelim_kepuni: None,
-        };
+        newton_params.solver_type.kind = SolverKind::NewtonRaphson;
 
         let mut brent_params = params_template;
-        brent_params.solver_type = SolverType::BrentDecker {
-            convergency: None,
-            max_iter_prelim_kepuni: None,
-        };
+        brent_params.solver_type.kind = SolverKind::BrentDecker;
 
         let sol_newton = newton_params.solve().expect("Newton must converge");
         let sol_brent = brent_params.solve().expect("Brent must converge");
@@ -511,63 +422,28 @@ mod kepler_params_tests {
 
     #[test]
     fn solvers_consistent_elliptic_short_arc() {
-        assert_solvers_consistent(elliptic_params(
-            10.0,
-            1.0,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        ));
+        assert_solvers_consistent(elliptic_params(10.0, 1.0, SolverKind::BrentDecker));
     }
 
     #[test]
     fn solvers_consistent_elliptic_long_arc() {
-        assert_solvers_consistent(elliptic_params(
-            200.0,
-            2.5,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        ));
+        assert_solvers_consistent(elliptic_params(200.0, 2.5, SolverKind::BrentDecker));
     }
 
     #[test]
     fn solvers_consistent_elliptic_negative_dt() {
-        assert_solvers_consistent(elliptic_params(
-            -45.0,
-            1.5,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        ));
+        assert_solvers_consistent(elliptic_params(-45.0, 1.5, SolverKind::BrentDecker));
     }
 
     #[test]
     fn solvers_consistent_hyperbolic() {
-        assert_solvers_consistent(hyperbolic_params(
-            5.0,
-            1e-5,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        ));
+        assert_solvers_consistent(hyperbolic_params(5.0, 1e-5, SolverKind::BrentDecker));
     }
 
     #[test]
     fn solvers_consistent_outer_solar_system_elliptic() {
         // Jupiter-like orbit: a ~ 5.2 AU, dt ~ 1000 days.
-        assert_solvers_consistent(elliptic_params(
-            1000.0,
-            5.2,
-            SolverType::BrentDecker {
-                convergency: None,
-                max_iter_prelim_kepuni: None,
-            },
-        ));
+        assert_solvers_consistent(elliptic_params(1000.0, 5.2, SolverKind::BrentDecker));
     }
 
     // -----------------------------------------------------------------------
@@ -600,11 +476,7 @@ mod kepler_params_tests {
         fn proptest_newton_elliptic_residual(
             (a, dt) in elliptic_strategy()
         ) {
-            let params = elliptic_params(dt, a, SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None
-            });
+            let params = elliptic_params(dt, a, SolverKind::NewtonRaphson);
             if let Ok(sol) = params.solve() {
                 prop_assert!(
                     kepler_residual(&sol, &params) < 1e-9,
@@ -623,7 +495,7 @@ mod kepler_params_tests {
         fn proptest_brent_elliptic_residual(
             (a, dt) in elliptic_strategy()
         ) {
-            let params = elliptic_params(dt, a, SolverType::BrentDecker { convergency: None, max_iter_prelim_kepuni: None });
+            let params = elliptic_params(dt, a, SolverKind::BrentDecker);
             if let Ok(sol) = params.solve() {
                 prop_assert!(
                     kepler_residual(&sol, &params) < 1e-9,
@@ -639,13 +511,9 @@ mod kepler_params_tests {
         fn proptest_solvers_consistent_elliptic(
             (a, dt) in elliptic_strategy()
         ) {
-            let newton_params = elliptic_params(dt, a, SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None
-            });
+            let newton_params = elliptic_params(dt, a, SolverKind::NewtonRaphson);
             let mut brent_params = newton_params;
-            brent_params.solver_type = SolverType::BrentDecker { convergency: None, max_iter_prelim_kepuni: None };
+            brent_params.solver_type.kind = SolverKind::BrentDecker;
 
             if let (Ok(sol_n), Ok(sol_b)) = (newton_params.solve(), brent_params.solve()) {
                 prop_assert!(
@@ -666,13 +534,9 @@ mod kepler_params_tests {
         fn proptest_solvers_consistent_hyperbolic(
             (c3, dt) in hyperbolic_strategy()
         ) {
-            let newton_params = hyperbolic_params(dt, c3, SolverType::NewtonRaphson {
-                convergency: None,
-                psi_guess: None,
-                max_iter_prelim_kepuni: None
-            });
+            let newton_params = hyperbolic_params(dt, c3, SolverKind::NewtonRaphson);
             let mut brent_params = newton_params;
-            brent_params.solver_type = SolverType::BrentDecker { convergency: None, max_iter_prelim_kepuni: None };
+            brent_params.solver_type.kind = SolverKind::BrentDecker;
 
             if let (Ok(sol_n), Ok(sol_b)) = (newton_params.solve(), brent_params.solve()) {
                 prop_assert!(
@@ -701,12 +565,238 @@ mod kepler_params_tests {
                 mu: MU_SUN,
                 alpha,
                 e0: 0.5,
-                solver_type: SolverType::NewtonRaphson { convergency: None, psi_guess: None, max_iter_prelim_kepuni: None },
+                solver_type: SolverType::default(),
             };
             match params.orbit_type() {
                 OrbitType::Elliptic  => prop_assert!(alpha < 0.0),
                 OrbitType::Hyperbolic => prop_assert!(alpha > 0.0),
                 OrbitType::Parabolic  => prop_assert!(alpha == 0.0),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_prelim_kepuni {
+
+    use super::*;
+
+    const MU: f64 = 1.0;
+    const CONTR: f64 = 1e-12;
+
+    fn make_params(
+        dt: f64,
+        r0: f64,
+        sig0: f64,
+        mu: f64,
+        alpha: f64,
+        e0: f64,
+    ) -> UniversalKeplerParams {
+        UniversalKeplerParams {
+            dt,
+            r0,
+            sig0,
+            mu,
+            alpha,
+            e0,
+            solver_type: SolverType {
+                params: SolverParams {
+                    convergency: CONTR,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn test_returns_none_for_alpha_zero() {
+        let params = make_params(1.0, 1.0, 0.0, MU, 0.0, 0.1);
+        let res = params.prelim_kepuni().unwrap();
+        assert_eq!(res, 0.8846222003969053);
+    }
+
+    #[test]
+    fn test_elliptic_small_eccentricity() {
+        let params = make_params(0.5, 1.0, 0.1, MU, -1.0, 1e-8);
+        let result = params.prelim_kepuni();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_finite());
+    }
+
+    #[test]
+    fn test_elliptic_high_eccentricity() {
+        let params = make_params(0.1, 0.5, 0.2, MU, -1.0, 0.8);
+        let result = params.prelim_kepuni();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_finite());
+    }
+
+    #[test]
+    fn test_hyperbolic_case() {
+        let params = make_params(0.3, 2.0, -0.1, MU, 1.0, 1.5);
+        let result = params.prelim_kepuni();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_finite());
+    }
+
+    #[test]
+    fn test_negative_sig0_changes_direction() {
+        let alpha = -1.0;
+        let r0 = 1.0;
+        let e0 = 0.5;
+        let dt = 0.25;
+
+        let params_pos = make_params(dt, r0, 0.1, MU, alpha, e0);
+        let params_neg = make_params(dt, r0, -0.1, MU, alpha, e0);
+
+        let psi_pos = params_pos.prelim_kepuni().unwrap();
+        let psi_neg = params_neg.prelim_kepuni().unwrap();
+
+        assert!(
+            (psi_pos - psi_neg).abs() > 1e-8,
+            "psi did not change significantly when changing sig0 sign: {psi_pos} vs {psi_neg}"
+        );
+    }
+
+    #[test]
+    fn test_stability_long_dt() {
+        let params = make_params(50.0, 1.0, 0.1, MU, -1.0, 0.5);
+        let result = params.prelim_kepuni();
+        assert!(result.is_some());
+        assert!(result.unwrap().is_finite());
+    }
+
+    #[test]
+    fn test_edge_cosine_limits() {
+        let params = make_params(0.25, 2.0, 0.1, MU, -1.0, 0.1);
+        let result = params.prelim_kepuni();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_prelim_kepuni_real_data() {
+        let dt = -20.765849999996135;
+        let r0 = 1.3803870211345761;
+        let sig0 = 3.701_354_484_003_874_8E-3;
+        let mu = 2.959_122_082_855_911_5E-4;
+        let alpha = -1.642_158_377_771_140_7E-4;
+        let e0 = 0.283_599_599_137_344_5;
+
+        let params = UniversalKeplerParams {
+            dt,
+            r0,
+            sig0,
+            mu,
+            alpha,
+            e0,
+            solver_type: SolverType::default(),
+        };
+        let psi = params.prelim_kepuni().unwrap();
+        assert_eq!(psi, -15.327414893041848);
+
+        let params2 = UniversalKeplerParams {
+            alpha: 1.642_158_377_771_140_7E-4,
+            ..params
+        };
+        let psi = params2.prelim_kepuni().unwrap();
+        assert_eq!(psi, -73.1875935362658);
+
+        let params3 = UniversalKeplerParams {
+            alpha: 0.0,
+            ..params
+        };
+        let psi = params3.prelim_kepuni().unwrap();
+        assert_eq!(psi, -15.228233329763219);
+    }
+
+    mod kepuni_prop_tests {
+
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_params() -> impl Strategy<Value = UniversalKeplerParams> {
+            (
+                -10.0..10.0f64,
+                0.1..5.0f64,
+                -2.0..2.0f64,
+                0.5..2.0f64,
+                prop_oneof![(-5.0..-0.01f64), (0.01..5.0f64)],
+                0.0..3.0f64,
+                1e-14..1e-8f64,
+            )
+                .prop_map(|(dt, r0, sig0, mu, alpha, e0, contr)| {
+                    UniversalKeplerParams {
+                        dt,
+                        r0,
+                        sig0,
+                        mu,
+                        alpha,
+                        e0,
+                        solver_type: SolverType {
+                            params: SolverParams {
+                                convergency: contr,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                    }
+                })
+        }
+
+        proptest! {
+            #[test]
+            fn prop_prelim_kepuni_behaves_well(params in arb_params()) {
+                let result = params.prelim_kepuni();
+                prop_assert!(result.is_some());
+                prop_assert!(result.unwrap().is_finite());
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn prop_prelim_kepuni_alpha_zero(
+                dt in -10.0..10.0f64,
+                r0 in 0.1..5.0f64,
+                sig0 in -2.0..2.0f64,
+                mu in 0.5..2.0f64,
+                e0 in 0.0..3.0f64,
+                contr in 1e-14..1e-8f64
+            ) {
+                let params = UniversalKeplerParams { dt, r0, sig0, mu, alpha: 0.0, e0, solver_type: SolverType {
+                        params: SolverParams {
+                            convergency: contr,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                };
+                let result = params.prelim_kepuni();
+                if let Some(psi0) = result {
+                    prop_assert!(psi0.is_finite());
+                }
+            }
+        }
+
+        proptest! {
+            #[test]
+            fn prop_sig0_influences_psi(params in arb_params()) {
+                prop_assume!(params.dt.abs() > 1e-6);
+                prop_assume!(params.e0 > 1e-6);
+                prop_assume!(params.r0 > 1e-6);
+
+                let mut params_pos = params;
+                params_pos.sig0 = 0.1;
+                let mut params_neg = params;
+                params_neg.sig0 = -0.1;
+
+                let res_pos = params_pos.prelim_kepuni();
+                let res_neg = params_neg.prelim_kepuni();
+
+                prop_assume!(res_pos.is_some() && res_neg.is_some());
+
+                let diff = (res_pos.unwrap() - res_neg.unwrap()).abs();
+                prop_assert!(diff >= 0.0);
             }
         }
     }

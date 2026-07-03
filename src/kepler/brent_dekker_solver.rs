@@ -465,16 +465,11 @@ fn update_bracket(state: &mut BrentState, next_psi: f64, f_next: f64) {
 ///   Alternative Newton–Raphson solver.
 pub fn solve_kepuni_brent_dekker(
     params: &UniversalKeplerParams,
-    convergency: Option<f64>,
 ) -> Option<UniversalKeplerSolution> {
-    let tolerance = convergency.unwrap_or(100.0 * f64::EPSILON);
-
-    params.reject_parabolic_orbit()?;
-
     let psi_initial_guess = params.prelim_kepuni()?;
     let (psi_lo, psi_hi) = bracket_kepler_root(psi_initial_guess, params)?;
 
-    run_brent_dekker(psi_lo, psi_hi, params, tolerance)
+    run_brent_dekker(psi_lo, psi_hi, params)
 }
 
 // ---------------------------------------------------------------------------
@@ -490,12 +485,11 @@ fn run_brent_dekker(
     psi_lo: f64,
     psi_hi: f64,
     params: &UniversalKeplerParams,
-    tolerance: f64,
 ) -> Option<UniversalKeplerSolution> {
     let mut state = BrentState::from_bracket(psi_lo, psi_hi, params);
 
     (0..MAX_BRENT_ITERATIONS).find_map(|_| {
-        if state.has_converged(tolerance) {
+        if state.has_converged(params.solver_type.params.convergency) {
             return Some(build_solution(state.b, params));
         }
 

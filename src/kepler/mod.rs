@@ -117,14 +117,10 @@
 //!     mu: 0.00029591220828559115, // GAUSS_GRAV^2
 //!     alpha: -1.0,       // elliptic
 //!     e0: 0.1,
-//!     solver_type: SolverType::NewtonRaphson {
-//!         convergency: Some(1e-10),
-//!         psi_guess: None,
-//!         max_iter_prelim_kepuni: None
-//!     }
+//!     solver_type: SolverType::default()
 //! };
 //!
-//! let kepler_solution: UniversalKeplerSolution = solve_kepuni(&params, None)
+//! let kepler_solution: UniversalKeplerSolution = solve_kepuni(&params)
 //!     .expect("converged");
 //! // Use (psi, s0..s3) to build f, g or propagate state.
 //! ```
@@ -158,7 +154,7 @@ mod brent_dekker_solver;
 mod newton_solver;
 mod orbit_type;
 mod params;
-mod preliminary_guess;
+mod prelim_kepler;
 mod propagation;
 mod stumpff;
 mod universal_kepler_solution;
@@ -167,8 +163,9 @@ mod velocity;
 pub use angles::{angle_diff, principal_angle};
 pub use newton_solver::{solve_kepuni, solve_kepuni_with_guess};
 pub use orbit_type::OrbitType;
-pub use params::{SolverType, UniversalKeplerParams};
-pub use preliminary_guess::{prelim_elliptic, prelim_hyperbolic};
+pub use params::{SolverKind, SolverParams, SolverType, UniversalKeplerParams};
+pub use prelim_kepler::prelim_elliptic::prelim_elliptic;
+pub use prelim_kepler::prelim_hyperbolic::prelim_hyperbolic;
 pub use propagation::{propagate_universal, UniversalPropagResult};
 pub use stumpff::s_funct;
 pub use universal_kepler_solution::UniversalKeplerSolution;

@@ -3,7 +3,7 @@
 use nalgebra::Vector3;
 
 use crate::constants::GAUSS_GRAV_SQUARED;
-use crate::kepler::params::SolverType;
+use crate::kepler::params::{SolverParams, SolverType};
 use crate::orb_elem::eccentricity_control;
 use crate::outfit_errors::OutfitError;
 
@@ -124,10 +124,13 @@ pub fn velocity_correction_with_guess(
         mu: gravitational_parameter,
         alpha: 2.0 * specific_orbital_energy, // specific orbital energy -> alpha
         e0: eccentricity,
-        solver_type: SolverType::NewtonRaphson {
-            convergency: Some(eps),
-            psi_guess: chi_guess,
-            max_iter_prelim_kepuni: None,
+        solver_type: SolverType {
+            params: SolverParams {
+                convergency: eps,
+                psi_guess: chi_guess,
+                ..Default::default()
+            },
+            ..Default::default()
         },
     };
 
