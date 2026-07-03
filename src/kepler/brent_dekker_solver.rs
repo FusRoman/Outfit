@@ -466,7 +466,12 @@ fn update_bracket(state: &mut BrentState, next_psi: f64, f_next: f64) {
 pub fn solve_kepuni_brent_dekker(
     params: &UniversalKeplerParams,
 ) -> Option<UniversalKeplerSolution> {
-    let psi_initial_guess = params.prelim_kepuni()?;
+    let psi_initial_guess = params
+        .solver_type
+        .params
+        .psi_guess
+        .map_or_else(|| params.prelim_kepuni(), Some)?;
+
     let (psi_lo, psi_hi) = bracket_kepler_root(psi_initial_guess, params)?;
 
     run_brent_dekker(psi_lo, psi_hi, params)

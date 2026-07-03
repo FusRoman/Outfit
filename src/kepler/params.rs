@@ -118,13 +118,12 @@ impl UniversalKeplerParams {
     pub fn solve(&self) -> Result<UniversalKeplerSolution, OutfitError> {
         match self.solver_type.kind {
             SolverKind::NewtonRaphson => {
-                solve_kepuni_with_guess(self, self.solver_type.params.psi_guess)
-                    .ok_or(OutfitError::NewtonRaphsonKeplerConvergence)
+                solve_kepuni_with_guess(self).ok_or(OutfitError::NewtonRaphsonKeplerConvergence)
             }
             SolverKind::BrentDecker => {
                 solve_kepuni_brent_dekker(self).ok_or(OutfitError::BrentDekkerKeplerConvergence)
             }
-            SolverKind::Auto => solve_kepuni_with_guess(self, self.solver_type.params.psi_guess)
+            SolverKind::Auto => solve_kepuni_with_guess(self)
                 .or_else(|| solve_kepuni_brent_dekker(self))
                 .ok_or(OutfitError::BrentDekkerKeplerConvergence),
         }

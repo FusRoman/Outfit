@@ -148,13 +148,14 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 /// * [`solve_kepuni`] – Thin wrapper without warm-start argument.
 /// * [`s_funct`](crate::kepler::s_funct) – Stumpff auxiliary functions.
 /// * [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni) – Heuristic initial guess.
-pub fn solve_kepuni_with_guess(
-    params: &UniversalKeplerParams,
-    psi_guess: Option<f64>,
-) -> Option<UniversalKeplerSolution> {
+pub fn solve_kepuni_with_guess(params: &UniversalKeplerParams) -> Option<UniversalKeplerSolution> {
     let residual_tolerance = compute_residual_tolerance(params.dt);
 
-    let psi_initial = psi_guess.map_or_else(|| params.prelim_kepuni(), Some)?;
+    let psi_initial = params
+        .solver_type
+        .params
+        .psi_guess
+        .map_or_else(|| params.prelim_kepuni(), Some)?;
 
     run_newton(psi_initial, params, residual_tolerance)
 }
@@ -186,7 +187,7 @@ pub fn solve_kepuni_with_guess(
 ///
 /// * [`solve_kepuni_with_guess`] – Extended variant with warm-start support.
 pub fn solve_kepuni(params: &UniversalKeplerParams) -> Option<UniversalKeplerSolution> {
-    solve_kepuni_with_guess(params, None)
+    solve_kepuni_with_guess(params)
 }
 
 // ---------------------------------------------------------------------------
