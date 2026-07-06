@@ -22,6 +22,12 @@ pub struct UniversalPropagResult {
     pub f_dot: f64,
     /// Time-derivative of $g$: $\dot{g} = 1 - \frac{\mu}{r_1} S_2$.
     pub g_dot: f64,
+    /// Universal anomaly $\psi$ (rad, generalized units).
+    ///
+    /// The root of the universal Kepler equation:
+    ///
+    /// $$f(\psi) = r_0 \cdot s_1 + \sigma_0 \cdot s_2 + \mu \cdot s_3 - \Delta t = 0$$
+    pub psy: f64,
 }
 
 /// Propagate a Cartesian state vector using the universal-variable formulation.
@@ -156,6 +162,7 @@ pub fn propagate_universal(
         g_lag: lagrange_g,
         f_dot: lagrange_f_dot,
         g_dot: lagrange_g_dot,
+        psy: kepler_solution.universal_anomaly,
     })
 }
 
