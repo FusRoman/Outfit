@@ -1,5 +1,11 @@
 //! Input parameters bundle for the universal-variable Kepler solver.
 
+#[cfg(feature = "serde")]
+use serde::Deserialize;
+
+#[cfg(feature = "serde")]
+use serde::Serialize;
+
 use crate::{
     kepler::{
         brent_dekker_solver::solve_kepuni_brent_dekker,
@@ -13,6 +19,7 @@ use crate::{
 use super::orbit_type::OrbitType;
 
 /// Common tuning parameters shared by all Kepler equation solvers.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub struct SolverParams {
     /// Convergence threshold on the solved variable.
@@ -37,6 +44,7 @@ impl Default for SolverParams {
 }
 
 /// Selects which root-finding algorithm is used to solve Kepler's equation.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub enum SolverKind {
     /// Newton-Raphson iteration.
@@ -48,6 +56,7 @@ pub enum SolverKind {
 }
 
 /// Full solver configuration: algorithm choice plus its tuning parameters.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub struct SolverType {
     pub kind: SolverKind,

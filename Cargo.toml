@@ -18,13 +18,7 @@ keywords = [
 ]
 categories = ["science", "parsing", "data-structures"]
 authors = ["Roman Le Montagner <roman.le-montagner@ijclab.in2p3.fr>"]
-exclude = [
-    ".github/",
-    "examples/",
-    "tests/",
-    ".opencode/",
-    ".husky/"
-]
+exclude = [".github/", "examples/", "tests/", ".opencode/", ".husky/"]
 
 [dependencies]
 
@@ -64,8 +58,13 @@ tokio = { version = "1.44.1", default-features = false, features = [
     "io-util",
 ] }
 tokio-stream = { version = "0.1.17", default-features = false }
-rayon = { version = "1.12.0", default-features = false, optional = true }
 differential-equations = { version = "0.6.1", default-features = false }
+
+# optionnal dependencies
+rayon = { version = "1.12.0", default-features = false, optional = true }
+serde = { version = "1.0.228", default-features = false, features = [
+    "derive",
+], optional = true }
 
 [dev-dependencies]
 approx = { version = "0.5.1", default-features = false }
@@ -80,7 +79,8 @@ photom = { version = "0.4.0", default-features = false, features = [
 polars = { version = "0.53.0", features = ["is_in"] }
 
 [features]
-parallel = ["photom/parallel", "rayon"]
+parallel = ["photom/parallel", "dep:rayon"]
+serde = ["dep:serde"]
 
 [[example]]
 name = "fit_full_iod"

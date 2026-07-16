@@ -60,12 +60,19 @@
 
 use crate::kepler::UniversalKeplerParams;
 
+#[cfg(feature = "serde")]
+use serde::Deserialize;
+
+#[cfg(feature = "serde")]
+use serde::Serialize;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /// Selects which numerical strategy is used to solve the cubic parabolic
 /// preliminary equation.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParabolicPrelimMethod {
     /// Closed-form solution via Cardano's formula. No iteration, no
