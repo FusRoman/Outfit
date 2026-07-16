@@ -284,6 +284,15 @@ pub enum OutfitError {
 
     #[error("N-body propagation failed: {0}")]
     NBodyPropagationFailed(String),
+
+    #[error("{0}")]
+    DegenerateState(String),
+
+    #[error("universal Kepler solver did not converge with solver NewtonRaphson")]
+    NewtonRaphsonKeplerConvergence,
+
+    #[error("universal Kepler solver did not converge with solver BrentDekker")]
+    BrentDekkerKeplerConvergence,
 }
 
 impl From<&ObsDatasetError> for OutfitError {
