@@ -2,6 +2,50 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-07-16
+
+### Added
+
+- **`kepler` module split and rewritten** (`src/kepler.rs` → `src/kepler/`)
+  - The former monolithic `kepler.rs` (~1800 lines) is now a module tree:
+    `angles.rs`, `orbit_type.rs`, `params.rs`, `stumpff.rs`,
+    `newton_solver.rs`, `brent_dekker_solver.rs`,
+    `universal_kepler_solution.rs`, `velocity.rs`, `propagation.rs`, and
+    `prelim_kepler/` (elliptic, hyperbolic, parabolic).
+  - New **BrentDekker solver** (`solve_kepuni_brent_dekker`) for the
+    universal anomaly ψ, selectable alongside the existing Newton–Raphson
+    solver via `SolverKind` / `SolverType`.
+  - New **parabolic case** handling in the universal anomaly preliminary
+    guess (`prelim_kepler/prelim_parabolic.rs`), previously unsupported.
+  - `SolverParams`, `SolverKind`, `SolverType` — new configuration types
+    letting callers pick and tune the Kepler solver used during
+    propagation/fitting.
+  - `UniversalKeplerSolution` — new result container for the universal
+    Kepler solve.
+  - New `OutfitError` variants: `DegenerateState`,
+    `NewtonRaphsonKeplerConvergence`, `BrentDekkerKeplerConvergence`, giving
+    solver-specific convergence failures instead of a generic error.
+
+### Changed
+
+- **`serde` feature** — `SolverParams`, `SolverKind`, and `SolverType` now
+  derive `Serialize`/`Deserialize` under the new optional `serde` feature,
+  so Kepler solver configuration can be read from / written to top-level
+  config files.
+  - New optional dependency: [`serde`](https://crates.io/crates/serde)
+    (`derive` feature).
+- **Brent–Dekker solver** now accepts an initial ψ guess when one is
+  available, instead of always bracketing from scratch.
+- `rayon` is now declared as `dep:rayon` (matching `serde`'s
+  `dep:serde`) rather than an implicit optional dependency.
+
+### Breaking
+
+- Major version bump to reflect the `kepler` module restructuring
+  (`src/kepler.rs` is gone; all prior `kepler::*` imports still resolve via
+  the new `src/kepler/mod.rs` re-exports, but internal submodule paths have
+  changed).
+
 ## [3.1.0] - 2026-06-15
 
 ### Added
