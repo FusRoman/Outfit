@@ -166,6 +166,7 @@ pub use orbit_type::OrbitType;
 pub use params::{SolverKind, SolverParams, SolverType, UniversalKeplerParams};
 pub use prelim_kepler::prelim_elliptic::prelim_elliptic;
 pub use prelim_kepler::prelim_hyperbolic::prelim_hyperbolic;
+pub use prelim_kepler::prelim_parabolic::ParabolicPrelimMethod;
 pub use propagation::{propagate_universal, UniversalPropagResult};
 pub use stumpff::s_funct;
 pub use universal_kepler_solution::UniversalKeplerSolution;

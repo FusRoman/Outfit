@@ -18,7 +18,11 @@
 ///
 /// A single equation covers all regimes:
 ///
-/// $$r_0 \cdot s_1(\psi, \alpha) + \sigma_0 \cdot s_2(\psi, \alpha) + \mu \cdot s_3(\psi, \alpha) = \Delta t$$
+/// $$r_0 \cdot s_1(\psi, \alpha) + \sigma_0 \cdot s_2(\psi, \alpha) + s_3(\psi, \alpha) = \sqrt{\mu} \cdot \Delta t$$
+///
+/// where `alpha` is the reciprocal semi-major-axis convention
+/// ( $\alpha = -1/a$ ), not the raw vis-viva $2E$ — see
+/// [`UniversalKeplerParams`](crate::kepler::UniversalKeplerParams).
 ///
 /// ## Stumpff auxiliary functions $s_n(\psi, \alpha)$
 ///
@@ -46,7 +50,7 @@
 ///
 /// which directly yields the residual derivative:
 ///
-/// $$f'(\psi) = r_0 \cdot s_0 + \sigma_0 \cdot s_1 + \mu \cdot s_2$$
+/// $$f'(\psi) = r_0 \cdot s_0 + \sigma_0 \cdot s_1 + s_2$$
 ///
 /// ## Role of each $s_n$ in orbit propagation
 ///
@@ -68,7 +72,7 @@ pub struct UniversalKeplerSolution {
     ///
     /// The root of the universal Kepler equation:
     ///
-    /// $$f(\psi) = r_0 \cdot s_1 + \sigma_0 \cdot s_2 + \mu \cdot s_3 - \Delta t = 0$$
+    /// $$f(\psi) = r_0 \cdot s_1 + \sigma_0 \cdot s_2 + s_3 - \sqrt{\mu} \cdot \Delta t = 0$$
     pub universal_anomaly: f64,
 
     /// $s_0(\psi, \alpha)$ — cosine-like Stumpff function.

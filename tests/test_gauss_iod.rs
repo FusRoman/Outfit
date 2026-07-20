@@ -67,7 +67,7 @@ fn expected_results() -> Vec<ExpectedResult> {
                 uncertainty: None,
                 covariance: None,
             },
-            rms: 18.963755528781288,
+            rms: 18.963755533886232,
         },
     ]
 }

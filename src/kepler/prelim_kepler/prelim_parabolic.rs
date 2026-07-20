@@ -22,11 +22,11 @@
 //! ```
 //!
 //! Substituting into the universal Kepler equation
-//! `r0 * s1 + sig0 * s2 + mu * s3 = dt` gives a **cubic polynomial in
+//! `r0 * s1 + sig0 * s2 + s3 = sqrt(mu) * dt` gives a **cubic polynomial in
 //! `psi`**, with no division by `alpha` anywhere:
 //!
 //! ```text
-//! (mu / 6) * psi^3 + (sig0 / 2) * psi^2 + r0 * psi - dt = 0
+//! (1 / 6) * psi^3 + (sig0 / 2) * psi^2 + r0 * psi - sqrt(mu) * dt = 0
 //! ```
 //!
 //! This is the universal-variable equivalent of Barker's equation for
@@ -38,8 +38,8 @@
 //! # A cubic can have up to three real roots — and it matters here
 //!
 //! The cubic derivative is itself a quadratic,
-//! `f'(psi) = (mu/2) psi^2 + sig0 * psi + r0`, with discriminant
-//! `sig0^2 - 2 * mu * r0`. Whenever `sig0` is large enough (fast radial
+//! `f'(psi) = (1/2) psi^2 + sig0 * psi + r0`, with discriminant
+//! `sig0^2 - 2 * r0`. Whenever `sig0` is large enough (fast radial
 //! motion, typically near pericenter — and, empirically, a *common* case for
 //! near-parabolic asteroid tracklets, not a rare edge case), this
 //! discriminant is positive, `f` is **not monotonic**, and the cubic can
@@ -79,7 +79,7 @@ pub enum ParabolicPrelimMethod {
     /// convergence criterion, and no failure mode on the non-monotonic
     /// branch: the correct real root is always identified analytically.
     /// This is the recommended default for this codebase, where the
-    /// non-monotonic case (`sig0^2 > 2 * mu * r0`) is common rather than
+    /// non-monotonic case (`sig0^2 > 2 * r0`) is common rather than
     /// exceptional.
     Cardano,
     /// Safeguarded Newton-Raphson iteration on the cubic residual, used
@@ -136,39 +136,40 @@ pub fn prelim_parabolic(params: &UniversalKeplerParams) -> f64 {
 /// `f'(psi)` at a given universal anomaly.
 ///
 /// ```text
-/// f(psi)  = (mu / 6) * psi^3 + (sig0 / 2) * psi^2 + r0 * psi - dt
-/// f'(psi) = (mu / 2) * psi^2 + sig0 * psi + r0
+/// f(psi)  = (1 / 6) * psi^3 + (sig0 / 2) * psi^2 + r0 * psi - sqrt(mu)*dt
+/// f'(psi) = (1 / 2) * psi^2 + sig0 * psi + r0
 /// ```
+///
+/// `scaled_time_of_flight` is `sqrt(mu) * dt`: the universal Kepler equation
+/// compares `r0*s1 + sig0*s2 + s3` against `sqrt(mu)*dt`, not raw `dt` (see
+/// [`UniversalKeplerParams`](crate::kepler::UniversalKeplerParams)); at
+/// `alpha = 0`, `s3 = psi^3/6` carries no `mu` factor, so none appears on the
+/// cubic term either — only the time term needs the `sqrt(mu)` scaling.
 #[inline]
 fn cubic_residual_and_derivative(
     universal_anomaly: f64,
     radial_distance: f64,
     radial_velocity_proxy: f64,
-    gravitational_parameter: f64,
-    time_of_flight: f64,
+    scaled_time_of_flight: f64,
 ) -> (f64, f64) {
-    let residual = gravitational_parameter / 6.0 * universal_anomaly.powi(3)
+    let residual = universal_anomaly.powi(3) / 6.0
         + radial_velocity_proxy / 2.0 * universal_anomaly.powi(2)
         + radial_distance * universal_anomaly
-        - time_of_flight;
+        - scaled_time_of_flight;
 
-    let derivative = gravitational_parameter / 2.0 * universal_anomaly.powi(2)
+    let derivative = universal_anomaly.powi(2) / 2.0
         + radial_velocity_proxy * universal_anomaly
         + radial_distance;
 
     (residual, derivative)
 }
 
-/// `true` if `f'(psi) = (mu/2) psi^2 + sig0*psi + r0` has real roots, i.e.
+/// `true` if `f'(psi) = (1/2) psi^2 + sig0*psi + r0` has real roots, i.e.
 /// the parabolic Kepler cubic `f` is **not** monotonic and can have up to
 /// three real roots. See the module documentation for why this matters.
 #[inline]
-fn is_cubic_non_monotonic(
-    radial_distance: f64,
-    radial_velocity_proxy: f64,
-    gravitational_parameter: f64,
-) -> bool {
-    radial_velocity_proxy * radial_velocity_proxy > 2.0 * gravitational_parameter * radial_distance
+fn is_cubic_non_monotonic(radial_distance: f64, radial_velocity_proxy: f64) -> bool {
+    radial_velocity_proxy * radial_velocity_proxy > 2.0 * radial_distance
 }
 
 // ---------------------------------------------------------------------------
@@ -197,8 +198,8 @@ fn is_cubic_non_monotonic(
 fn prelim_parabolic_newton(params: &UniversalKeplerParams, contr: f64, max_iter: usize) -> f64 {
     let radial_distance = params.r0;
     let radial_velocity_proxy = params.sig0;
-    let gravitational_parameter = params.mu;
     let time_of_flight = params.dt;
+    let scaled_time_of_flight = params.mu.sqrt() * time_of_flight;
 
     // Fast path: see the identical short-circuit in
     // `prelim_parabolic_cardano` for the rationale.
@@ -206,23 +207,18 @@ fn prelim_parabolic_newton(params: &UniversalKeplerParams, contr: f64, max_iter:
         return 0.0;
     }
 
-    if is_cubic_non_monotonic(
-        radial_distance,
-        radial_velocity_proxy,
-        gravitational_parameter,
-    ) {
+    if is_cubic_non_monotonic(radial_distance, radial_velocity_proxy) {
         return prelim_parabolic_cardano(params);
     }
 
-    let mut universal_anomaly = time_of_flight / radial_distance;
+    let mut universal_anomaly = scaled_time_of_flight / radial_distance;
 
     for _ in 0..max_iter {
         let (residual, derivative) = cubic_residual_and_derivative(
             universal_anomaly,
             radial_distance,
             radial_velocity_proxy,
-            gravitational_parameter,
-            time_of_flight,
+            scaled_time_of_flight,
         );
 
         if !derivative.is_finite() || derivative.abs() < 10.0 * f64::EPSILON {
@@ -268,15 +264,15 @@ fn prelim_parabolic_newton(params: &UniversalKeplerParams, contr: f64, max_iter:
 fn prelim_parabolic_cardano(params: &UniversalKeplerParams) -> f64 {
     let radial_distance = params.r0;
     let radial_velocity_proxy = params.sig0;
-    let gravitational_parameter = params.mu;
     let time_of_flight = params.dt;
+    let scaled_time_of_flight = params.mu.sqrt() * time_of_flight;
 
     // Fast path: at dt = 0 the constant term of the cubic vanishes
     // identically, so psi = 0 is an exact root regardless of r0 / sig0.
     // Going through the general depression + trigonometric algebra below
     // still finds this root, but only up to floating-point rounding (the
     // depressed coefficients can be many orders of magnitude larger than
-    // psi itself, e.g. when mu is tiny relative to r0 and sig0, so the
+    // psi itself, e.g. when sig0 is large relative to r0, so the
     // subtractions involved lose precision). Short-circuiting here avoids
     // that entirely for the one case where the exact answer is trivial.
     if time_of_flight == 0.0 {
@@ -284,12 +280,12 @@ fn prelim_parabolic_cardano(params: &UniversalKeplerParams) -> f64 {
     }
 
     // Step 1: normalize to a monic cubic `psi^3 + b*psi^2 + c*psi + d = 0`.
-    // The leading coefficient `mu / 6` is always strictly positive
-    // (mu = GM > 0), so this division is always safe.
-    let leading_coefficient = gravitational_parameter / 6.0;
+    // The leading coefficient `1 / 6` is a fixed constant, so this division
+    // is always safe.
+    let leading_coefficient = 1.0 / 6.0;
     let quadratic_coefficient = (radial_velocity_proxy / 2.0) / leading_coefficient;
     let linear_coefficient = radial_distance / leading_coefficient;
-    let constant_coefficient = -time_of_flight / leading_coefficient;
+    let constant_coefficient = -scaled_time_of_flight / leading_coefficient;
 
     // Step 2: depress the cubic via psi = y - depression_shift, with
     // depression_shift = quadratic_coefficient / 3. Standard depression
@@ -330,16 +326,14 @@ fn prelim_parabolic_cardano(params: &UniversalKeplerParams) -> f64 {
         &candidate_roots,
         radial_distance,
         radial_velocity_proxy,
-        gravitational_parameter,
-        time_of_flight,
+        scaled_time_of_flight,
     );
 
     polish_root_by_newton(
         selected_root,
         radial_distance,
         radial_velocity_proxy,
-        gravitational_parameter,
-        time_of_flight,
+        scaled_time_of_flight,
     )
 }
 
@@ -378,8 +372,7 @@ fn polish_root_by_newton(
     initial_estimate: f64,
     radial_distance: f64,
     radial_velocity_proxy: f64,
-    gravitational_parameter: f64,
-    time_of_flight: f64,
+    scaled_time_of_flight: f64,
 ) -> f64 {
     let mut universal_anomaly = initial_estimate;
 
@@ -388,8 +381,7 @@ fn polish_root_by_newton(
             universal_anomaly,
             radial_distance,
             radial_velocity_proxy,
-            gravitational_parameter,
-            time_of_flight,
+            scaled_time_of_flight,
         );
         if derivative == 0.0 || !derivative.is_finite() {
             break;
@@ -447,10 +439,9 @@ fn select_physical_root(
     candidate_roots: &[f64],
     radial_distance: f64,
     radial_velocity_proxy: f64,
-    gravitational_parameter: f64,
-    time_of_flight: f64,
+    scaled_time_of_flight: f64,
 ) -> f64 {
-    let linear_estimate = time_of_flight / radial_distance;
+    let linear_estimate = scaled_time_of_flight / radial_distance;
 
     let closest_to_linear_estimate = |roots: &[f64]| -> f64 {
         *roots
@@ -472,8 +463,7 @@ fn select_physical_root(
                 universal_anomaly,
                 radial_distance,
                 radial_velocity_proxy,
-                gravitational_parameter,
-                time_of_flight,
+                scaled_time_of_flight,
             );
             derivative >= 0.0
         })
@@ -518,8 +508,7 @@ mod prelim_parabolic_tests {
             universal_anomaly,
             params.r0,
             params.sig0,
-            params.mu,
-            params.dt,
+            params.mu.sqrt() * params.dt,
         )
         .0
     }
@@ -546,7 +535,7 @@ mod prelim_parabolic_tests {
     /// in the ordinary monotonic case.
     #[test]
     fn cardano_and_newton_agree_on_monotonic_case() {
-        let mut params = make_params(5.0, 1.3, 0.02); // sig0^2 << 2*mu*r0: monotonic
+        let mut params = make_params(5.0, 1.3, 0.02); // sig0^2 << 2*r0: monotonic
 
         let psi_cardano = prelim_parabolic(&params);
 
@@ -569,7 +558,7 @@ mod prelim_parabolic_tests {
             1.242_343_356_943_632_2,
             -5.995_054_062_733_072,
         );
-        assert!(is_cubic_non_monotonic(params.r0, params.sig0, params.mu));
+        assert!(is_cubic_non_monotonic(params.r0, params.sig0));
 
         let psi_cardano = prelim_parabolic(&params);
 
@@ -736,20 +725,18 @@ mod prelim_parabolic_tests {
                 let mut params = make_params(time_of_flight, radial_distance, radial_velocity_proxy);
                 params.solver_type.params.max_iter_prelim_kepuni = 100;
                 let universal_anomaly = prelim_parabolic(&params);
+                let scaled_time_of_flight = GRAVITATIONAL_PARAMETER.sqrt() * time_of_flight;
                 let (residual, _) = cubic_residual_and_derivative(
                     universal_anomaly,
                     radial_distance,
                     radial_velocity_proxy,
-                    GRAVITATIONAL_PARAMETER,
-                    time_of_flight,
+                    scaled_time_of_flight,
                 );
 
-                let term_magnitude_scale = (GRAVITATIONAL_PARAMETER / 6.0
-                    * universal_anomaly.powi(3))
-                .abs()
+                let term_magnitude_scale = (universal_anomaly.powi(3) / 6.0).abs()
                     + (radial_velocity_proxy / 2.0 * universal_anomaly.powi(2)).abs()
                     + (radial_distance * universal_anomaly).abs()
-                    + time_of_flight.abs();
+                    + scaled_time_of_flight.abs();
                 let tolerance = 1e-9 * term_magnitude_scale.max(1.0);
 
                 prop_assert!(
@@ -836,8 +823,8 @@ mod prelim_parabolic_tests {
             }
 
             /// In the regime where the cubic is *guaranteed* monotonic
-            /// (`sig0^2 <= 2 * mu * r0`, see [`is_cubic_non_monotonic`]),
-            /// `f` is strictly increasing and `f(0) = -dt`, so the sign of
+            /// (`sig0^2 <= 2 * r0`, see [`is_cubic_non_monotonic`]),
+            /// `f` is strictly increasing and `f(0) = -sqrt(mu)*dt`, so the sign of
             /// the unique real root must match the sign of `dt`. This is
             /// intentionally not asserted outside the monotonic regime —
             /// see the module-level note on the property that was dropped.
@@ -846,7 +833,7 @@ mod prelim_parabolic_tests {
                 radial_distance in radial_distance_strategy(),
                 time_of_flight in nonzero_time_of_flight_strategy(),
             ) {
-                // sig0 fixed to 0, trivially within the sig0^2 <= 2*mu*r0
+                // sig0 fixed to 0, trivially within the sig0^2 <= 2*r0
                 // bound for any r0 > 0, guaranteeing the monotonic regime.
                 let radial_velocity_proxy = 0.0;
                 let mut params = make_params(time_of_flight, radial_distance, radial_velocity_proxy);
@@ -855,7 +842,6 @@ mod prelim_parabolic_tests {
                 prop_assert!(!is_cubic_non_monotonic(
                     radial_distance,
                     radial_velocity_proxy,
-                    GRAVITATIONAL_PARAMETER,
                 ));
 
                 for method in [ParabolicPrelimMethod::Cardano, ParabolicPrelimMethod::Newton] {

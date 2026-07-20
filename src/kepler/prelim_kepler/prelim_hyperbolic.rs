@@ -9,8 +9,8 @@ use crate::kepler::UniversalKeplerParams;
 ///
 /// Algorithm
 /// ---------
-/// 1. Compute the semi-major axis `a0 = -μ / α` and the hyperbolic mean motion
-///    `n = sqrt(α³) / μ`.
+/// 1. Compute the semi-major axis `a0 = -1 / α` and the hyperbolic mean motion
+///    `n = sqrt(μ) · sqrt(α³)`.
 /// 2. Compute the initial hyperbolic eccentric anomaly `F₀` from the geometry,
 ///    using:
 ///    cosh(F₀) = (1 - r₀ / a₀) / e₀
@@ -43,9 +43,12 @@ use crate::kepler::UniversalKeplerParams;
 /// * [`prelim_elliptic`](crate::kepler::prelim_elliptic) – Equivalent routine for elliptical orbits.
 /// * [`solve_kepuni`](crate::kepler::solve_kepuni) – Refines ψ by solving the universal Kepler equation.
 pub fn prelim_hyperbolic(params: &UniversalKeplerParams) -> f64 {
-    // Step 1: semi-major axis (negative for hyperbolic orbits) and hyperbolic mean motion.
-    let semi_major_axis = -params.mu / params.alpha;
-    let mean_motion = params.alpha.powi(3).sqrt() / params.mu;
+    // Step 1: semi-major axis (negative for hyperbolic orbits) and hyperbolic
+    // mean motion. `alpha` is the reciprocal semi-major-axis convention
+    // (alpha = -1/a, i.e. alpha > 0 for a < 0 hyperbolic orbits), so
+    // a0 = -1/alpha; mean motion n = sqrt(mu/(-a0)^3) = sqrt(mu) * alpha^{3/2}.
+    let semi_major_axis = -1.0 / params.alpha;
+    let mean_motion = params.mu.sqrt() * params.alpha.powi(3).sqrt();
 
     // Step 2: hyperbolic anomaly at epoch, sign-corrected by radial velocity.
     let initial_hyperbolic_anomaly = initial_hyperbolic_anomaly_from_geometry(

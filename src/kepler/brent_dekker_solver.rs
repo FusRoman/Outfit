@@ -49,14 +49,16 @@ const PHI: f64 = 1.618_033_988_749_895;
 /// Evaluate the universal Kepler residual  $ f(\psi) $ .
 ///
 ///  $ f(\psi) = r_0 \cdot s_1(\psi,\alpha) + \sigma_0 \cdot s_2(\psi,\alpha)
-///            + \mu \cdot s_3(\psi,\alpha) - \Delta t $
+///            + s_3(\psi,\alpha) - \sqrt{\mu} \cdot \Delta t $
 ///
 /// A root of this function corresponds to the universal anomaly  $ \psi^* $  at
-/// time  $ \Delta t $ .
+/// time  $ \Delta t $ . `alpha` is the reciprocal semi-major-axis convention
+/// ( $ \alpha = -1/a $ ), so no extra `mu` factor is needed on the `s2`/`s3`
+/// terms — see [`UniversalKeplerParams`](crate::kepler::UniversalKeplerParams).
 #[inline(always)]
 fn kepler_residual(psi: f64, params: &UniversalKeplerParams) -> f64 {
     let (_, s1, s2, s3) = s_funct(psi, params.alpha);
-    params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt
+    params.r0 * s1 + params.sig0 * s2 + s3 - params.mu.sqrt() * params.dt
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +185,7 @@ fn bracket_kepler_root(psi0: f64, params: &UniversalKeplerParams) -> Option<(f64
 /// By convention, `b` is always the *better* approximation, i.e.
 ///  $ |f(b)| \leq |f(a)| $  is maintained as an invariant throughout the
 /// iteration.
+#[derive(Debug)]
 struct BrentState {
     /// Current left endpoint of the bracket.
     a: f64,
@@ -499,10 +502,12 @@ fn run_brent_dekker(
         }
 
         let (next_psi, was_bisection) = select_next_candidate(&state);
+
         let f_next = kepler_residual(next_psi, params);
 
         state.prev_step_length = (state.b - state.c).abs();
         state.prev_was_bisection = was_bisection;
+
         update_bracket(&mut state, next_psi, f_next);
 
         None

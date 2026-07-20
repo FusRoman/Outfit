@@ -132,12 +132,12 @@ fn test_iod_from_polars() {
     let expected_orbit = OrbitalElements::Keplerian {
         elements: KeplerianElements {
             reference_epoch: 60894.252965553926,
-            semi_major_axis: 1.24701989952089,
-            eccentricity: 0.2082069422196415,
-            inclination: 0.08116316040114972,
-            ascending_node_longitude: 2.49554922649176,
-            periapsis_argument: 2.5470318525197477,
-            mean_anomaly: 0.2983936748249412,
+            semi_major_axis: 1.2470198995234851,
+            eccentricity: 0.20820694222020417,
+            inclination: 0.08116316040090545,
+            ascending_node_longitude: 2.4955492264777863,
+            periapsis_argument: 2.5470318525400066,
+            mean_anomaly: 0.2983936748196788,
         },
         uncertainty: None,
         covariance: None,
@@ -146,7 +146,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.010284390096535293,
+        0.010284425699399564,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );

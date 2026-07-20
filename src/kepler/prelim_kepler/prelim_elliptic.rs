@@ -39,7 +39,7 @@ fn initial_eccentric_anomaly_from_geometry(
 ///
 /// Algorithm
 /// ---------
-/// 1. Compute the semi-major axis `a0 = -μ / α` and mean motion `n = sqrt((-α)^3) / μ`.
+/// 1. Compute the semi-major axis `a0 = -1 / α` and mean motion `n = sqrt(μ) · sqrt((-α)^3)`.
 /// 2. If the eccentricity `e0` is very small, approximate `ψ` directly using a linear formula.
 /// 3. Otherwise, compute the initial eccentric anomaly `u0` from the orbital geometry and
 ///    correct its sign based on the radial velocity `sig0`.
@@ -74,8 +74,10 @@ pub fn prelim_elliptic(params: &UniversalKeplerParams) -> f64 {
     let max_iter = params.solver_type.params.max_iter_prelim_kepuni;
 
     // Step 1: semi-major axis and mean motion.
-    let semi_major_axis = -params.mu / params.alpha;
-    let mean_motion = (-params.alpha.powi(3)).sqrt() / params.mu;
+    // `alpha` is the reciprocal semi-major-axis convention (alpha = -1/a),
+    // so a0 = -1/alpha; mean motion n = sqrt(mu/a0^3) = sqrt(mu) * (-alpha)^{3/2}.
+    let semi_major_axis = -1.0 / params.alpha;
+    let mean_motion = params.mu.sqrt() * (-params.alpha.powi(3)).sqrt();
 
     // Step 2: special case, nearly circular orbit.
     if params.e0 < contr {

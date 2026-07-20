@@ -1,6 +1,6 @@
 [package]
 name = "outfit"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 license-file = "LICENSE"
 rust-version = "1.94.0"
@@ -91,6 +91,10 @@ name = "fit_full_iod_parallel"
 path = "examples/run_full_iod_parallel.rs"
 required-features = ["parallel"]
 
+[[bench]]
+name = "propagate_universal"
+harness = false
+
 [profile.dev]
 debug = false
 
@@ -98,6 +102,8 @@ debug = false
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+# Keep debug symbols so `perf record --call-graph=dwarf` can resolve Rust
+# frames on the compiled bench binaries (target/release/deps/<bench>-*).
 debug = true
 
 [profile.release]
