@@ -149,7 +149,7 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 /// * [`s_funct`](crate::kepler::s_funct) – Stumpff auxiliary functions.
 /// * [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni) – Heuristic initial guess.
 pub fn solve_kepuni_with_guess(params: &UniversalKeplerParams) -> Option<UniversalKeplerSolution> {
-    let residual_tolerance = compute_residual_tolerance(params.dt);
+    let residual_tolerance = compute_residual_tolerance(params.mu.sqrt() * params.dt);
 
     let psi_initial = params
         .solver_type
@@ -196,24 +196,29 @@ pub fn solve_kepuni(params: &UniversalKeplerParams) -> Option<UniversalKeplerSol
 
 /// Compute the scale-aware residual tolerance.
 ///
-///  $ \varepsilon_f = 10\varepsilon \cdot (1 + |\Delta t|) $
+///  $ \varepsilon_f = 10\varepsilon \cdot (1 + |\sqrt{\mu}\Delta t|) $
 ///
 /// Mixing an absolute floor  $ 10\varepsilon $  with a relative component
-///  $ 10\varepsilon \cdot |\Delta t| $  keeps the criterion meaningful across
-/// the full range of flight times.
+///  $ 10\varepsilon \cdot |\sqrt{\mu}\Delta t| $  keeps the criterion
+/// meaningful across the full range of flight times. The residual is
+/// compared against  $ \sqrt{\mu}\Delta t $  (not raw  $ \Delta t $ ), so the
+/// tolerance is scaled accordingly.
 #[inline]
-fn compute_residual_tolerance(dt: f64) -> f64 {
-    10.0 * f64::EPSILON * (1.0 + dt.abs())
+fn compute_residual_tolerance(sqrt_mu_dt: f64) -> f64 {
+    10.0 * f64::EPSILON * (1.0 + sqrt_mu_dt.abs())
 }
 
 /// Evaluate the universal Kepler residual  $ f(\psi) $  and its derivative
 ///  $ f'(\psi) $  at the given universal anomaly.
 ///
-///  $ f(\psi) = r_0 \cdot s_1 + \sigma_0 \cdot s_2 + \mu \cdot s_3 - \Delta t $
-///  $ f'(\psi) = r_0 \cdot s_0 + \sigma_0 \cdot s_1 + \mu \cdot s_2 $
+///  $ f(\psi) = r_0 \cdot s_1 + \sigma_0 \cdot s_2 + s_3 - \sqrt{\mu} \cdot \Delta t $
+///  $ f'(\psi) = r_0 \cdot s_0 + \sigma_0 \cdot s_1 + s_2 $
 ///
 /// The derivative chain of the Stumpff functions gives
-///  $ \mathrm{d}s_k / \mathrm{d}\psi = s_{k-1} $ .
+///  $ \mathrm{d}s_k / \mathrm{d}\psi = s_{k-1} $ . `alpha` here is the
+/// reciprocal semi-major-axis convention ( $ \alpha = -1/a $ ), so no extra
+/// `mu` factor is needed on the `s2`/`s3` terms — see
+/// [`UniversalKeplerParams`](crate::kepler::UniversalKeplerParams).
 #[inline]
 fn kepler_residual_and_derivative(
     psi: f64,
@@ -221,8 +226,8 @@ fn kepler_residual_and_derivative(
 ) -> (f64, f64, (f64, f64, f64, f64)) {
     let stumpff @ (s0, s1, s2, s3) = s_funct(psi, params.alpha);
 
-    let residual = params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt;
-    let derivative = params.r0 * s0 + params.sig0 * s1 + params.mu * s2;
+    let residual = params.r0 * s1 + params.sig0 * s2 + s3 - params.mu.sqrt() * params.dt;
+    let derivative = params.r0 * s0 + params.sig0 * s1 + s2;
 
     (residual, derivative, stumpff)
 }

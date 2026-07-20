@@ -81,7 +81,10 @@ impl Default for SolverType {
 /// * `r0`: Heliocentric distance at the reference epoch t₀ (in AU).
 /// * `sig0`: Radial velocity component at t₀ (in AU/day).
 /// * `mu`: Standard gravitational parameter μ = GM (in AU³/day²).
-/// * `alpha`: Twice the specific orbital energy (2E).
+/// * `alpha`: Reciprocal semi-major axis, `alpha = -1/a = 2E/μ` (in 1/AU).
+///   This is the convention expected by [`s_funct`](crate::kepler::s_funct)
+///   and the rest of the universal-variable machinery — *not* the raw
+///   vis-viva `2E` (dimension velocity²).
 /// * `e0`: Orbital eccentricity (unitless).
 ///
 /// The associated method [`orbit_type`](UniversalKeplerParams::orbit_type)
@@ -97,7 +100,7 @@ pub struct UniversalKeplerParams {
     pub sig0: f64,
     /// Standard gravitational parameter μ = GM, in AU³/day².
     pub mu: f64,
-    /// Twice the specific orbital energy (alpha = 2E).
+    /// Reciprocal semi-major axis (alpha = -1/a = 2E/mu), in 1/AU.
     pub alpha: f64,
     /// Orbital eccentricity (unitless).
     pub e0: f64,
@@ -210,7 +213,7 @@ mod kepler_params_tests {
         // Recompute Stumpff functions from psi to catch any inconsistency
         // between the stored universal anomaly and the cached s.. values.
         let (_, s1, s2, s3) = s_funct(sol.universal_anomaly, params.alpha);
-        (params.r0 * s1 + params.sig0 * s2 + params.mu * s3 - params.dt).abs()
+        (params.r0 * s1 + params.sig0 * s2 + s3 - params.mu.sqrt() * params.dt).abs()
     }
 
     /// Build a [`UniversalKeplerParams`] for a near-circular elliptic orbit.
@@ -218,8 +221,8 @@ mod kepler_params_tests {
     /// Uses a semi-major axis `a` (AU) to derive `alpha` and a nearly-zero
     /// radial velocity proxy.
     fn elliptic_params(dt: f64, a: f64, kind: SolverKind) -> UniversalKeplerParams {
-        // alpha = -mu / a  (twice specific orbital energy for elliptic orbit)
-        let alpha = -MU_SUN / a;
+        // alpha = -1 / a  (reciprocal semi-major axis convention)
+        let alpha = -1.0 / a;
         // r0 ~ a for a near-circular orbit.
         let r0 = a;
         // sig0 ~ 0 for a circular orbit (radial velocity is zero at periapsis/apoapsis).
@@ -241,9 +244,9 @@ mod kepler_params_tests {
     /// Build a [`UniversalKeplerParams`] for a hyperbolic orbit.
     ///
     /// Uses a characteristic energy $C_3 > 0$ (AU²/day²) so that
-    /// $\alpha = C_3 > 0$.
+    /// $\alpha = C_3 / \mu > 0$.
     fn hyperbolic_params(dt: f64, c3: f64, kind: SolverKind) -> UniversalKeplerParams {
-        let alpha = c3; // positive energy -> hyperbolic
+        let alpha = c3 / MU_SUN; // positive energy -> hyperbolic
         let r0 = 1.5; // AU
         let sig0 = 0.001;
         UniversalKeplerParams {
@@ -688,7 +691,10 @@ mod tests_prelim_kepuni {
         let r0 = 1.3803870211345761;
         let sig0 = 3.701_354_484_003_874_8E-3;
         let mu = 2.959_122_082_855_911_5E-4;
-        let alpha = -1.642_158_377_771_140_7E-4;
+        // alpha = -1/a, the reciprocal semi-major-axis convention (see
+        // `UniversalKeplerParams::alpha` doc). Equal to the raw vis-viva
+        // `2E = -1.642_158_377_771_140_7E-4` (AU^2/day^2) divided by `mu`.
+        let alpha = -0.554_947_829_724_638_7;
         let e0 = 0.283_599_599_137_344_5;
 
         let params = UniversalKeplerParams {
@@ -701,21 +707,21 @@ mod tests_prelim_kepuni {
             solver_type: SolverType::default(),
         };
         let psi = params.prelim_kepuni().unwrap();
-        assert_eq!(psi, -15.327414893041848);
+        assert_eq!(psi, -0.2636637076378094);
 
         let params2 = UniversalKeplerParams {
-            alpha: 1.642_158_377_771_140_7E-4,
+            alpha: 0.554_947_829_724_638_7,
             ..params
         };
         let psi = params2.prelim_kepuni().unwrap();
-        assert_eq!(psi, -73.1875935362658);
+        assert_eq!(psi, -1.258980225923225);
 
         let params3 = UniversalKeplerParams {
             alpha: 0.0,
             ..params
         };
         let psi = params3.prelim_kepuni().unwrap();
-        assert_eq!(psi, -15.228233329763219);
+        assert_eq!(psi, -0.2568229151088884);
     }
 
     mod kepuni_prop_tests {

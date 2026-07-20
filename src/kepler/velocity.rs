@@ -103,7 +103,7 @@ pub fn velocity_correction_with_guess(
 ) -> Result<(Vector3<f64>, f64, f64, f64), OutfitError> {
     let gravitational_parameter = GAUSS_GRAV_SQUARED;
     let radius_at_t2 = x2.norm();
-    let radial_velocity_proxy_at_t2 = x2.dot(v2);
+    let radial_velocity_proxy_at_t2 = x2.dot(v2) / gravitational_parameter.sqrt();
 
     // Quick reject: near-zero angular momentum means rectilinear, unstable motion.
     reject_if_angular_momentum_is_degenerate(x2, v2)?;
@@ -117,12 +117,16 @@ pub fn velocity_correction_with_guess(
     ))?;
 
     // Step 2: pack parameters for the universal Kepler solver.
+    // `alpha` uses the reciprocal semi-major-axis convention (alpha = -1/a =
+    // 2E/mu) expected by the Stumpff engine, not the raw vis-viva `2E` —
+    // dividing by `mu` here is what keeps `alpha` and the Lagrange
+    // coefficients below (which carry no explicit `mu` factor) consistent.
     let params = UniversalKeplerParams {
         dt,
         r0: radius_at_t2,
         sig0: radial_velocity_proxy_at_t2,
         mu: gravitational_parameter,
-        alpha: 2.0 * specific_orbital_energy, // specific orbital energy -> alpha
+        alpha: 2.0 * specific_orbital_energy / gravitational_parameter,
         e0: eccentricity,
         solver_type: SolverType {
             params: SolverParams {
@@ -140,8 +144,8 @@ pub fn velocity_correction_with_guess(
     let (_, _, s2, s3) = kepler_solution.as_raw_stumpff();
 
     // Step 4: compute the Lagrange coefficients f and g.
-    let f_coefficient = 1.0 - (gravitational_parameter * s2) / radius_at_t2;
-    let g_coefficient = dt - (gravitational_parameter * s3);
+    let f_coefficient = 1.0 - s2 / radius_at_t2;
+    let g_coefficient = dt - s3 / gravitational_parameter.sqrt();
 
     // Guard against an ill-conditioned g (division instability).
     reject_if_lagrange_g_is_unstable(g_coefficient, dt)?;
@@ -335,7 +339,7 @@ mod tests_velocity_correction {
 
         let (v2, f, g) = velocity_correction(&x1, &x2, &v2, dt, 1., 1., KEP_EPS).unwrap();
 
-        assert_eq!(f, 0.988_164_877_097_290_6);
+        assert_eq!(f, 0.9881648770972906);
         assert_eq!(g, 14.674676076120734);
         assert_eq!(
             v2.as_slice(),
