@@ -2,6 +2,56 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-07-20
+
+### Fixed
+
+- **Universal Kepler solver — `alpha`/`mu` scaling bug**
+  - `UniversalKeplerParams::alpha` was computed as the raw vis-viva energy
+    `2E = v² − 2μ/r`, but the Stumpff engine, the Kepler residual/derivative
+    equations, the Lagrange f/g coefficients, and the `prelim_elliptic` /
+    `prelim_hyperbolic` / `prelim_parabolic` initial-guess heuristics all
+    require the reciprocal-semi-major-axis convention `alpha = -1/a`
+    (`= 2E / μ`). The missing division by `μ` made `propagate_universal`
+    fail to converge — or converge to a spurious multi-revolution root — on
+    real Kalman-filter state vectors (fink-fat), especially for gaps of
+    several weeks or more.
+  - Fixed across `propagation.rs`, `newton_solver.rs`,
+    `brent_dekker_solver.rs`, and `prelim_kepler/{prelim_elliptic,
+    prelim_hyperbolic, prelim_parabolic}.rs`.
+  - Verified against an independent two-body ODE integration
+    (`test_propag`..`test_propag4` in `src/kepler/propagation.rs`).
+- **`velocity_correction` — missing `sqrt(mu)` factor on `sig0`**
+  - `src/kepler/velocity.rs` computed the radial-velocity proxy as
+    `x2.dot(v2)` instead of `x2.dot(v2) / sqrt(mu)`, a second, independent
+    bug in the same Lagrange f/g machinery used by the Gauss IOD velocity
+    refinement loop (`initial_orbit_determination/gauss.rs`).
+  - Fixing it together with the `alpha` bug above restores agreement with
+    the Orbfit reference orbit in `gauss_test::test_solve_orbit` to the
+    original 1e-13 tolerance (it silently diverged while only one of the
+    two bugs was fixed).
+
+### Added
+
+- **`propagate_universal` test coverage** (`src/kepler/propagation.rs`)
+  - `tests_propagation_edge_cases` — deterministic tests for quasi-circular,
+    high-eccentricity, near-parabolic (both signs of `alpha`), and
+    hyperbolic orbits; `dt ≈ 0`; negative `dt`; survey-cadence gaps from 35
+    to 400+ days (including multi-revolution gaps); continuity across a gap
+    boundary; degenerate (zero-norm) position input; warm-start vs
+    cold-start consistency; and agreement between `NewtonRaphson`,
+    `BrentDecker`, and `Auto` solver kinds.
+  - `tests_propagation_invariants` — property-based tests (`proptest`)
+    checking invariants that must hold for any valid two-body state: no
+    panics, the Lagrange identity `f·ġ − g·ḟ = 1`, conservation of specific
+    orbital energy and angular momentum, forward/backward round-trip
+    consistency, solver-kind agreement, chained small steps vs. a single
+    large step, and continuity under a tiny input perturbation. Orbits and
+    time-of-flight gaps are sampled from distributions matching real
+    fink-fat/Kalman-filter usage (periapsis/eccentricity up to `e = 5`,
+    survey-cadence gaps biased toward the >30-day inter-lunation and
+    inter-season regimes actually seen with ZTF/LSST).
+
 ## [4.0.0] - 2026-07-16
 
 ### Added
