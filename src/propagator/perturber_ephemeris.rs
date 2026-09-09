@@ -214,9 +214,8 @@ fn select_panel_index(t: f64, t_start: f64, radius: f64, n_panels: usize) -> usi
 
 /// Samples one perturber's heliocentric position at each of `node_epochs`.
 ///
-/// Only the position is read; `JPLEphem::body_ephemeris` velocities are not used
-/// here (they carry a backend-dependent scaling that is irrelevant to a
-/// position-only Chebyshev fit).
+/// Only the position is read: the Chebyshev fit interpolates position alone, so
+/// the velocity returned by `JPLEphem::body_ephemeris` is not needed here.
 ///
 /// # Arguments
 ///
