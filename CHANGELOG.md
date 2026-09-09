@@ -2,6 +2,47 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **N-body propagator — time-independent perturber positions**
+  - `NBodyOde::diff` ignored its time argument: every perturbing body's
+    heliocentric position was sampled once at `t0` (`build_perturber_snapshots`)
+    and held fixed for the whole integration arc. The integrated force field was
+    therefore static, which is only acceptable for very short arcs (the previous
+    doc comment claimed ≲ 30 days). On the observation arcs actually used by the
+    fitting pipeline (median ~90 days, up to ~500 days for the backward
+    ground-truth propagation) this *degraded* the fit when planetary
+    perturbations were enabled instead of improving it.
+  - Perturber positions are now evaluated at the current integration epoch from
+    a per-arc **piecewise Chebyshev interpolation**
+    (`propagator::perturber_ephemeris`), built once per trajectory in
+    `run_differential_correction` and reused by every observation propagation.
+    The ephemeris-request path (`EphemerisConfig` / `apparent_position`) builds an
+    equivalent table on the fly per call.
+  - The Sun keeps an exact special case (identically-zero heliocentric position),
+    so the Sun-only path is unchanged bit-for-bit; a new
+    `tests/test_nbody_propagator.rs` pins it against the analytic two-body
+    solution. Reference values in `test_diff_cor_nbody_nonregression` were
+    regenerated (Jupiter is now time-dependent).
+  - Backward propagation (negative spans) is fully supported: the interpolation
+    window covers `[min(t0, t1), max(t0, t1)]` plus a small margin.
+  - Fixed an inverted doc comment on `direct_acceleration` (argument is
+    `r_asteroid − r_perturber`).
+
+### Added
+
+- **`NBodyConfig::perturber_interp_degree` / `perturber_panel_days`**
+  - Tuning knobs for the perturber-position interpolation: Chebyshev degree per
+    panel (default `12`) and maximum panel length in days (default `16.0`, which
+    keeps the worst body — Mercury — below `1e-10` AU).
+- **`propagator::perturber_ephemeris`** module
+  - `PerturberEphemerisSet` / `PerturberEphemeris`: per-arc Chebyshev
+    interpolation of heliocentric perturber positions, with pure, individually
+    tested helpers (Chebyshev–Gauss nodes, series fit, Clenshaw evaluation, panel
+    layout/selection) plus property-based tests and an ephemeris oracle test.
+
 ## [4.1.0] - 2026-07-20
 
 ### Fixed

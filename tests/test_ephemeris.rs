@@ -106,6 +106,7 @@ fn nbody_ephem_config() -> EphemerisConfig {
             ],
             abs_tol: 1e-12,
             rel_tol: 1e-12,
+            ..NBodyConfig::default()
         }),
         aberration: AberrationOrder::default(),
     }

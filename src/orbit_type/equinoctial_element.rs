@@ -137,9 +137,10 @@ use crate::{
     outfit_errors::OutfitError,
     propagator::{
         nbody::{
-            build_augmented_initial_state, build_initial_state_jacobian, build_perturber_snapshots,
-            integrate_augmented_state, split_propagated_jacobian, NBodyOde, NBodyResult,
+            build_augmented_initial_state, build_initial_state_jacobian, integrate_augmented_state,
+            split_propagated_jacobian, NBodyOde, NBodyResult,
         },
+        perturber_ephemeris::PerturberEphemerisSet,
         NBodyConfig,
     },
     JPLEphem,
@@ -886,9 +887,14 @@ impl EquinoctialElements {
     /// * `t1_mjd_tt` – Target epoch expressed as Modified Julian Date in the
     ///   Terrestrial Time (TT) scale. Units: days (MJD-TT).
     /// * `jpl` – Opened JPL ephemeris file used to query the heliocentric positions
-    ///   of the perturbing bodies at t0.
-    /// * `config` – N-body configuration specifying the perturbing bodies and the
-    ///   DOP853 absolute/relative tolerances.
+    ///   of the perturbing bodies over the integration arc.
+    /// * `config` – N-body configuration specifying the perturbing bodies, the
+    ///   DOP853 absolute/relative tolerances, and the perturber-interpolation
+    ///   degree / panel length.
+    /// * `perturber_ephem` – Optional pre-built per-arc perturber-position
+    ///   interpolation.  When `Some` and it covers the propagation span it is
+    ///   used directly (per-trajectory amortisation); otherwise a table is built
+    ///   on the fly for `[min(t0, t1), max(t0, t1)]` plus a small margin.
     ///
     /// # Returns
     ///
@@ -910,6 +916,7 @@ impl EquinoctialElements {
         t1_mjd_tt: f64,
         jpl: &JPLEphem,
         config: &NBodyConfig,
+        perturber_ephem: Option<&PerturberEphemerisSet>,
     ) -> Result<NBodyResult, OutfitError> {
         let t0_mjd_tt = self.reference_epoch;
         let time_span_days = t1_mjd_tt - t0_mjd_tt;
@@ -933,10 +940,33 @@ impl EquinoctialElements {
         let augmented_initial_state =
             build_augmented_initial_state(initial_position, initial_velocity);
 
-        let epoch_t0 = hifitime::Epoch::from_mjd_in_time_scale(t0_mjd_tt, hifitime::TimeScale::TT);
-        let perturbers = build_perturber_snapshots(config, jpl, &epoch_t0)?;
+        // Perturber positions over the arc: reuse the caller's per-trajectory
+        // table when it covers the span, otherwise build one for this call.
+        let (span_start, span_end) = if t1_mjd_tt >= t0_mjd_tt {
+            (t0_mjd_tt, t1_mjd_tt)
+        } else {
+            (t1_mjd_tt, t0_mjd_tt)
+        };
+        let margin = (0.02 * (span_end - span_start)).max(1.0);
 
-        let ode = NBodyOde { perturbers };
+        let owned_perturbers;
+        let perturbers = match perturber_ephem {
+            Some(set) if set.covers(span_start, span_end) => set,
+            _ => {
+                owned_perturbers = PerturberEphemerisSet::build(
+                    config,
+                    jpl,
+                    span_start - margin,
+                    span_end + margin,
+                )?;
+                &owned_perturbers
+            }
+        };
+
+        let ode = NBodyOde {
+            perturbers: perturbers.perturbers(),
+            t0_mjd_tt,
+        };
 
         let augmented_final_state =
             integrate_augmented_state(&ode, augmented_initial_state, time_span_days, config)?;
