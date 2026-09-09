@@ -14,6 +14,7 @@
 //!   differential corrector at runtime.
 
 pub mod nbody;
+pub mod perturber_ephemeris;
 pub mod planet_gm;
 
 use nalgebra::Vector3;
@@ -106,7 +107,9 @@ fn propagate_nbody(
     jpl: &JPLEphem,
     config: &NBodyConfig,
 ) -> Result<(Vector3<f64>, Vector3<f64>), OutfitError> {
-    let result = elements.propagate_nbody(obs_time_mjd, jpl, config)?;
+    // Single-shot ephemeris query: no per-trajectory table is available here, so
+    // `propagate_nbody` builds one on the fly for this span.
+    let result = elements.propagate_nbody(obs_time_mjd, jpl, config, None)?;
     Ok(ecl_state_to_equ(result.position, result.velocity))
 }
 
@@ -148,6 +151,20 @@ pub struct NBodyConfig {
     ///
     /// Defaults to `1e-12`.
     pub rel_tol: f64,
+
+    /// Chebyshev degree per panel used to interpolate perturber positions over
+    /// the integration arc (see [`crate::propagator::perturber_ephemeris`]).
+    ///
+    /// Defaults to `12`.
+    pub perturber_interp_degree: usize,
+
+    /// Maximum panel length, in days, for the perturber-position interpolation.
+    ///
+    /// The observation arc is split into panels no longer than this before
+    /// fitting the Chebyshev series, so accuracy stays independent of the arc
+    /// length and of the fastest perturber.  The default (`16.0`) keeps the
+    /// worst body (Mercury) below `1e-10` AU at degree `12`.
+    pub perturber_panel_days: f64,
 }
 
 impl Default for NBodyConfig {
@@ -157,6 +174,8 @@ impl Default for NBodyConfig {
             perturbing_bodies: vec![NaifIds::SSB(SolarSystemBary::Sun)],
             abs_tol: 1e-12,
             rel_tol: 1e-12,
+            perturber_interp_degree: 12,
+            perturber_panel_days: 16.0,
         }
     }
 }

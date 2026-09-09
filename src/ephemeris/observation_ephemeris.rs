@@ -29,7 +29,7 @@ use crate::{
     cache::OutfitCache,
     constants::{ROT_ECLMJ2000_TO_EQUMJ2000, ROT_EQUMJ2000_TO_ECLMJ2000},
     ephemeris::aberration::correct_aberration_first_order,
-    propagator::NBodyConfig,
+    propagator::{perturber_ephemeris::PerturberEphemerisSet, NBodyConfig},
     EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
 };
 
@@ -191,13 +191,16 @@ pub trait ObservationEphemeris {
     /// propagator (DOP853) instead of the analytic Keplerian solution.
     ///
     /// The STM-based element Jacobian is computed via the variational equations
-    /// integrated alongside the state.
+    /// integrated alongside the state.  `perturber_ephem` is an optional per-arc
+    /// perturber-position interpolation; pass the trajectory-level table so it is
+    /// reused across observations, or `None` to build one per call.
     fn compute_obs_and_partials_nbody(
         &self,
         cache: &OutfitCache,
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
         config: &NBodyConfig,
+        perturber_ephem: Option<&PerturberEphemerisSet>,
     ) -> Result<ObsAndElementPartials, OutfitError>;
 }
 
@@ -455,12 +458,14 @@ impl ObservationEphemeris for Observation {
         jpl: &JPLEphem,
         equinoctial_element: &EquinoctialElements,
         config: &NBodyConfig,
+        perturber_ephem: Option<&PerturberEphemerisSet>,
     ) -> Result<ObsAndElementPartials, OutfitError> {
         // Hyperbolic orbits are not yet supported
         check_elliptical_orbit(equinoctial_element)?;
 
         let t1_mjd_tt = self.mjd_tt();
-        let nbody_result = equinoctial_element.propagate_nbody(t1_mjd_tt, jpl, config)?;
+        let nbody_result =
+            equinoctial_element.propagate_nbody(t1_mjd_tt, jpl, config, perturber_ephem)?;
 
         let obs_epoch = Epoch::from_mjd_in_time_scale(t1_mjd_tt, hifitime::TimeScale::TT);
         let obs_pos_equ = resolve_observer_geometry(self, cache, jpl, &obs_epoch);
