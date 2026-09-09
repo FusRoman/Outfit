@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **`JPLEphem::body_ephemeris` — spurious ×86400 on Horizon velocity**
+  - The Horizon branch multiplied the returned velocity by `86400.0` (comment
+    "AU/s → AU/day"), but the Horizon backend already yields AU/day after
+    `InterpResult::to_au()` — there is no per-second quantity anywhere in that
+    path. The velocity was therefore 86400× too large. Removed the scaling so
+    the Horizon branch matches `earth_ephemeris` and the documented AU/day
+    contract; added regression tests (`body_ephemeris(EarthMoon)` vs
+    `earth_ephemeris`, and velocity vs a central finite difference of the
+    position). No production result changed: the only callers of
+    `body_ephemeris` read the position and discard the velocity.
+  - Also documented (ignored regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative`): the **NAIF**
+    velocity chain is independently wrong — `EphemerisRecord::interpolate`
+    scales by `2.0 / radius` instead of `1.0 / radius`, and the NAIF branches of
+    `body_ephemeris` / `earth_ephemeris` divide by 86400 where they must
+    multiply. This is only reachable with the NAIF backend selected and is left
+    for a dedicated fix (it needs the `test_record_interpolation` /
+    `test_jpl_ephemeris` oracles regenerated).
+
 - **N-body propagator — time-independent perturber positions**
   - `NBodyOde::diff` ignored its time argument: every perturbing body's
     heliocentric position was sampled once at `t0` (`build_perturber_snapshots`)
