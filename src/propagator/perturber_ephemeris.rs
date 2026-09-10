@@ -27,7 +27,7 @@ use hifitime::{Epoch, TimeScale};
 use nalgebra::Vector3;
 
 use crate::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
-use crate::jpl_ephem::JPLEphem;
+use crate::jpl_ephem::{EphemerisFrame, JPLEphem};
 use crate::outfit_errors::OutfitError;
 use crate::propagator::{planet_gm::gm_au3_day2, NBodyConfig};
 
@@ -215,7 +215,9 @@ fn select_panel_index(t: f64, t_start: f64, radius: f64, n_panels: usize) -> usi
 /// Samples one perturber's heliocentric position at each of `node_epochs`.
 ///
 /// Only the position is read: the Chebyshev fit interpolates position alone, so
-/// the velocity returned by `JPLEphem::body_ephemeris` is not needed here.
+/// the velocity returned by `JPLEphem::body_ephemeris` is not needed here. The
+/// N-body integration runs in ecliptic mean J2000, so the position is requested
+/// in that frame ([`EphemerisFrame::Ecliptic`]).
 ///
 /// # Arguments
 ///
@@ -225,8 +227,8 @@ fn select_panel_index(t: f64, t_start: f64, radius: f64, n_panels: usize) -> usi
 ///
 /// # Returns
 ///
-/// `[xs, ys, zs]`, three `Vec<f64>` of AU components in ecliptic J2000, aligned
-/// with `node_epochs`.
+/// `[xs, ys, zs]`, three `Vec<f64>` of AU components in ecliptic mean J2000,
+/// aligned with `node_epochs`.
 ///
 /// # Errors
 ///
@@ -240,7 +242,7 @@ fn sample_component_grids(
     let mut ys = Vec::with_capacity(node_epochs.len());
     let mut zs = Vec::with_capacity(node_epochs.len());
     for epoch in node_epochs {
-        let (position, _velocity) = jpl.body_ephemeris(body, epoch)?;
+        let (position, _velocity) = jpl.body_ephemeris(body, epoch, EphemerisFrame::Ecliptic)?;
         xs.push(position[0]);
         ys.push(position[1]);
         zs.push(position[2]);
@@ -678,7 +680,9 @@ mod perturber_ephemeris_tests {
         for i in 0..=steps {
             let t = t_start + (t_end - t_start) * (i as f64 / steps as f64);
             let epoch = Epoch::from_mjd_in_time_scale(t, TimeScale::TT);
-            let (truth, _) = JPL_EPHEM_HORIZON.body_ephemeris(body, &epoch).unwrap();
+            let (truth, _) = JPL_EPHEM_HORIZON
+                .body_ephemeris(body, &epoch, EphemerisFrame::Ecliptic)
+                .unwrap();
             let err = (interp.position_at(t) - truth).norm();
             max_err = max_err.max(err);
         }
@@ -716,6 +720,29 @@ mod perturber_ephemeris_tests {
         )
         .unwrap();
         assert_eq!(interp.position_at(59_123.4), Vector3::zeros());
+    }
+
+    /// The interpolated perturber positions are in ecliptic mean J2000: the
+    /// Earth–Moon barycenter defines the ecliptic plane, so its heliocentric
+    /// `z` stays near zero (it would reach ~0.4 AU in the equatorial frame).
+    #[test]
+    fn perturber_positions_are_ecliptic() {
+        let interp = PerturberEphemeris::build(
+            NaifIds::PB(PlanetaryBary::EarthMoon),
+            &JPL_EPHEM_HORIZON,
+            59_000.0,
+            59_400.0,
+            12,
+            16.0,
+        )
+        .unwrap();
+        for mjd in [59_020.0, 59_200.0, 59_380.0] {
+            let z = interp.position_at(mjd)[2].abs();
+            assert!(
+                z < 3e-3,
+                "z = {z} AU at mjd {mjd}: perturber not in ecliptic frame"
+            );
+        }
     }
 
     // ── Property-based tests ──────────────────────────────────────────────

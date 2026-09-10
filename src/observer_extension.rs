@@ -33,7 +33,7 @@ use crate::{
     earth_orientation::equequ,
     ref_system::{rotmt, rotpn, RefEpoch, RefSystem},
     time::gmst,
-    JPLEphem, OutfitError,
+    EphemerisFrame, JPLEphem, OutfitError,
 };
 
 pub trait ResolvedObserver {
@@ -225,8 +225,11 @@ impl ResolvedObserver for Observer {
         epoch: &Epoch,
         observer_geocentric_position: &ObserverGeocentricPosition,
     ) -> Result<ObserverHeliocentricPosition, OutfitError> {
-        // Earth's heliocentric position
-        let earth_pos = jpl.earth_ephemeris(epoch, false).0.to_notnan()?;
+        // Earth's heliocentric position (equatorial mean J2000)
+        let earth_pos = jpl
+            .earth_ephemeris(epoch, EphemerisFrame::Equatorial, false)
+            .0
+            .to_notnan()?;
 
         // Transform observer position from ecliptic to equatorial J2000
         let rot_matrix = ROT_ECLMJ2000_TO_EQUMJ2000.to_notnan()?;
@@ -241,9 +244,9 @@ impl ResolvedObserver for Observer {
         epoch: &Epoch,
         observer_geocentric_velocity: &ObserverGeocentricVelocity,
     ) -> Result<ObserverHeliocentricVelocity, OutfitError> {
-        // Earth's heliocentric velocity — already in ecliptic J2000, AU/day
+        // Earth's heliocentric velocity — equatorial mean J2000, AU/day
         let earth_vel = jpl
-            .earth_ephemeris(epoch, true)
+            .earth_ephemeris(epoch, EphemerisFrame::Equatorial, true)
             .1
             .expect("Velocity is always available, this should not happen")
             .to_notnan()?;

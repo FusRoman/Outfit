@@ -800,8 +800,8 @@ impl HorizonData {
     ///   - `position` \[km\],
     ///   - `velocity` \[km/day\] (if requested),
     ///   - `acceleration` \[km/day²\] (if requested),
-    ///     all expressed relative to the center body.
-    ///     Express in the Ecliptic J2000 frame, consistent with Horizons output.
+    ///     all expressed relative to the center body,
+    ///     in the equatorial mean J2000 (ICRF) frame the DE binary is stored in.
     ///
     /// See also
     /// ------------

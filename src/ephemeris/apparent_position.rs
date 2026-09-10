@@ -43,8 +43,8 @@ use photom::{
 
 use crate::{
     cache::observer_fixed_cache::ObserverFixedCache, constants::ROT_ECLMJ2000_TO_EQUMJ2000,
-    conversion::ToNotNan, observer_extension::ResolvedObserver, EquinoctialElements, JPLEphem,
-    OutfitError,
+    conversion::ToNotNan, observer_extension::ResolvedObserver, EphemerisFrame,
+    EquinoctialElements, JPLEphem, OutfitError,
 };
 
 use super::{AberrationOrder, EphemerisConfig};
@@ -277,7 +277,8 @@ fn observer_pv(
     let (geo_pos_ecl, _) = Observer::pvobs(epoch, ut1, fixed_cache, false)?;
 
     // Single JPL Chebyshev evaluation for Earth's heliocentric state.
-    let (earth_pos_equ_raw, earth_vel_opt) = jpl.earth_ephemeris(epoch, true);
+    let (earth_pos_equ_raw, earth_vel_opt) =
+        jpl.earth_ephemeris(epoch, EphemerisFrame::Equatorial, true);
     let earth_vel_equ_raw = earth_vel_opt
         .expect("JPL earth_ephemeris with compute_velocity=true must return a velocity");
 
