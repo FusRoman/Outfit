@@ -1,15 +1,15 @@
-//! Ephemeris file resolution, caching, and (optional) download.
+//! Ephemeris file resolution, caching, and download.
 //!
 //! This module determines where to find the JPL ephemeris file required by the
-//! `jpl` layer, placing a unified cache in the user's OS cache directory and,
-//! when the `jpl-download` feature is enabled, downloading the missing file
-//! from the official JPL locations (Horizons legacy DE binaries and NAIF SPK/DAF).
+//! ephemeris backend, placing a unified cache in the user's OS cache directory
+//! and downloading the missing file from the official JPL locations (Horizons
+//! legacy DE binaries and NAIF SPK/DAF). It is compiled for every backend.
 //!
 //! # What this module does
 //! - Parse a high-level ephemeris source specification (backend + version).
 //! - Resolve a **cache path** under the OS cache directory (via `directories`).
-//! - Materialize a typed handle [`EphemFilePath`] used by readers (`horizon`, `naif`).
-//! - Optionally **download** the file if it is not present (feature `jpl-download`).
+//! - Materialize a typed handle [`EphemFilePath`] consumed by the ephemeris backend.
+//! - **Download** the file if it is not present in the cache.
 //!
 //! # Cache layout
 //! Cache root: `<os-cache>/outfit_cache/jpl_ephem`
@@ -126,7 +126,7 @@ impl TryFrom<&str> for EphemFileSource {
 }
 
 impl EphemFileSource {
-    /// Return the official base URL for the given backend (only with `jpl-download`).
+    /// Return the official base URL for the given backend.
     ///
     /// Horizons legacy binaries live under:
     /// `https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/`
@@ -146,7 +146,7 @@ impl EphemFileSource {
         }
     }
 
-    /// Compose the full URL for the concrete version file (only with `jpl-download`).
+    /// Compose the full URL for the concrete version file.
     ///
     /// This uses the backend‑specific filename returned by the version enums.
     ///
@@ -189,7 +189,7 @@ impl EphemFileSource {
     }
 }
 
-/// Download a (potentially large) file to `path` (feature `jpl-download`).
+/// Download a (potentially large) file to `path`.
 ///
 /// Uses `reqwest` to stream the HTTP body in chunks and writes it asynchronously
 /// with Tokio's `File` implementation.
@@ -260,7 +260,7 @@ impl EphemFilePath {
     /// 2. Compose the full local filename for the requested version.
     /// 3. If the file **exists**, return its typed path.
     /// 4. If the file is **missing**:
-    ///    - with feature `jpl-download`: download it to the cache and return the path,
+    ///    - if it is missing from the cache, download it and return the path,
     ///    - otherwise: return an error.
     ///
     /// Errors
@@ -282,7 +282,7 @@ impl EphemFilePath {
     /// See also
     /// --------
     /// * [`EphemFileSource`] — Backend + version selector.
-    /// * \[`download_big_file`\] — Async downloader (gated by `jpl-download`).
+    /// * \[`download_big_file`\] — Async downloader.
     pub fn get_ephemeris_file(file_source: &EphemFileSource) -> Result<EphemFilePath, OutfitError> {
         let local_file = EphemFilePath::try_from(file_source.clone())?;
 

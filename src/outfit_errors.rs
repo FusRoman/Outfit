@@ -18,9 +18,11 @@
 //! - [`InvalidJPLEphemFileVersion`](crate::outfit_errors::OutfitError::InvalidJPLEphemFileVersion)
 //! - [`JPLFileNotFound`](crate::outfit_errors::OutfitError::JPLFileNotFound)
 //! - [`InvalidSpkDataType`](crate::outfit_errors::OutfitError::InvalidSpkDataType)
+//! - [`EphemerisBodyNotSupported`](crate::outfit_errors::OutfitError::EphemerisBodyNotSupported)
+//! - `AniseEphemerisError` *(feature: `ephem-anise`)*
 //!
 //! **Typical causes**: malformed `"horizon:DE###"` strings; unsupported ephemeris revisions;
-//! missing local SPK files; unexpected segment types.
+//! missing local SPK files; unexpected segment types; an out-of-coverage epoch.
 //!
 //! **Remediation**: validate early; log available revisions; check paths; assert known SPK types.
 //!
@@ -30,7 +32,7 @@
 //!
 //! - [`InvalidUrl`](crate::outfit_errors::OutfitError::InvalidUrl)
 //! - [`UreqHttpError`](crate::outfit_errors::OutfitError::UreqHttpError)
-//! - \[`ReqwestError`\](crate::outfit_errors::OutfitError::ReqwestError) *(feature: `jpl-download`)*
+//! - [`ReqwestError`](crate::outfit_errors::OutfitError::ReqwestError)
 //! - [`IoError`](crate::outfit_errors::OutfitError::IoError)
 //! - [`UnableToCreateBaseDir`](crate::outfit_errors::OutfitError::UnableToCreateBaseDir)
 //! - [`Utf8PathError`](crate::outfit_errors::OutfitError::Utf8PathError)
@@ -282,6 +284,12 @@ pub enum OutfitError {
     #[error("Ephemeris body not supported by this backend: {0}")]
     EphemerisBodyNotSupported(String),
 
+    /// Failure reported by the ANISE ephemeris backend (feature `ephem-anise`):
+    /// kernel parsing, an out-of-coverage epoch, or an unresolved body chain.
+    #[cfg(feature = "ephem-anise")]
+    #[error("ANISE ephemeris error: {0}")]
+    AniseEphemerisError(String),
+
     #[error("N-body propagation failed: {0}")]
     NBodyPropagationFailed(String),
 
@@ -380,6 +388,8 @@ impl PartialEq for OutfitError {
             (DifferentialCorrectionDiverged, DifferentialCorrectionDiverged) => true,
             (DifferentialCorrectionFailed(a), DifferentialCorrectionFailed(b)) => a == b,
             (EphemerisBodyNotSupported(a), EphemerisBodyNotSupported(b)) => a == b,
+            #[cfg(feature = "ephem-anise")]
+            (AniseEphemerisError(a), AniseEphemerisError(b)) => a == b,
             (NBodyPropagationFailed(a), NBodyPropagationFailed(b)) => a == b,
 
             _ => false,

@@ -1016,6 +1016,8 @@ mod test_observations_ephemeris {
             (obs_dataset, cache)
         }
 
+        // Exact golden reproduction of the in-house reader's output.
+        #[cfg(feature = "ephem-builtin")]
         #[test]
         fn test_ephem_error() {
             let (obs_dataset, cache) = make_obs_dataset_and_cache_mpc(

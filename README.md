@@ -396,6 +396,27 @@ The pipeline converts elements to **equinoctial form**, propagates with the sele
 
 ---
 
+## Cargo Feature Flags
+
+| Feature | Default | Description |
+|---|---|---|
+| `ephem-builtin` | ✅ | Planetary ephemeris backend: the in-house reader for legacy JPL DE binaries (`horizon:DE###`) and NAIF SPK/DAF kernels (`naif:DE###`). |
+| `ephem-anise` | | Planetary ephemeris backend: the [`anise`](https://crates.io/crates/anise) toolkit, validated against the NAIF SPICE toolkit to machine precision. Reads NAIF SPK kernels only, so it requires a `naif:DE###` source. |
+| `parallel` | | Rayon-backed parallel batch execution (`fit_full_iod_parallel`, `compute_ephemerides_parallel`). |
+| `serde` | | `Serialize` / `Deserialize` derives on the solver-configuration types. |
+
+At least one `ephem-*` backend must be enabled; building with neither is a compile error. Enabling both compiles both, and `JPLEphem::new` then selects the ANISE backend — call `JPLEphem::from_builtin` to force the in-house reader.
+
+```toml
+# In-house reader (default)
+outfit = "5.0"
+
+# ANISE backend instead
+outfit = { version = "5.0", default-features = false, features = ["ephem-anise"] }
+```
+
+---
+
 ## Performance & Reproducibility
 
 - **Deterministic runs** by default (set RNG seeds explicitly when noise is used).

@@ -8,6 +8,8 @@
 //! heliocentric position, so switching to the Chebyshev interpolation must not
 //! move this result.
 
+mod common;
+
 use nalgebra::Vector3;
 use outfit::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
 use outfit::orbit_type::equinoctial_element::EquinoctialElements;
@@ -36,9 +38,7 @@ fn sun_only_config() -> NBodyConfig {
 }
 
 fn load_ephem() -> JPLEphem {
-    "horizon:DE440"
-        .try_into()
-        .expect("failed to load horizon:DE440 ephemeris")
+    common::load_ephem()
 }
 
 /// Maximum absolute component error between two vectors.

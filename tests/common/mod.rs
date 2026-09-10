@@ -1,5 +1,39 @@
 use approx::abs_diff_eq;
-use outfit::{orbit_type::uncertainty::OrbitalCovariance, OrbitalElements};
+use outfit::{orbit_type::uncertainty::OrbitalCovariance, JPLEphem, OrbitalElements};
+
+/// Ephemeris source string for the planetary backend selected at compile time.
+///
+/// The in-house reader (`ephem-builtin`) is exercised through the legacy DE
+/// binary; when only `ephem-anise` is enabled the ANISE backend is used, which
+/// reads NAIF SPK kernels only.
+///
+/// # Returns
+///
+/// `"horizon:DE440"` with `ephem-builtin`, otherwise `"naif:DE440"`.
+#[allow(dead_code)]
+pub fn ephem_spec() -> &'static str {
+    if cfg!(feature = "ephem-builtin") {
+        "horizon:DE440"
+    } else {
+        "naif:DE440"
+    }
+}
+
+/// Load the DE440 planetary ephemeris for the active backend.
+///
+/// # Returns
+///
+/// A ready-to-query [`JPLEphem`] for the backend selected at compile time.
+///
+/// # Panics
+///
+/// Panics if the ephemeris file cannot be resolved, downloaded, or parsed.
+#[allow(dead_code)]
+pub fn load_ephem() -> JPLEphem {
+    ephem_spec()
+        .try_into()
+        .expect("failed to load the DE440 ephemeris for the active backend")
+}
 
 #[allow(dead_code)]
 pub fn approx_equal(current: &OrbitalElements, other: &OrbitalElements, tol: f64) -> bool {

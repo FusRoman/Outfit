@@ -59,9 +59,7 @@ fn test_iod_from_polars() {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_ephem: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("Failed to load JPL ephemeris");
+    let jpl_ephem: JPLEphem = common::load_ephem();
 
     let mut full_orbit = obs_dataset
         .fit_full_iod(

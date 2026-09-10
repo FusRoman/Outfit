@@ -1,3 +1,9 @@
+//! Exact-oracle non-regression tests for the Gauss IOD pipeline. The reference
+//! orbits below reproduce the in-house ephemeris reader's arithmetic bit-for-bit,
+//! so the whole file is gated on that backend; the ANISE backend is exercised by
+//! `test_ephemeris`, `test_diff_cor_nbody` and the parity tests in the library.
+#![cfg(feature = "ephem-builtin")]
+
 mod common;
 
 use approx::assert_relative_eq;
@@ -76,9 +82,7 @@ fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_ephem: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("Failed to load JPL ephemeris");
+    let jpl_ephem: JPLEphem = common::load_ephem();
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",

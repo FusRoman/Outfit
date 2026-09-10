@@ -4,7 +4,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Alternative planetary ephemeris backend via ANISE (`ephem-anise` feature)**
+  - The planetary ephemeris backend is now chosen at compile time by Cargo
+    feature. `ephem-builtin` (in the `default` set) keeps the in-house JPL DE /
+    NAIF SPK reader; `ephem-anise` swaps in the [`anise`](https://crates.io/crates/anise)
+    toolkit, a Rust reimplementation of the NAIF SPICE toolkit validated against
+    SPICE to machine precision. This is motivated by the still-open velocity-chain
+    bug in the in-house NAIF reader (see the ignored regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative`): the ANISE backend
+    computes correct velocities, and a new regression test
+    (`body_velocity_matches_central_difference`) locks that in.
+  - New constructors on `JPLEphem`: `from_builtin` and `from_anise`. `JPLEphem::new`
+    is unchanged and selects the backend from the enabled features — the ANISE
+    backend when both are on; use `from_builtin` to force the in-house reader.
+    Building with neither `ephem-builtin` nor `ephem-anise` is a compile error.
+  - The ANISE backend reads NAIF SPK kernels only; a `horizon:` (legacy DE binary)
+    source returns `OutfitError::InvalidJPLEphemFileSource`. It reuses Outfit's
+    existing ephemeris downloader and on-disk cache (no `anise/metaload`).
+  - New error variant `OutfitError::AniseEphemerisError(String)` (feature-gated).
+  - `earth_ephemeris` under ANISE returns the Earth **geocenter** relative to the
+    Sun, matching the built-in Horizon reader (the built-in NAIF reader returns
+    the Earth–Moon barycenter relative to the Solar System Barycenter). Parity
+    tests check ANISE against the Horizon reader to `1e-8` AU on planet positions
+    and `1e-9` AU / `1e-10` AU·day⁻¹ on Earth.
+  - `hifitime` requirement bumped to `4.3` (shared, unchanged epoch type). The
+    `nalgebra` requirement is unchanged; the ANISE state is converted at the
+    backend boundary.
+
 ### Changed
+
+- **Planetary ephemeris readers are behind `feature = "ephem-builtin"`** (breaking)
+  - The `jpl_ephem::horizon` and `jpl_ephem::naif` reader submodules,
+    `JPLEphem::HorizonFile` / `JPLEphem::NaifFile`, and
+    `JPLEphem::try_into_horizon` / `try_into_naif` now require the
+    `ephem-builtin` feature, which is enabled by the `default` feature set. The
+    lightweight `horizon_version`, `naif_version` and `naif_ids` modules stay
+    available for every feature combination.
 
 - **`JPLEphem::earth_ephemeris` / `body_ephemeris` — explicit output frame** (breaking)
   - Both methods now take an `EphemerisFrame` argument (`Equatorial` or

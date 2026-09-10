@@ -1,17 +1,22 @@
 mod common;
 
-use crate::common::approx_equal;
-use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::jpl_ephem::naif::naif_ids::{
     planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary, NaifIds,
 };
-use outfit::orbit_type::uncertainty::{EquinoctialUncertainty, OrbitalCovariance};
 use outfit::{
     orbit_type::{equinoctial_element::EquinoctialElements, OrbitalElements},
     propagator::{NBodyConfig, PropagatorKind},
     DifferentialCorrectionConfig, FitLSQ, IODParams, JPLEphem,
 };
+
+// Used only by the exact-oracle tests gated on the in-house ephemeris reader.
+#[cfg(feature = "ephem-builtin")]
+use crate::common::approx_equal;
+#[cfg(feature = "ephem-builtin")]
+use approx::assert_relative_eq;
+#[cfg(feature = "ephem-builtin")]
+use outfit::orbit_type::uncertainty::{EquinoctialUncertainty, OrbitalCovariance};
 use photom::TrajId;
 use photom::{observation_dataset::ObsDataset, observer::error_model::ObsErrorModel};
 use rand::{rngs::StdRng, SeedableRng};
@@ -26,9 +31,7 @@ fn build_test_fixtures() -> (
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_ephem: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("Failed to load JPL ephemeris");
+    let jpl_ephem: JPLEphem = common::load_ephem();
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
@@ -69,6 +72,10 @@ fn build_test_fixtures() -> (
 /// Oracle values were captured from a known-good Outfit run with seed 42.
 /// Tolerances:
 ///   - Non-regression (Outfit vs oracle): 1e-10 absolute
+// Exact-oracle reproduction of the in-house ephemeris reader; the ANISE pipeline
+// is covered by `test_diff_cor_nbody` (physical bounds) and the library parity
+// tests.
+#[cfg(feature = "ephem-builtin")]
 #[test]
 fn test_diff_cor() {
     let nr_tol = 1e-10;
@@ -544,6 +551,7 @@ fn test_diff_cor_nbody() {
 
 /// Helper: dumps a converged N-body orbit as a ready-to-paste oracle block.
 /// Run with `cargo test --test test_diff_cor dump_nbody_nonregression_oracle -- --ignored --nocapture`.
+#[cfg(feature = "ephem-builtin")]
 #[test]
 #[ignore = "prints regenerated oracle literals for test_diff_cor_nbody_nonregression"]
 fn dump_nbody_nonregression_oracle() {
@@ -659,6 +667,8 @@ fn dump_nbody_nonregression_oracle() {
 ///
 /// Reference values were captured from a deterministic run of
 /// `dump_nbody_nonregression_oracle` and must remain reproducible to 1e-10.
+// Exact-oracle reproduction of the in-house ephemeris reader.
+#[cfg(feature = "ephem-builtin")]
 #[test]
 fn test_diff_cor_nbody_nonregression() {
     let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) = build_test_fixtures();

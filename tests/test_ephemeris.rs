@@ -49,9 +49,7 @@ fn build_fixtures() -> (
 ) {
     let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long").expect("UT1 download failed");
 
-    let jpl: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("JPL ephemeris load failed");
+    let jpl: JPLEphem = common::load_ephem();
 
     let (raw_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
