@@ -247,6 +247,7 @@ fn assert_median_below(seps: &mut [f64], label: &str, threshold_arcsec: f64) {
     assert!(!seps.is_empty(), "{label}: no separations computed");
     seps.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = seps[seps.len() / 2];
+    println!("{label}: median {median:.4} arcsec (threshold {threshold_arcsec:.2})");
     assert!(
         median < threshold_arcsec,
         "{label}: median {median:.2} arcsec ≥ threshold {threshold_arcsec:.1} arcsec"
@@ -539,25 +540,31 @@ fn run_nbody_ephemeris_test(traj_id: TrajId, threshold_arcsec: f64) {
     );
 }
 
-/// N-body ephemeris test for **33803 Julienpeloton** — threshold 2 arcsec.
+/// N-body ephemeris test for **33803 Julienpeloton**.
+///
+/// The threshold bounds the per-site median apparent-position residual reached
+/// on this main-belt arc (~0.29 arcsec) with margin.
 #[test]
 fn test_ephemeris_33803_nbody() {
-    run_nbody_ephemeris_test(TrajId::Int(33803), 2.0);
+    run_nbody_ephemeris_test(TrajId::Int(33803), 0.4);
 }
 
-/// N-body ephemeris test for **8467 Benoîtcarry** — threshold 2 arcsec.
+/// N-body ephemeris test for **8467 Benoîtcarry**.
+///
+/// The threshold bounds the per-site median apparent-position residual reached
+/// on this main-belt arc (~0.29 arcsec) with margin.
 #[test]
 fn test_ephemeris_8467_nbody() {
-    run_nbody_ephemeris_test(TrajId::Int(8467), 2.0);
+    run_nbody_ephemeris_test(TrajId::Int(8467), 0.4);
 }
 
-/// N-body ephemeris test for **2015 AB** (K09R05F) — threshold 15 arcsec.
+/// N-body ephemeris test for **2015 AB** (K09R05F).
 ///
-/// The long (~2000-day) arc and NEA dynamics make sub-2-arcsec residuals
-/// unrealistic here; we use the same bound as the 2-body test for this object.
+/// The long (~2000-day) arc and NEA dynamics keep the per-site median residual
+/// at a few arcsec (~2.7 arcsec); the threshold bounds that value with margin.
 #[test]
 fn test_ephemeris_2015ab_nbody() {
-    run_nbody_ephemeris_test(TrajId::from("K09R05F"), 15.0);
+    run_nbody_ephemeris_test(TrajId::from("K09R05F"), 3.5);
 }
 
 // ── Batch ephemeris tests (FullOrbitResultExt) ────────────────────────────────
