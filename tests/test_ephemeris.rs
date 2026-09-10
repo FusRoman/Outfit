@@ -543,16 +543,16 @@ fn run_nbody_ephemeris_test(traj_id: TrajId, threshold_arcsec: f64) {
 /// N-body ephemeris test for **33803 Julienpeloton**.
 ///
 /// The threshold bounds the per-site median apparent-position residual reached
-/// on this main-belt arc (~0.29 arcsec) with margin.
+/// on this main-belt arc (~0.18 arcsec) with margin.
 #[test]
 fn test_ephemeris_33803_nbody() {
-    run_nbody_ephemeris_test(TrajId::Int(33803), 0.4);
+    run_nbody_ephemeris_test(TrajId::Int(33803), 0.3);
 }
 
 /// N-body ephemeris test for **8467 Benoîtcarry**.
 ///
 /// The threshold bounds the per-site median apparent-position residual reached
-/// on this main-belt arc (~0.29 arcsec) with margin.
+/// on this main-belt arc (~0.28 arcsec) with margin.
 #[test]
 fn test_ephemeris_8467_nbody() {
     run_nbody_ephemeris_test(TrajId::Int(8467), 0.4);
@@ -560,11 +560,11 @@ fn test_ephemeris_8467_nbody() {
 
 /// N-body ephemeris test for **2015 AB** (K09R05F).
 ///
-/// The long (~2000-day) arc and NEA dynamics keep the per-site median residual
-/// at a few arcsec (~2.7 arcsec); the threshold bounds that value with margin.
+/// The threshold bounds the per-site median apparent-position residual reached
+/// on this long (~2000-day) NEA arc (~0.22 arcsec) with margin.
 #[test]
 fn test_ephemeris_2015ab_nbody() {
-    run_nbody_ephemeris_test(TrajId::from("K09R05F"), 3.5);
+    run_nbody_ephemeris_test(TrajId::from("K09R05F"), 0.5);
 }
 
 // ── Batch ephemeris tests (FullOrbitResultExt) ────────────────────────────────

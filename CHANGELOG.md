@@ -4,6 +4,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`JPLEphem::earth_ephemeris` / `body_ephemeris` — explicit output frame** (breaking)
+  - Both methods now take an `EphemerisFrame` argument (`Equatorial` or
+    `Ecliptic`). JPL DE and NAIF SPK data are stored in equatorial mean J2000
+    (ICRF); `EphemerisFrame::Equatorial` returns it unchanged,
+    `EphemerisFrame::Ecliptic` rotates the state to ecliptic mean J2000 with
+    `ROT_EQUMJ2000_TO_ECLMJ2000`. `EphemerisFrame` is re-exported at the crate
+    root and in the prelude.
+  - Fixes an out-of-plane perturbation error: the N-body propagator integrates in
+    ecliptic mean J2000 but `perturber_ephemeris` sampled `body_ephemeris`
+    without rotating, so every perturber sat up to ~2 AU off the ecliptic. It now
+    samples in `EphemerisFrame::Ecliptic`. The stray force coupled the fitted
+    inclination and ascending node; the ephemeris residuals for the N-body
+    reference objects drop accordingly (e.g. K09R05F per-site median from ~2.7″
+    to ~0.2″).
+  - The four `earth_ephemeris` call sites already treated the output as
+    equatorial and now pass `EphemerisFrame::Equatorial` — no numerical change.
+    The mislabeled "ecliptic J2000" docs on `body_ephemeris`,
+    `HorizonData::ephemeris` and `NaifData::ephemeris` were corrected.
+  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated; the
+    `tests/test_ephemeris.rs` `*_nbody` thresholds are now 0.3″ / 0.4″ / 0.5″.
+    Added frame-consistency unit and property tests in `jpl_ephem` and a
+    `perturber_positions_are_ecliptic` guard in `perturber_ephemeris`. The
+    Sun-only propagation path is unchanged (rotation-invariant).
+
 ### Fixed
 
 - **N-body propagator — inverted sign on the indirect perturbation term**
@@ -22,10 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     property-based tests: the net perturbation (direct + indirect) vanishes as
     the small body approaches the Sun, the indirect term is antiparallel to the
     perturber position, and the gravity gradient is untouched.
-  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated.
-    The `*_nbody` thresholds in `tests/test_ephemeris.rs` were tightened to the
-    residuals now actually reached (0.4″ for the main-belt arcs, 3.5″ for the
-    long NEA arc).
+  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated and
+    the `*_nbody` thresholds in `tests/test_ephemeris.rs` were tightened to the
+    residuals now reached (see also the frame fix below).
   - Also realigned the `direct_acceleration` argument doc with the code
     (`r_asteroid − r_perturber`).
 

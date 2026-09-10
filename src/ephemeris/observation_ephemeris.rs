@@ -30,7 +30,7 @@ use crate::{
     constants::{ROT_ECLMJ2000_TO_EQUMJ2000, ROT_EQUMJ2000_TO_ECLMJ2000},
     ephemeris::aberration::correct_aberration_first_order,
     propagator::{perturber_ephemeris::PerturberEphemerisSet, NBodyConfig},
-    EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
+    EphemerisFrame, EquinoctialElements, JPLEphem, OutfitError, VLIGHT_AU,
 };
 
 /// Apparent equatorial coordinates together with their partial derivatives
@@ -309,7 +309,7 @@ fn resolve_observer_geometry(
     jpl: &JPLEphem,
     obs_epoch: &Epoch,
 ) -> TopocentricGeometryInputsWithoutAsteroid {
-    let (earth_position_equ, _) = jpl.earth_ephemeris(obs_epoch, false);
+    let (earth_position_equ, _) = jpl.earth_ephemeris(obs_epoch, EphemerisFrame::Equatorial, false);
     let earth_pos_ecl = ROT_EQUMJ2000_TO_ECLMJ2000 * earth_position_equ;
 
     let geo_obs_pos = cache

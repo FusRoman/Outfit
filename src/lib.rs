@@ -398,7 +398,7 @@ pub use crate::constants::{
 };
 
 // JPL ephemeris enum for runtime inspection (optional but convenient)
-pub use crate::jpl_ephem::JPLEphem;
+pub use crate::jpl_ephem::{EphemerisFrame, JPLEphem};
 
 // Ephemeris façade
 pub use crate::ephemeris::{
@@ -427,7 +427,8 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// ```
 pub mod prelude {
     pub use crate::{
-        FitIOD, FullOrbitResult, GaussResult, IODParams, JPLEphem, OutfitError, IODRMS,
+        EphemerisFrame, FitIOD, FullOrbitResult, GaussResult, IODParams, JPLEphem, OutfitError,
+        IODRMS,
     };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
