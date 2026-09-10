@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **N-body propagator — inverted sign on the indirect perturbation term**
+  - `indirect_acceleration` returned `+GM·r_p/|r_p|³` instead of
+    `−GM·r_p/|r_p|³`. In the heliocentric equation of motion the indirect term
+    subtracts the acceleration imparted by each perturber to the (non-inertial)
+    Sun; with the wrong sign the perturbation was added twice in the in-plane
+    direction, so enabling planets *degraded* the fit and the residual grew with
+    arc length. Fixed the sign; module and function docs updated to match.
+  - The direct term and the gravity gradient `∂a/∂r` are unaffected (the
+    indirect term does not depend on the small-body position), so the state
+    transition matrix and covariance are unchanged. The Sun-only path is
+    unchanged bit-for-bit (the Sun's heliocentric position is identically zero,
+    so its indirect term is skipped).
+  - Added a `#[cfg(test)] mod tests` in `propagator::nbody` with unit and
+    property-based tests: the net perturbation (direct + indirect) vanishes as
+    the small body approaches the Sun, the indirect term is antiparallel to the
+    perturber position, and the gravity gradient is untouched.
+  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated.
+    The `*_nbody` thresholds in `tests/test_ephemeris.rs` were tightened to the
+    residuals now actually reached (0.4″ for the main-belt arcs, 3.5″ for the
+    long NEA arc).
+  - Also realigned the `direct_acceleration` argument doc with the code
+    (`r_asteroid − r_perturber`).
+
 - **`JPLEphem::body_ephemeris` — spurious ×86400 on Horizon velocity**
   - The Horizon branch multiplied the returned velocity by `86400.0` (comment
     "AU/s → AU/day"), but the Horizon backend already yields AU/day after
