@@ -33,6 +33,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     `nalgebra` requirement is unchanged; the ANISE state is converted at the
     backend boundary.
 
+- **Main-belt asteroids as N-body perturbers (ANISE backend)**
+  - `NaifIds` gained an `AST(AsteroidNumber)` variant identifying a numbered
+    main-belt asteroid by its official minor-planet number (e.g. `1` for
+    Ceres); `AsteroidNumber::CERES` / `PALLAS` / `VESTA` are provided for
+    convenience.
+  - New constructor `JPLEphem::from_anise_with_main_belt_asteroids` loads DE440
+    plus a supplementary NAIF SPK kernel
+    (`codes_300ast_20100725.bsp`, downloaded and cached like the primary
+    kernel) covering 300 numbered asteroids. Once loaded, any of them can be
+    added to `NBodyConfig::perturbing_bodies` like any other body.
+  - `propagator::planet_gm::known_main_belt_asteroids()` returns all 300 as
+    ready-to-use `NaifIds::AST(_)` perturbers, each with a gravitational
+    parameter from the kernel's own published mass table — pick as many or as
+    few as needed.
+  - This is ANISE-specific: the in-house reader has no code path for
+    supplementary small-body kernels, so `NaifIds::AST(_)` only resolves under
+    the `ephem-anise` backend.
+
 ### Changed
 
 - **Planetary ephemeris readers are behind `feature = "ephem-builtin"`** (breaking)
@@ -68,6 +86,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     Sun-only propagation path is unchanged (rotation-invariant).
 
 ### Fixed
+
+- **`NaifData::ephemeris` (built-in NAIF SPK backend) — panicked instead of
+  returning an error**
+  - Querying a `(target, center)` pair absent from the loaded kernel, or an
+    epoch outside a segment's coverage, made `naif_data::NaifData::ephemeris`
+    panic. `NaifIds::AST(_)` (main-belt asteroids) made this easy to trigger,
+    since `de440.bsp`-style kernels never carry small bodies, but the bug is
+    general — any unsupported body/epoch combination on this backend hit it.
+    `ephemeris` now returns `Result<InterpResult, OutfitError>`
+    (`OutfitError::EphemerisBodyNotSupported` on failure); the two
+    `JPLEphem::NaifFile` call sites in `jpl_ephem::mod` propagate it through
+    the existing `body_ephemeris` `Result`, matching how the built-in Horizon
+    reader and the ANISE backend already report the same situation.
+    `earth_ephemeris` keeps its infallible contract (Earth is always present
+    in a real kernel) by panicking with a clear message on failure instead,
+    consistent with the ANISE backend's documented behaviour for Earth. This
+    is a breaking change to `NaifData::ephemeris`'s public signature.
+  - Documented, on `NaifIds`, exactly which variant each backend can resolve
+    and what happens when it can't (always an error, never a panic, except
+    for the documented `earth_ephemeris` case above).
 
 - **N-body propagator — inverted sign on the indirect perturbation term**
   - `indirect_acceleration` returned `+GM·r_p/|r_p|³` instead of

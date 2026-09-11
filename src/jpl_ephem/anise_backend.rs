@@ -32,10 +32,11 @@
 use std::sync::Arc;
 
 use anise::prelude::{Almanac, Frame};
+use camino::Utf8Path;
 use hifitime::Epoch;
 use nalgebra::Vector3;
 
-use crate::constants::AU;
+use crate::constants::{AU, ROT_ECLMJ2000_TO_EQUMJ2000};
 use crate::jpl_ephem::download_jpl_file::EphemFilePath;
 use crate::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
 use crate::outfit_errors::OutfitError;
@@ -104,6 +105,86 @@ fn cartesian_km_s_to_au_day(
     (position_au, velocity_au_day)
 }
 
+/// True for every body served by the main-belt asteroid supplementary kernel
+/// (`codes_300ast_20100725.bsp`, NAIF ids `2_000_000..=2_999_999`).
+///
+/// That kernel stores its states in the ECLIPJ2000_DE405 frame (ecliptic mean
+/// J2000 at the DE405 obliquity), not equatorial mean J2000/ICRF. ANISE's
+/// translation-only API returns whatever frame the segment is stored in
+/// without rotating it, so bodies from this kernel need the correction in
+/// [`correct_ecliptic_de405_frame`] before they can be treated as equatorial.
+///
+/// # Arguments
+///
+/// * `target_naif_id` – NAIF integer identifier being queried.
+///
+/// # Returns
+///
+/// `true` if `target_naif_id` falls in the main-belt asteroid id range.
+fn needs_ecliptic_de405_correction(target_naif_id: i32) -> bool {
+    (2_000_000..3_000_000).contains(&target_naif_id)
+}
+
+/// Rotate a heliocentric state from ECLIPJ2000_DE405 to equatorial mean J2000,
+/// when the body's source kernel requires it.
+///
+/// The DE405 obliquity (84381.412″) that defines ECLIPJ2000_DE405 is, to the
+/// precision both are stated at, the same obliquity as
+/// [`ROT_ECLMJ2000_TO_EQUMJ2000`](crate::constants::ROT_ECLMJ2000_TO_EQUMJ2000),
+/// so that existing rotation is reused rather than deriving a new one.
+///
+/// # Arguments
+///
+/// * `target_naif_id` – NAIF integer identifier the state belongs to.
+/// * `position_au` – position, AU, as returned by [`cartesian_km_s_to_au_day`].
+/// * `velocity_au_day` – velocity, AU per day, same source.
+///
+/// # Returns
+///
+/// `(position, velocity)` in equatorial mean J2000: rotated when
+/// [`needs_ecliptic_de405_correction`] is `true` for `target_naif_id`,
+/// returned unchanged otherwise.
+fn correct_ecliptic_de405_frame(
+    target_naif_id: i32,
+    position_au: Vector3<f64>,
+    velocity_au_day: Vector3<f64>,
+) -> (Vector3<f64>, Vector3<f64>) {
+    if needs_ecliptic_de405_correction(target_naif_id) {
+        (
+            ROT_ECLMJ2000_TO_EQUMJ2000 * position_au,
+            ROT_ECLMJ2000_TO_EQUMJ2000 * velocity_au_day,
+        )
+    } else {
+        (position_au, velocity_au_day)
+    }
+}
+
+/// Extract the on-disk path of an [`EphemFilePath`] that denotes a NAIF SPK
+/// kernel, rejecting the legacy-DE variant this backend cannot read.
+///
+/// # Arguments
+///
+/// * `path` – resolved ephemeris file.
+///
+/// # Returns
+///
+/// The kernel's on-disk path.
+///
+/// # Errors
+///
+/// Returns [`OutfitError::InvalidJPLEphemFileSource`] if `path` denotes a
+/// legacy DE binary (`EphemFilePath::JPLHorizon`).
+fn spk_path(path: &EphemFilePath) -> Result<&Utf8Path, OutfitError> {
+    match path {
+        EphemFilePath::Naif(kernel_path, _) => Ok(kernel_path),
+        EphemFilePath::MainBeltAsteroids(kernel_path) => Ok(kernel_path),
+        EphemFilePath::JPLHorizon(..) => Err(OutfitError::InvalidJPLEphemFileSource(
+            "the ANISE backend reads NAIF SPK kernels only; use a \"naif:DE###\" source"
+                .to_string(),
+        )),
+    }
+}
+
 /// Planetary ephemeris backend holding a NAIF SPK kernel parsed by ANISE.
 ///
 /// The kernel is reference-counted so that cloning the handle is cheap; the
@@ -137,16 +218,34 @@ impl AniseEphem {
     ///   binary, which this backend cannot read.
     /// * [`OutfitError::AniseEphemerisError`] – the kernel could not be parsed.
     pub fn from_file_path(path: &EphemFilePath) -> Result<Self, OutfitError> {
-        let kernel_path = match path {
-            EphemFilePath::Naif(kernel_path, _) => kernel_path,
-            EphemFilePath::JPLHorizon(..) => {
-                return Err(OutfitError::InvalidJPLEphemFileSource(
-                    "the ANISE backend reads NAIF SPK kernels only; use a \"naif:DE###\" source"
-                        .to_string(),
-                ))
-            }
-        };
-        let almanac = Almanac::new(kernel_path.as_str())
+        let almanac = Almanac::new(spk_path(path)?.as_str())
+            .map_err(|err| OutfitError::AniseEphemerisError(err.to_string()))?;
+        Ok(Self {
+            almanac: Arc::new(almanac),
+        })
+    }
+
+    /// Load an additional SPK kernel into this backend (e.g. the main-belt
+    /// asteroid supplementary kernel), returning a new handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` – resolved ephemeris file to add; it must denote a NAIF SPK
+    ///   kernel.
+    ///
+    /// # Returns
+    ///
+    /// A new [`AniseEphem`] whose kernel can resolve every body covered by
+    /// either the original kernel(s) or `path`.
+    ///
+    /// # Errors
+    ///
+    /// * [`OutfitError::InvalidJPLEphemFileSource`] – the path denotes a
+    ///   legacy DE binary, which this backend cannot read.
+    /// * [`OutfitError::AniseEphemerisError`] – the kernel could not be parsed.
+    pub fn with_supplementary_kernel(self, path: &EphemFilePath) -> Result<Self, OutfitError> {
+        let almanac = Arc::unwrap_or_clone(self.almanac)
+            .load(spk_path(path)?.as_str())
             .map_err(|err| OutfitError::AniseEphemerisError(err.to_string()))?;
         Ok(Self {
             almanac: Arc::new(almanac),
@@ -252,7 +351,12 @@ impl AniseEphem {
     ) -> Result<(Vector3<f64>, Vector3<f64>), OutfitError> {
         let target_naif_id = resolve_translation_target(body)?;
         let (radius_km, velocity_km_s) = self.heliocentric_state_km(target_naif_id, epoch)?;
-        Ok(cartesian_km_s_to_au_day(radius_km, velocity_km_s))
+        let (position_au, velocity_au_day) = cartesian_km_s_to_au_day(radius_km, velocity_km_s);
+        Ok(correct_ecliptic_de405_frame(
+            target_naif_id,
+            position_au,
+            velocity_au_day,
+        ))
     }
 }
 
@@ -305,6 +409,35 @@ mod pure_function_tests {
             cartesian_km_s_to_au_day([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
         assert_eq!(position_au, Vector3::zeros());
         assert_eq!(velocity_au_day, Vector3::zeros());
+    }
+
+    #[test]
+    fn ecliptic_correction_applies_only_to_asteroid_ids() {
+        assert!(needs_ecliptic_de405_correction(2_000_001)); // Ceres
+        assert!(needs_ecliptic_de405_correction(2_999_999));
+        assert!(!needs_ecliptic_de405_correction(10)); // Sun
+        assert!(!needs_ecliptic_de405_correction(399)); // Earth
+        assert!(!needs_ecliptic_de405_correction(1_999_999));
+        assert!(!needs_ecliptic_de405_correction(3_000_000));
+    }
+
+    #[test]
+    fn ecliptic_correction_is_identity_for_a_planet() {
+        let p = Vector3::new(1.3, -0.7, 0.42);
+        let v = Vector3::new(-0.011, 0.008, 0.003);
+        let (rp, rv) = correct_ecliptic_de405_frame(4, p, v); // Mars barycenter id
+        assert_eq!(rp, p);
+        assert_eq!(rv, v);
+    }
+
+    #[test]
+    fn ecliptic_correction_rotates_an_asteroid_state() {
+        let p = Vector3::new(1.3, -0.7, 0.42);
+        let v = Vector3::new(-0.011, 0.008, 0.003);
+        let (rp, rv) = correct_ecliptic_de405_frame(2_000_001, p, v); // Ceres
+        assert_eq!(rp, ROT_ECLMJ2000_TO_EQUMJ2000 * p);
+        assert_eq!(rv, ROT_ECLMJ2000_TO_EQUMJ2000 * v);
+        assert_ne!(rp, p, "the correction must actually rotate the state");
     }
 
     proptest! {
@@ -361,6 +494,23 @@ mod pure_function_tests {
         ) {
             let (p, _) = cartesian_km_s_to_au_day([x, y, z], [0.0, 0.0, 0.0]);
             prop_assert!(p.iter().all(|c| c.is_finite()));
+        }
+
+        /// A rotation preserves vector norms, whether or not the correction
+        /// actually fires for the given id.
+        #[test]
+        fn ecliptic_correction_preserves_norm(
+            target_naif_id in prop_oneof![
+                Just(10), Just(399), Just(2_000_001), Just(2_001_467),
+            ],
+            x in -50.0_f64..50.0,
+            y in -50.0_f64..50.0,
+            z in -50.0_f64..50.0,
+        ) {
+            let p = Vector3::new(x, y, z);
+            let v = Vector3::zeros();
+            let (rp, _) = correct_ecliptic_de405_frame(target_naif_id, p, v);
+            prop_assert!((rp.norm() - p.norm()).abs() < 1e-12 * (1.0 + p.norm()));
         }
     }
 }
@@ -503,5 +653,113 @@ mod parity_tests {
             .unwrap();
         let (expected, _) = crate::jpl_ephem::equ_state_to_ecl(equ, equ);
         assert!((ecl - expected).norm() < 1e-13);
+    }
+}
+
+#[cfg(all(test, feature = "ephem-anise"))]
+mod main_belt_asteroid_tests {
+    use super::*;
+    use crate::jpl_ephem::naif::naif_ids::main_belt::AsteroidNumber;
+    use crate::jpl_ephem::EphemerisFrame;
+    use crate::test_fixture::JPL_EPHEM_ANISE_WITH_ASTEROIDS;
+    use hifitime::TimeScale;
+
+    /// Heliocentric equatorial mean J2000 (ICRF) state of Ceres at
+    /// 2021-Sep-19 00:00 TDB (JD 2459476.5), from JPL Horizons
+    /// (`COMMAND='1;' CENTER='500@10' REF_PLANE=FRAME OUT_UNITS=AU-D`,
+    /// queried 2026-09-11): position in AU, velocity in AU/day.
+    const CERES_HORIZONS_POSITION_AU: [f64; 3] = [
+        1.782_341_075_522_114,
+        2.073_176_490_439_472,
+        0.614_852_658_891_694_7,
+    ];
+    const CERES_HORIZONS_VELOCITY_AU_DAY: [f64; 3] = [
+        -0.008_136_059_326_451_917,
+        0.004_769_609_050_730_651,
+        0.003_905_915_532_942_483,
+    ];
+
+    /// The epoch the constants above were sampled at (MJD 59476.0). Tagged TT
+    /// rather than TDB: the two differ by a couple of milliseconds, far below
+    /// the tolerance used to compare against Horizons below.
+    fn ceres_reference_epoch() -> Epoch {
+        Epoch::from_mjd_in_time_scale(59_476.0, TimeScale::TT)
+    }
+
+    /// Querying a main-belt asteroid works once the supplementary kernel is
+    /// loaded, and the resolved position is a plausible main-belt distance
+    /// (Ceres: semi-major axis ~2.77 AU, eccentricity ~0.08).
+    #[test]
+    fn ceres_position_is_a_plausible_main_belt_distance() {
+        let (position, _) = JPL_EPHEM_ANISE_WITH_ASTEROIDS
+            .body_ephemeris(
+                NaifIds::AST(AsteroidNumber::CERES),
+                &ceres_reference_epoch(),
+                EphemerisFrame::Equatorial,
+            )
+            .unwrap();
+        assert!(
+            (2.5..3.0).contains(&position.norm()),
+            "|r| = {}",
+            position.norm()
+        );
+    }
+
+    /// The resolved state agrees, component by component, with an
+    /// independent JPL Horizons state vector at the same epoch. Comparing
+    /// components (not just the norm) is essential here: a state that was
+    /// left in the kernel's native ECLIPJ2000_DE405 frame instead of being
+    /// rotated to equatorial mean J2000 would still have the right distance
+    /// from the Sun, just pointed in the wrong direction.
+    #[test]
+    fn ceres_state_agrees_with_horizons() {
+        let (position, velocity) = JPL_EPHEM_ANISE_WITH_ASTEROIDS
+            .body_ephemeris(
+                NaifIds::AST(AsteroidNumber::CERES),
+                &ceres_reference_epoch(),
+                EphemerisFrame::Equatorial,
+            )
+            .unwrap();
+
+        let expected_position = Vector3::from(CERES_HORIZONS_POSITION_AU);
+        let expected_velocity = Vector3::from(CERES_HORIZONS_VELOCITY_AU_DAY);
+
+        // `codes_300ast_20100725.bsp` is an independent, ~2010-era orbit fit
+        // rather than a DE440-consistent one, so the tolerance is looser than
+        // the sub-1e-8 AU parity checks against the built-in reader elsewhere
+        // in this file; observed agreement is ~7e-7 AU / ~2e-9 AU/day, so
+        // 1e-4 / 1e-6 leaves headroom while still catching a missing or
+        // doubled frame rotation outright (that would be off by ~1 AU or a
+        // large relative angle, not a small fraction of a percent).
+        let dp = (position - expected_position).norm();
+        let dv = (velocity - expected_velocity).norm();
+        assert!(dp < 1e-4, "|Δposition| = {dp:e} AU");
+        assert!(dv < 1e-6, "|Δvelocity| = {dv:e} AU/day");
+    }
+
+    /// The Solar System Barycenter still cannot be requested as a body, even
+    /// once the asteroid kernel is loaded.
+    #[test]
+    fn barycenter_is_still_rejected() {
+        let err = JPL_EPHEM_ANISE_WITH_ASTEROIDS
+            .body_ephemeris(
+                NaifIds::SSB(SolarSystemBary::SSB),
+                &ceres_reference_epoch(),
+                EphemerisFrame::Equatorial,
+            )
+            .unwrap_err();
+        assert!(matches!(err, OutfitError::EphemerisBodyNotSupported(_)));
+    }
+
+    /// Loading the supplementary kernel does not break access to bodies from
+    /// the primary DE440 kernel.
+    #[test]
+    fn planets_still_resolve_after_loading_asteroids() {
+        let (position, _) = JPL_EPHEM_ANISE_WITH_ASTEROIDS.earth_ephemeris(
+            &ceres_reference_epoch(),
+            EphemerisFrame::Equatorial,
+            false,
+        );
+        assert!((position.norm() - 1.0).abs() < 0.05);
     }
 }

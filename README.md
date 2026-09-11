@@ -415,6 +415,49 @@ outfit = "5.0"
 outfit = { version = "5.0", default-features = false, features = ["ephem-anise"] }
 ```
 
+### Main-belt asteroids as N-body perturbers (`ephem-anise`)
+
+With the ANISE backend, the N-body propagator can also account for the
+gravitational pull of main-belt asteroids, not just the Sun and planets.
+`JPLEphem::from_anise_with_main_belt_asteroids` loads DE440 together with a
+supplementary kernel covering 300 numbered asteroids, each with a known mass;
+`propagator::planet_gm::known_main_belt_asteroids()` lists them all as
+ready-to-use perturbers.
+
+```rust,no_run
+use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
+use outfit::jpl_ephem::naif::naif_ids::main_belt::AsteroidNumber;
+use outfit::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
+use outfit::propagator::planet_gm::known_main_belt_asteroids;
+use outfit::propagator::NBodyConfig;
+use outfit::JPLEphem;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let source: EphemFileSource = "naif:DE440".try_into()?;
+    let jpl = JPLEphem::from_anise_with_main_belt_asteroids(&source)?;
+
+    // Pick specific bodies by number...
+    let config = NBodyConfig {
+        perturbing_bodies: vec![
+            NaifIds::SSB(SolarSystemBary::Sun),
+            NaifIds::AST(AsteroidNumber::CERES),
+            NaifIds::AST(AsteroidNumber::VESTA),
+            NaifIds::AST(AsteroidNumber::PALLAS),
+        ],
+        ..NBodyConfig::default()
+    };
+
+    // ...or take a subset of the full 300-body catalog.
+    let config_top16 = NBodyConfig {
+        perturbing_bodies: known_main_belt_asteroids().take(16).collect(),
+        ..NBodyConfig::default()
+    };
+
+    let _ = (jpl, config, config_top16);
+    Ok(())
+}
+```
+
 ---
 
 ## Performance & Reproducibility

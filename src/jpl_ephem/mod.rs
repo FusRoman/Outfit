@@ -27,6 +27,12 @@
 //! features — the ANISE backend when both are compiled. Use
 //! [`JPLEphem::from_builtin`] / [`JPLEphem::from_anise`] to pick explicitly.
 //!
+//! Which bodies a backend can resolve also varies —
+//! [`naif::naif_ids::NaifIds`](crate::jpl_ephem::naif::naif_ids::NaifIds)'s
+//! "Ephemeris backend support" section lists exactly which variant works with
+//! which backend and what happens (always a clean error, never a panic) when
+//! it doesn't.
+//!
 //! The lightweight identifier and version modules
 //! ([`naif::naif_ids`](crate::jpl_ephem::naif::naif_ids),
 //! [`naif::naif_version`](crate::jpl_ephem::naif::naif_version),
@@ -305,6 +311,12 @@ impl JPLEphem {
                 let naif_data = NaifData::read_naif_file(&file_path);
                 Ok(JPLEphem::NaifFile(naif_data))
             }
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(..) => Err(OutfitError::InvalidJPLEphemFileSource(
+                "the in-house reader cannot read the main-belt asteroid supplementary kernel; \
+                 use the ephem-anise backend"
+                    .to_string(),
+            )),
         }
     }
 
@@ -334,6 +346,42 @@ impl JPLEphem {
         )?))
     }
 
+    /// Construct a [`JPLEphem`] backed by the ANISE toolkit, with the
+    /// main-belt asteroid supplementary kernel also loaded.
+    ///
+    /// Like [`JPLEphem::from_anise`], plus a second SPK kernel
+    /// (`codes_300ast_20100725.bsp`, downloaded into the local cache on first
+    /// use) covering 300 numbered main-belt asteroids. Once loaded,
+    /// `NaifIds::AST(_)` bodies (see
+    /// [`crate::propagator::planet_gm::known_main_belt_asteroids`]) resolve
+    /// through [`JPLEphem::body_ephemeris`] like any other body.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` – ephemeris source policy for the primary kernel; only the
+    ///   `naif:` token is supported.
+    ///
+    /// # Returns
+    ///
+    /// A [`JPLEphem`] wrapping an ANISE almanac loaded from both kernels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OutfitError::InvalidJPLEphemFileSource`] for a legacy-DE
+    /// source, or [`OutfitError`] if either kernel cannot be resolved,
+    /// downloaded, or parsed.
+    #[cfg(feature = "ephem-anise")]
+    pub fn from_anise_with_main_belt_asteroids(
+        source: impl Into<EphemFileSource>,
+    ) -> Result<Self, OutfitError> {
+        let primary_path = EphemFilePath::get_ephemeris_file(&source.into())?;
+        let asteroids_path =
+            EphemFilePath::get_ephemeris_file(&EphemFileSource::MainBeltAsteroids)?;
+        let anise = anise_backend::AniseEphem::from_file_path(&primary_path)?
+            .with_supplementary_kernel(&asteroids_path)?;
+        Ok(JPLEphem::Anise(anise))
+    }
+
     /// Return Earth's heliocentric state at `ephem_time`.
     ///
     /// The state is heliocentric (Earth geocenter relative to the Sun for the
@@ -353,6 +401,14 @@ impl JPLEphem {
     /// `(position, velocity)` with `position` in AU and `velocity` in AU/day,
     /// heliocentric, in the requested frame; `velocity` is `Some` only when
     /// `compute_velocity` is `true`.
+    ///
+    /// # Panics
+    ///
+    /// Every loaded kernel is expected to cover Earth for any epoch a real
+    /// ephemeris file spans, so this call is treated as infallible; it panics
+    /// if the active backend cannot resolve Earth at `ephem_time` (for example
+    /// an epoch outside the kernel's coverage). Use [`JPLEphem::body_ephemeris`]
+    /// for a fallible query.
     pub fn earth_ephemeris(
         &self,
         ephem_time: &Epoch,
@@ -405,6 +461,7 @@ impl JPLEphem {
                         NaifIds::SSB(SolarSystemBary::SSB),
                         ephem_time.to_et_seconds(),
                     )
+                    .unwrap_or_else(|err| panic!("NAIF Earth ephemeris lookup failed: {err}"))
                     .to_au();
                 (ephem_res.position, ephem_res.velocity.map(|v| v / 86400.0)) // Convert from AU/s to AU/day
             }
@@ -498,7 +555,9 @@ impl JPLEphem {
     /// # Errors
     ///
     /// - [`OutfitError::EphemerisBodyNotSupported`] if `body` cannot be resolved
-    ///   by the active backend.
+    ///   by the active backend (see [`NaifIds`]'s "Ephemeris backend support"
+    ///   section for which variants each backend accepts) — this never panics,
+    ///   including for a body absent from the loaded kernel.
     /// - Any error propagated by the underlying ephemeris query.
     pub fn body_ephemeris(
         &self,
@@ -558,9 +617,11 @@ impl JPLEphem {
             #[cfg(feature = "ephem-builtin")]
             JPLEphem::NaifFile(naif_data) => {
                 let et = epoch.to_et_seconds();
-                // Query body w.r.t. SSB
+                // Query body w.r.t. SSB. A body this reader's kernel does not
+                // carry (e.g. a numbered asteroid) surfaces as
+                // `EphemerisBodyNotSupported` here rather than panicking.
                 let body_res = naif_data
-                    .ephemeris(body, NaifIds::SSB(SolarSystemBary::SSB), et)
+                    .ephemeris(body, NaifIds::SSB(SolarSystemBary::SSB), et)?
                     .to_au();
                 // Query Sun w.r.t. SSB
                 let sun_res = naif_data
@@ -568,7 +629,7 @@ impl JPLEphem {
                         NaifIds::SSB(SolarSystemBary::Sun),
                         NaifIds::SSB(SolarSystemBary::SSB),
                         et,
-                    )
+                    )?
                     .to_au();
                 // Heliocentric = body_ssb - sun_ssb; convert AU/s → AU/day
                 let pos = body_res.position - sun_res.position;

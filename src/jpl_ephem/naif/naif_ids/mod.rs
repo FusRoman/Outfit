@@ -14,6 +14,8 @@
 //! * `PlanetaryBary` — planetary barycenters (e.g. `1` Mercury barycenter, …).
 //! * `PlanetMassCenter` — mass centers (e.g. `199` Mercury, `399` Earth).
 //! * `SatelliteMassCenter` — natural satellites (e.g. `301` Moon, `401` Phobos).
+//! * `AsteroidNumber` — numbered main-belt asteroids (e.g. `2000001` Ceres),
+//!   wrapping the raw minor-planet number rather than naming every body.
 //!
 //! The exact mapping tables live in the submodules of this namespace
 //! (`planet_bary`, `planet_mass`, `satellite_mass`, …). This `mod.rs`
@@ -69,11 +71,15 @@ pub mod satellite_mass;
 /// Solar System barycenter and Sun identifiers (0 and 10).
 pub mod solar_system_bary;
 
+/// Numbered main-belt asteroid identifiers (e.g., Ceres = 2000001).
+pub mod main_belt;
+
 /// Shared NAIF type definitions and helper utilities.
 pub mod naif_type;
 
 use std::fmt;
 
+use main_belt::AsteroidNumber;
 use planet_bary::PlanetaryBary;
 use planet_mass::PlanetMassCenter;
 use satellite_mass::SatelliteMassCenter;
@@ -99,6 +105,9 @@ pub enum ErrorId {
     #[error("Invalid Satellite Mass Center ID: {0}")]
     InvalidSatelliteMassCenterId(i32),
 
+    #[error("Invalid asteroid NAIF ID: {0}")]
+    InvalidAsteroidId(i32),
+
     #[error("Invalid NAIF ID: {0}")]
     InvalidNaifId(i32),
 }
@@ -107,6 +116,30 @@ pub enum ErrorId {
 ///
 /// This type preserves the semantic category of the code, which is useful
 /// for routing, formatting, or applying category‑specific logic downstream.
+///
+/// # Ephemeris backend support
+///
+/// Not every variant is resolvable by every planetary ephemeris backend
+/// ([`JPLEphem`](crate::JPLEphem), selected at compile time by the
+/// `ephem-builtin` / `ephem-anise` Cargo features):
+///
+/// * `SSB`, `PB`, `PMC`, `SMC` (Sun, planetary barycenters and mass centers,
+///   natural satellites) are resolvable by every backend — they are present
+///   in every DE440 file, whichever reader loads it.
+/// * `AST` (a numbered main-belt asteroid) is resolvable only through the
+///   ANISE backend, and only once the main-belt asteroid supplementary
+///   kernel has been loaded with
+///   [`JPLEphem::from_anise_with_main_belt_asteroids`](crate::JPLEphem::from_anise_with_main_belt_asteroids).
+///   With the in-house backend (`ephem-builtin`), or with the ANISE backend
+///   built from [`JPLEphem::from_anise`](crate::JPLEphem::from_anise) alone
+///   (no supplementary kernel), querying an `AST` id returns
+///   [`OutfitError::EphemerisBodyNotSupported`](crate::outfit_errors::OutfitError::EphemerisBodyNotSupported)
+///   — it never panics.
+///
+/// [`JPLEphem::body_ephemeris`](crate::JPLEphem::body_ephemeris) surfaces
+/// every such failure as a `Result`.
+/// [`JPLEphem::earth_ephemeris`](crate::JPLEphem::earth_ephemeris) does not
+/// take a `NaifIds` argument (it always resolves Earth) and is unaffected.
 ///
 /// Examples
 /// ----------
@@ -126,6 +159,7 @@ pub enum NaifIds {
     PB(PlanetaryBary),
     PMC(PlanetMassCenter),
     SMC(SatelliteMassCenter),
+    AST(AsteroidNumber),
 }
 
 impl NaifIds {
@@ -145,6 +179,8 @@ impl NaifIds {
     /// * Special‑case handling for `0` (SSB) and `10` (Sun).
     /// * For `1..=999`, this function attempts, in order:
     ///   planetary barycenter → planet mass center → satellite mass center.
+    /// * For `2_000_000..=2_999_999`, the code is parsed as a numbered
+    ///   main-belt asteroid.
     ///
     /// Examples
     /// ----------
@@ -174,6 +210,7 @@ impl NaifIds {
                     Err(ErrorId::InvalidNaifId(id))
                 }
             }
+            2_000_000..=2_999_999 => AsteroidNumber::from_id(id).map(NaifIds::AST),
             _ => Err(ErrorId::InvalidNaifId(id)),
         }
     }
@@ -209,6 +246,7 @@ impl NaifIds {
             NaifIds::PB(planetary_bary) => planetary_bary.to_id(),
             NaifIds::PMC(planet_mass_center) => planet_mass_center.to_id(),
             NaifIds::SMC(satellite_mass_center) => satellite_mass_center.to_id(),
+            NaifIds::AST(asteroid_number) => asteroid_number.to_id(),
         }
     }
 }
@@ -225,6 +263,7 @@ impl From<NaifIds> for i32 {
             NaifIds::PB(planetary_bary) => planetary_bary.to_id(),
             NaifIds::PMC(planet_mass_center) => planet_mass_center.to_id(),
             NaifIds::SMC(satellite_mass_center) => satellite_mass_center.to_id(),
+            NaifIds::AST(asteroid_number) => asteroid_number.to_id(),
         }
     }
 }
@@ -274,6 +313,7 @@ impl fmt::Display for NaifIds {
             NaifIds::PB(planetary_bary) => write!(f, "{planetary_bary}"),
             NaifIds::PMC(planet_mass_center) => write!(f, "{planet_mass_center}"),
             NaifIds::SMC(satellite_mass_center) => write!(f, "{satellite_mass_center}"),
+            NaifIds::AST(asteroid_number) => write!(f, "{asteroid_number}"),
         }
     }
 }
@@ -312,6 +352,14 @@ mod test_naif_id {
             NaifIds::from_id(901).unwrap(),
             NaifIds::SMC(SatelliteMassCenter::Charon)
         );
+        assert_eq!(
+            NaifIds::from_id(2_000_001).unwrap(),
+            NaifIds::AST(AsteroidNumber::CERES)
+        );
+        assert_eq!(
+            NaifIds::from_id(2_000_004).unwrap(),
+            NaifIds::AST(AsteroidNumber::VESTA)
+        );
         assert!(NaifIds::from_id(1000).is_err());
         assert!(NaifIds::from_id(11).is_err());
     }
@@ -325,6 +373,7 @@ mod test_naif_id {
         assert_eq!(NaifIds::SMC(SatelliteMassCenter::Moon).to_id(), 301);
         assert_eq!(NaifIds::SMC(SatelliteMassCenter::Phobos).to_id(), 401);
         assert_eq!(NaifIds::SMC(SatelliteMassCenter::Charon).to_id(), 901);
+        assert_eq!(NaifIds::AST(AsteroidNumber::CERES).to_id(), 2_000_001);
     }
 
     #[test]
@@ -347,6 +396,10 @@ mod test_naif_id {
         assert_eq!(
             NaifIds::SMC(SatelliteMassCenter::Charon).to_string(),
             "Charon"
+        );
+        assert_eq!(
+            NaifIds::AST(AsteroidNumber::CERES).to_string(),
+            "Asteroid 1"
         );
     }
 
@@ -380,6 +433,10 @@ mod test_naif_id {
             NaifIds::try_from(901).unwrap(),
             NaifIds::SMC(SatelliteMassCenter::Charon)
         );
+        assert_eq!(
+            NaifIds::try_from(2_000_001).unwrap(),
+            NaifIds::AST(AsteroidNumber::CERES)
+        );
         assert!(NaifIds::try_from(1000).is_err());
     }
 
@@ -392,5 +449,6 @@ mod test_naif_id {
         assert_eq!(i32::from(NaifIds::SMC(SatelliteMassCenter::Moon)), 301);
         assert_eq!(i32::from(NaifIds::SMC(SatelliteMassCenter::Phobos)), 401);
         assert_eq!(i32::from(NaifIds::SMC(SatelliteMassCenter::Charon)), 901);
+        assert_eq!(i32::from(NaifIds::AST(AsteroidNumber::CERES)), 2_000_001);
     }
 }
