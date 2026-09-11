@@ -420,15 +420,15 @@ outfit = { version = "5.0", default-features = false, features = ["ephem-anise"]
 With the ANISE backend, the N-body propagator can also account for the
 gravitational pull of main-belt asteroids, not just the Sun and planets.
 `JPLEphem::from_anise_with_main_belt_asteroids` loads DE440 together with a
-supplementary kernel covering 300 numbered asteroids, each with a known mass;
-`propagator::planet_gm::known_main_belt_asteroids()` lists them all as
-ready-to-use perturbers.
+supplementary kernel covering 300 numbered asteroids, each with a known name
+and mass; `propagator::planet_gm::known_main_belt_asteroids_by_mass()` lists
+them all as ready-to-use perturbers, most influential first.
 
 ```rust,no_run
 use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
 use outfit::jpl_ephem::naif::naif_ids::main_belt::AsteroidNumber;
 use outfit::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
-use outfit::propagator::planet_gm::known_main_belt_asteroids;
+use outfit::propagator::planet_gm::{known_main_belt_asteroids_by_mass, main_belt_asteroid_catalog};
 use outfit::propagator::NBodyConfig;
 use outfit::JPLEphem;
 
@@ -447,11 +447,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..NBodyConfig::default()
     };
 
-    // ...or take a subset of the full 300-body catalog.
+    // ...or take the 16 asteroids that perturb the main belt the most.
     let config_top16 = NBodyConfig {
-        perturbing_bodies: known_main_belt_asteroids().take(16).collect(),
+        perturbing_bodies: known_main_belt_asteroids_by_mass().take(16).collect(),
         ..NBodyConfig::default()
     };
+
+    // Browse the catalog (name, number, GM), most massive first.
+    for entry in main_belt_asteroid_catalog().iter().take(5) {
+        println!("{entry}"); // e.g. "Ceres (1) — GM = 1.402e-13 AU³/day²"
+    }
 
     let _ = (jpl, config, config_top16);
     Ok(())

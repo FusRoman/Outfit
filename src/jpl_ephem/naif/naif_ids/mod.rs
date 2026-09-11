@@ -397,10 +397,7 @@ mod test_naif_id {
             NaifIds::SMC(SatelliteMassCenter::Charon).to_string(),
             "Charon"
         );
-        assert_eq!(
-            NaifIds::AST(AsteroidNumber::CERES).to_string(),
-            "Asteroid 1"
-        );
+        assert_eq!(NaifIds::AST(AsteroidNumber::CERES).to_string(), "Ceres (1)");
     }
 
     #[test]

@@ -50,6 +50,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - This is ANISE-specific: the in-house reader has no code path for
     supplementary small-body kernels, so `NaifIds::AST(_)` only resolves under
     the `ephem-anise` backend.
+  - `AsteroidNumber` now carries a name (`.name()`, e.g. `"Ceres"`), sourced
+    from the same supplementary kernel's own name table and cross-checked
+    against its mass table (both cover exactly the same 300 bodies).
+    `Display` uses it (`"Ceres (1)"`), falling back to `"Asteroid {n}"` for a
+    number outside the table.
+  - New `propagator::planet_gm::known_main_belt_asteroids_by_mass()` — the
+    same 300 perturbers as `known_main_belt_asteroids()`, but ordered by
+    decreasing gravitational parameter (most perturbing first), which is the
+    natural order for picking "the top N" with `.take(n)`. New
+    `main_belt_asteroid_catalog()` / `MainBeltAsteroidInfo` bundle name +
+    number + GM with a `Display` (`"Ceres (1) — GM = 1.402e-13 AU³/day²"`) for
+    browsing the catalog.
 
 ### Changed
 
