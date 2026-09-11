@@ -301,6 +301,8 @@ mod observer_test {
         assert_eq!(observer_velocity.as_slice(), [0.0, 0.0, 0.0]);
     }
 
+    // Exact golden reproduction of the in-house reader's output.
+    #[cfg(feature = "ephem-builtin")]
     #[test]
     fn test_helio_pos_obs() {
         let (lon, lat, h) = (203.744090000_f64, 20.707233557_f64, 3067.694_f64);
@@ -355,6 +357,8 @@ mod observer_test {
         assert_relative_eq!(to_f64(actual), to_f64(expected), epsilon = eps);
     }
 
+    // Exact golden reproduction of the in-house reader's output.
+    #[cfg(feature = "ephem-builtin")]
     #[test]
     fn test_helio_pos_vel_geocenter() {
         let geocenter =

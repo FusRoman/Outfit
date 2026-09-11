@@ -34,7 +34,7 @@ jobs:
     if: github.event_name == 'pull_request'
     strategy:
       matrix:
-        features: [default, parallel]
+        features: [default, parallel, ephem-anise, ephem-anise-parallel]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,11 +56,16 @@ jobs:
           cargo clippy --version
       - name: Run cargo clippy
         run: |
-          if [ "${{ matrix.features }}" = "default" ]; then
-            cargo clippy --all-targets -- -D warnings
-          else
-            cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
-          fi
+          case "${{ matrix.features }}" in
+            default)
+              cargo clippy --all-targets -- -D warnings ;;
+            ephem-anise)
+              cargo clippy --all-targets --no-default-features --features ephem-anise -- -D warnings ;;
+            ephem-anise-parallel)
+              cargo clippy --all-targets --no-default-features --features "ephem-anise parallel" -- -D warnings ;;
+            *)
+              cargo clippy --all-targets --features "${{ matrix.features }}" -- -D warnings ;;
+          esac
 
   semver-pr:
     name: SemVer (PR vs base)
@@ -73,18 +78,49 @@ jobs:
       - name: Check semver (baseline = crates.io)
         uses: obi1kenobi/cargo-semver-checks-action@v2
 
+  backends:
+    name: Ephemeris backend build matrix
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-backends-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build ANISE-only
+        run: cargo build --all-targets --no-default-features --features ephem-anise
+      - name: Build ANISE + parallel
+        run: cargo build --all-targets --no-default-features --features "ephem-anise parallel"
+      - name: A backend is mandatory
+        run: |
+          if cargo check --no-default-features 2>&1 | grep -q "needs a planetary ephemeris backend"; then
+            echo "compile_error guard present"
+          else
+            echo "::error::missing compile_error guard for a backendless build"
+            exit 1
+          fi
+
   coverage:
     name: Coverage (${{ matrix.features }})
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, semver-pr]
+    needs: [fmt, clippy, semver-pr, backends]
     if: |
       always() &&
       (needs.fmt.result == 'success' || needs.fmt.result == 'skipped') &&
       (needs.clippy.result == 'success' || needs.clippy.result == 'skipped') &&
-      (needs.semver-pr.result == 'success' || needs.semver-pr.result == 'skipped')
+      (needs.semver-pr.result == 'success' || needs.semver-pr.result == 'skipped') &&
+      (needs.backends.result == 'success' || needs.backends.result == 'skipped')
     strategy:
       matrix:
-        features: [default, parallel]
+        features: [default, parallel, ephem-anise, ephem-anise-parallel]
 
     steps:
       - name: Checkout repository
@@ -112,20 +148,21 @@ jobs:
 
       - name: Generate coverage (lcov)
         run: |
-          if [ "${{ matrix.features }}" = "default" ]; then
-            RUST_TEST_THREADS=1 \
-            RAYON_NUM_THREADS=2 \
-            cargo llvm-cov \
-              --workspace \
-              --lcov --output-path lcov.info
-          else
-            RUST_TEST_THREADS=1 \
-            RAYON_NUM_THREADS=2 \
-            cargo llvm-cov \
-              --workspace \
-              --features ${{ matrix.features }} \
-              --lcov --output-path lcov.info
-          fi
+          export RUST_TEST_THREADS=1
+          export RAYON_NUM_THREADS=2
+          case "${{ matrix.features }}" in
+            default)
+              cargo llvm-cov --workspace --lcov --output-path lcov.info ;;
+            ephem-anise)
+              cargo llvm-cov --workspace --no-default-features --features ephem-anise \
+                --lcov --output-path lcov.info ;;
+            ephem-anise-parallel)
+              cargo llvm-cov --workspace --no-default-features --features "ephem-anise parallel" \
+                --lcov --output-path lcov.info ;;
+            *)
+              cargo llvm-cov --workspace --features "${{ matrix.features }}" \
+                --lcov --output-path lcov.info ;;
+          esac
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4

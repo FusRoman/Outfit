@@ -1,15 +1,15 @@
-//! Ephemeris file resolution, caching, and (optional) download.
+//! Ephemeris file resolution, caching, and download.
 //!
 //! This module determines where to find the JPL ephemeris file required by the
-//! `jpl` layer, placing a unified cache in the user's OS cache directory and,
-//! when the `jpl-download` feature is enabled, downloading the missing file
-//! from the official JPL locations (Horizons legacy DE binaries and NAIF SPK/DAF).
+//! ephemeris backend, placing a unified cache in the user's OS cache directory
+//! and downloading the missing file from the official JPL locations (Horizons
+//! legacy DE binaries and NAIF SPK/DAF). It is compiled for every backend.
 //!
 //! # What this module does
 //! - Parse a high-level ephemeris source specification (backend + version).
 //! - Resolve a **cache path** under the OS cache directory (via `directories`).
-//! - Materialize a typed handle [`EphemFilePath`] used by readers (`horizon`, `naif`).
-//! - Optionally **download** the file if it is not present (feature `jpl-download`).
+//! - Materialize a typed handle [`EphemFilePath`] consumed by the ephemeris backend.
+//! - **Download** the file if it is not present in the cache.
 //!
 //! # Cache layout
 //! Cache root: `<os-cache>/outfit_cache/jpl_ephem`
@@ -58,6 +58,9 @@ use crate::outfit_errors::OutfitError;
 /// --------
 /// - [`EphemFileSource::JPLHorizon`] — Legacy JPL DE binaries (e.g. `DE440`).
 /// - [`EphemFileSource::Naif`] — NAIF SPK/DAF kernels (e.g. `DE440`).
+/// - [`EphemFileSource::MainBeltAsteroids`] — supplementary NAIF SPK kernel
+///   covering 300 main-belt asteroids (feature `ephem-anise`; only the ANISE
+///   backend can read it).
 ///
 /// See also
 /// --------
@@ -67,7 +70,16 @@ use crate::outfit_errors::OutfitError;
 pub enum EphemFileSource {
     JPLHorizon(JPLHorizonVersion),
     Naif(NaifVersion),
+    /// Fixed supplementary kernel (no version to pick — a single file covers
+    /// all 300 bodies). Resolved programmatically, not through the
+    /// `"{source}:{version}"` string parser.
+    #[cfg(feature = "ephem-anise")]
+    MainBeltAsteroids,
 }
+
+/// Canonical filename of the main-belt asteroid supplementary kernel.
+#[cfg(feature = "ephem-anise")]
+const MAIN_BELT_ASTEROIDS_FILENAME: &str = "codes_300ast_20100725.bsp";
 
 /// Parse a source string like `"horizon:DE440"` or `"naif:DE442"`.
 ///
@@ -126,7 +138,7 @@ impl TryFrom<&str> for EphemFileSource {
 }
 
 impl EphemFileSource {
-    /// Return the official base URL for the given backend (only with `jpl-download`).
+    /// Return the official base URL for the given backend.
     ///
     /// Horizons legacy binaries live under:
     /// `https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/`
@@ -143,10 +155,14 @@ impl EphemFileSource {
             EphemFileSource::Naif(_) => {
                 "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/"
             }
+            #[cfg(feature = "ephem-anise")]
+            EphemFileSource::MainBeltAsteroids => {
+                "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/asteroids/"
+            }
         }
     }
 
-    /// Compose the full URL for the concrete version file (only with `jpl-download`).
+    /// Compose the full URL for the concrete version file.
     ///
     /// This uses the backend‑specific filename returned by the version enums.
     ///
@@ -161,6 +177,10 @@ impl EphemFileSource {
                 format!("{}{}", base_url, jpl_version.get_filename())
             }
             EphemFileSource::Naif(version) => format!("{}{}", base_url, version.get_filename()),
+            #[cfg(feature = "ephem-anise")]
+            EphemFileSource::MainBeltAsteroids => {
+                format!("{base_url}{MAIN_BELT_ASTEROIDS_FILENAME}")
+            }
         }
     }
 
@@ -168,10 +188,13 @@ impl EphemFileSource {
     ///
     /// - `jpl_horizon/` for legacy binaries
     /// - `naif/` for SPK/DAF files
+    /// - `asteroids/` for the main-belt asteroid supplementary kernel
     fn get_cache_dir(&self) -> &str {
         match self {
             EphemFileSource::JPLHorizon(_) => "jpl_horizon",
             EphemFileSource::Naif(_) => "naif",
+            #[cfg(feature = "ephem-anise")]
+            EphemFileSource::MainBeltAsteroids => "asteroids",
         }
     }
 
@@ -185,11 +208,13 @@ impl EphemFileSource {
         match self {
             EphemFileSource::JPLHorizon(version) => version.to_filename(),
             EphemFileSource::Naif(version) => version.get_filename(),
+            #[cfg(feature = "ephem-anise")]
+            EphemFileSource::MainBeltAsteroids => MAIN_BELT_ASTEROIDS_FILENAME,
         }
     }
 }
 
-/// Download a (potentially large) file to `path` (feature `jpl-download`).
+/// Download a (potentially large) file to `path`.
 ///
 /// Uses `reqwest` to stream the HTTP body in chunks and writes it asynchronously
 /// with Tokio's `File` implementation.
@@ -229,6 +254,8 @@ pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitE
 /// --------
 /// - [`EphemFilePath::JPLHorizon`] — legacy DE binary file.
 /// - [`EphemFilePath::Naif`] — NAIF SPK/DAF file.
+/// - [`EphemFilePath::MainBeltAsteroids`] — main-belt asteroid supplementary
+///   kernel (feature `ephem-anise`).
 ///
 /// See also
 /// --------
@@ -237,6 +264,8 @@ pub async fn download_big_file(url: &str, path: &Utf8Path) -> Result<(), OutfitE
 pub enum EphemFilePath {
     JPLHorizon(Utf8PathBuf, JPLHorizonVersion),
     Naif(Utf8PathBuf, NaifVersion),
+    #[cfg(feature = "ephem-anise")]
+    MainBeltAsteroids(Utf8PathBuf),
 }
 
 impl std::fmt::Display for EphemFilePath {
@@ -247,6 +276,13 @@ impl std::fmt::Display for EphemFilePath {
             }
             EphemFilePath::Naif(path, version) => {
                 write!(f, "NAIF: {} ({})", path, version.get_filename())
+            }
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(path) => {
+                write!(
+                    f,
+                    "Main-belt asteroids: {path} ({MAIN_BELT_ASTEROIDS_FILENAME})"
+                )
             }
         }
     }
@@ -260,7 +296,7 @@ impl EphemFilePath {
     /// 2. Compose the full local filename for the requested version.
     /// 3. If the file **exists**, return its typed path.
     /// 4. If the file is **missing**:
-    ///    - with feature `jpl-download`: download it to the cache and return the path,
+    ///    - if it is missing from the cache, download it and return the path,
     ///    - otherwise: return an error.
     ///
     /// Errors
@@ -282,7 +318,7 @@ impl EphemFilePath {
     /// See also
     /// --------
     /// * [`EphemFileSource`] — Backend + version selector.
-    /// * \[`download_big_file`\] — Async downloader (gated by `jpl-download`).
+    /// * \[`download_big_file`\] — Async downloader.
     pub fn get_ephemeris_file(file_source: &EphemFileSource) -> Result<EphemFilePath, OutfitError> {
         let local_file = EphemFilePath::try_from(file_source.clone())?;
 
@@ -308,6 +344,8 @@ impl EphemFilePath {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.exists(),
             EphemFilePath::Naif(path, _) => path.exists(),
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(path) => path.exists(),
         }
     }
 
@@ -316,6 +354,8 @@ impl EphemFilePath {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path,
             EphemFilePath::Naif(path, _) => path,
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(path) => path,
         }
     }
 
@@ -324,6 +364,8 @@ impl EphemFilePath {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.file_name(),
             EphemFilePath::Naif(path, _) => path.file_name(),
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(path) => path.file_name(),
         }
     }
 
@@ -332,6 +374,8 @@ impl EphemFilePath {
         match self {
             EphemFilePath::JPLHorizon(path, _) => path.extension(),
             EphemFilePath::Naif(path, _) => path.extension(),
+            #[cfg(feature = "ephem-anise")]
+            EphemFilePath::MainBeltAsteroids(path) => path.extension(),
         }
     }
 }
@@ -375,6 +419,8 @@ impl TryFrom<EphemFileSource> for EphemFilePath {
                 Ok(EphemFilePath::JPLHorizon(local_file, version))
             }
             EphemFileSource::Naif(version) => Ok(EphemFilePath::Naif(local_file, version)),
+            #[cfg(feature = "ephem-anise")]
+            EphemFileSource::MainBeltAsteroids => Ok(EphemFilePath::MainBeltAsteroids(local_file)),
         }
     }
 }

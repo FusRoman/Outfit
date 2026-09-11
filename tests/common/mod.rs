@@ -1,5 +1,43 @@
 use approx::abs_diff_eq;
-use outfit::{orbit_type::uncertainty::OrbitalCovariance, OrbitalElements};
+use outfit::{orbit_type::uncertainty::OrbitalCovariance, JPLEphem, OrbitalElements};
+
+/// Ephemeris source string for the planetary backend [`JPLEphem::new`] picks
+/// at compile time.
+///
+/// `JPLEphem::new` builds the ANISE backend whenever `ephem-anise` is
+/// enabled — even if `ephem-builtin` is also on — and only falls back to the
+/// in-house reader otherwise. ANISE reads NAIF SPK kernels only, so the
+/// source token must match that same precedence: `"naif:DE440"` whenever
+/// `ephem-anise` is enabled, `"horizon:DE440"` (the in-house legacy DE
+/// reader) otherwise.
+///
+/// # Returns
+///
+/// `"naif:DE440"` with `ephem-anise` enabled, otherwise `"horizon:DE440"`.
+#[allow(dead_code)]
+pub fn ephem_spec() -> &'static str {
+    if cfg!(feature = "ephem-anise") {
+        "naif:DE440"
+    } else {
+        "horizon:DE440"
+    }
+}
+
+/// Load the DE440 planetary ephemeris for the active backend.
+///
+/// # Returns
+///
+/// A ready-to-query [`JPLEphem`] for the backend selected at compile time.
+///
+/// # Panics
+///
+/// Panics if the ephemeris file cannot be resolved, downloaded, or parsed.
+#[allow(dead_code)]
+pub fn load_ephem() -> JPLEphem {
+    ephem_spec()
+        .try_into()
+        .expect("failed to load the DE440 ephemeris for the active backend")
+}
 
 #[allow(dead_code)]
 pub fn approx_equal(current: &OrbitalElements, other: &OrbitalElements, tol: f64) -> bool {

@@ -4,7 +4,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Alternative planetary ephemeris backend via ANISE (`ephem-anise` feature)**
+  - The planetary ephemeris backend is now chosen at compile time by Cargo
+    feature. `ephem-builtin` (in the `default` set) keeps the in-house JPL DE /
+    NAIF SPK reader; `ephem-anise` swaps in the [`anise`](https://crates.io/crates/anise)
+    toolkit, a Rust reimplementation of the NAIF SPICE toolkit validated against
+    SPICE to machine precision.
+  - New constructors on `JPLEphem`: `from_builtin` and `from_anise`. `JPLEphem::new`
+    is unchanged and selects the backend from the enabled features — the ANISE
+    backend when both are on; use `from_builtin` to force the in-house reader.
+    Building with neither `ephem-builtin` nor `ephem-anise` is a compile error.
+  - The ANISE backend reads NAIF SPK kernels only; a `horizon:` (legacy DE binary)
+    source returns `OutfitError::InvalidJPLEphemFileSource`. It reuses Outfit's
+    existing ephemeris downloader and on-disk cache (no `anise/metaload`).
+  - New error variant `OutfitError::AniseEphemerisError(String)` (feature-gated).
+  - `earth_ephemeris` under ANISE returns the Earth **geocenter** relative to the
+    Sun, matching the built-in Horizon reader (the built-in NAIF reader returns
+    the Earth–Moon barycenter relative to the Solar System Barycenter). Parity
+    tests check ANISE against the Horizon reader to `1e-8` AU on planet positions
+    and `1e-9` AU / `1e-10` AU·day⁻¹ on Earth.
+  - `hifitime` requirement bumped to `4.3` (shared, unchanged epoch type). The
+    `nalgebra` requirement is unchanged; the ANISE state is converted at the
+    backend boundary.
+
+- **Main-belt asteroids as N-body perturbers (ANISE backend)**
+  - `NaifIds` gained an `AST(AsteroidNumber)` variant identifying a numbered
+    main-belt asteroid by its official minor-planet number (e.g. `1` for
+    Ceres); `AsteroidNumber::CERES` / `PALLAS` / `VESTA` are provided for
+    convenience.
+  - New method `JPLEphem::with_main_belt_asteroids(&mut self)` loads a
+    supplementary NAIF SPK kernel (`codes_300ast_20100725.bsp`, downloaded
+    and cached like the primary kernel) covering 300 numbered asteroids into
+    an existing ANISE-backed handle (built with `JPLEphem::from_anise`), in
+    place. Once loaded, any of them can be added to
+    `NBodyConfig::perturbing_bodies` like any other body.
+  - `propagator::planet_gm::known_main_belt_asteroids()` returns all 300 as
+    ready-to-use `NaifIds::AST(_)` perturbers, each with a gravitational
+    parameter from the kernel's own published mass table — pick as many or as
+    few as needed.
+  - This is ANISE-specific: the in-house reader has no code path for
+    supplementary small-body kernels, so `NaifIds::AST(_)` only resolves under
+    the `ephem-anise` backend.
+  - `AsteroidNumber` now carries a name (`.name()`, e.g. `"Ceres"`), sourced
+    from the same supplementary kernel's own name table and cross-checked
+    against its mass table (both cover exactly the same 300 bodies).
+    `Display` uses it (`"Ceres (1)"`), falling back to `"Asteroid {n}"` for a
+    number outside the table.
+  - New `propagator::planet_gm::known_main_belt_asteroids_by_mass()` — the
+    same 300 perturbers as `known_main_belt_asteroids()`, but ordered by
+    decreasing gravitational parameter (most perturbing first), which is the
+    natural order for picking "the top N" with `.take(n)`. New
+    `main_belt_asteroid_catalog()` / `MainBeltAsteroidInfo` bundle name +
+    number + GM with a `Display` (`"Ceres (1) — GM = 1.402e-13 AU³/day²"`) for
+    browsing the catalog.
+
 ### Changed
+
+- **Planetary ephemeris readers are behind `feature = "ephem-builtin"`** (breaking)
+  - The `jpl_ephem::horizon` and `jpl_ephem::naif` reader submodules,
+    `JPLEphem::HorizonFile` / `JPLEphem::NaifFile`, and
+    `JPLEphem::try_into_horizon` / `try_into_naif` now require the
+    `ephem-builtin` feature, which is enabled by the `default` feature set. The
+    lightweight `horizon_version`, `naif_version` and `naif_ids` modules stay
+    available for every feature combination.
 
 - **`JPLEphem::earth_ephemeris` / `body_ephemeris` — explicit output frame** (breaking)
   - Both methods now take an `EphemerisFrame` argument (`Equatorial` or
@@ -31,6 +95,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     Sun-only propagation path is unchanged (rotation-invariant).
 
 ### Fixed
+
+- **Built-in NAIF SPK backend — velocity wrong by a factor of ~2/86400²**
+  - `EphemerisRecord::interpolate` scaled the Chebyshev derivative by
+    `2.0 / radius` instead of the correct chain-rule factor `1.0 / radius`
+    (`t = (et - mid) / radius` is linear in `et` with slope `1 / radius`),
+    making every interpolated velocity exactly twice too large.
+  - Separately, `JPLEphem::earth_ephemeris` and `JPLEphem::body_ephemeris`
+    (`JPLEphem::NaifFile` branches, in `jpl_ephem::mod`) *divided* the
+    resulting AU/s velocity by `86400.0` where converting AU/s to AU/day
+    requires *multiplying* by it (1 day = 86 400 s).
+  - Combined, every velocity returned by the built-in NAIF SPK reader
+    (`JPLEphem::from_builtin("naif:...")`, and `JPLEphem::new`/`TryFrom<&str>`
+    when only `ephem-builtin` is enabled) was off by a factor of
+    `2 / 86400² ≈ 2.7 × 10⁻¹⁰` — numerically indistinguishable from zero for
+    any practical purpose. Positions were unaffected. This path had no test
+    coverage under default features: the shared test fixtures load the
+    Horizon reader for `ephem-builtin` builds, so the built-in NAIF reader's
+    velocity was only ever exercised together with `ephem-anise`, where
+    `JPLEphem::Anise` answers the query instead of `JPLEphem::NaifFile`.
+  - Fixed both the interpolation scale factor and the two unit conversions.
+    Un-ignored and fixed the existing regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative` (previously
+    `#[ignore]`d, documenting the bug), added its property-based counterpart
+    `naif_velocity_matches_central_difference` (mirroring the existing
+    Horizon-backend property test), and added a property test directly on
+    `EphemerisRecord::interpolate` (`velocity_is_the_position_time_derivative`)
+    checking the analytic velocity against a central finite difference of the
+    position for arbitrary Chebyshev coefficients.
+
+- **`NaifData::ephemeris` (built-in NAIF SPK backend) — panicked instead of
+  returning an error**
+  - Querying a `(target, center)` pair absent from the loaded kernel, or an
+    epoch outside a segment's coverage, made `naif_data::NaifData::ephemeris`
+    panic. `NaifIds::AST(_)` (main-belt asteroids) made this easy to trigger,
+    since `de440.bsp`-style kernels never carry small bodies, but the bug is
+    general — any unsupported body/epoch combination on this backend hit it.
+    `ephemeris` now returns `Result<InterpResult, OutfitError>`
+    (`OutfitError::EphemerisBodyNotSupported` on failure); the two
+    `JPLEphem::NaifFile` call sites in `jpl_ephem::mod` propagate it through
+    the existing `body_ephemeris` `Result`, matching how the built-in Horizon
+    reader and the ANISE backend already report the same situation.
+    `earth_ephemeris` keeps its infallible contract (Earth is always present
+    in a real kernel) by panicking with a clear message on failure instead,
+    consistent with the ANISE backend's documented behaviour for Earth. This
+    is a breaking change to `NaifData::ephemeris`'s public signature.
+  - Documented, on `NaifIds`, exactly which variant each backend can resolve
+    and what happens when it can't (always an error, never a panic, except
+    for the documented `earth_ephemeris` case above).
 
 - **N-body propagator — inverted sign on the indirect perturbation term**
   - `indirect_acceleration` returned `+GM·r_p/|r_p|³` instead of

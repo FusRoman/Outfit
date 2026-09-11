@@ -547,17 +547,21 @@ impl TrajectoryFit for [&Observation] {
 
 #[cfg(test)]
 mod test_obs_ext {
-    use nalgebra::Matrix3;
     use photom::observer::error_model::{ModelCorrection, ObsErrorModel};
 
     use crate::{
         initial_orbit_determination::IODParamsBuilder,
-        orbit_type::orbit_type_test::approx_equal,
         test_fixture::{DATASET_2015AB, JPL_EPHEM_HORIZON, UT1_PROVIDER},
-        KeplerianElements, OrbitalElements,
     };
 
+    // Only the exact-golden tests below (gated on the in-house reader) use these.
+    #[cfg(feature = "ephem-builtin")]
+    use crate::{orbit_type::orbit_type_test::approx_equal, KeplerianElements, OrbitalElements};
+    #[cfg(feature = "ephem-builtin")]
     use approx::assert_relative_eq;
+    #[cfg(feature = "ephem-builtin")]
+    use nalgebra::Matrix3;
+    #[cfg(feature = "ephem-builtin")]
     use rand::{rngs::StdRng, SeedableRng};
 
     use super::*;
@@ -624,6 +628,8 @@ mod test_obs_ext {
         assert_eq!(u2, 33);
     }
 
+    // Exact golden reproduction of the in-house reader's output.
+    #[cfg(feature = "ephem-builtin")]
     #[test]
     fn test_rms_trajectory() {
         let iod_params = IODParams {
@@ -792,6 +798,8 @@ mod test_obs_ext {
         }
     }
 
+    // Exact golden reproduction of the in-house reader's output.
+    #[cfg(feature = "ephem-builtin")]
     #[test]
     fn test_estimate_best_orbit() {
         let mut rng = StdRng::seed_from_u64(42_u64); // seed for reproducibility

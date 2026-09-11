@@ -13,6 +13,7 @@
 //!   Planetary positions are looked up from the `JPLEphem` file supplied to the
 //!   differential corrector at runtime.
 
+pub(crate) mod asteroid_gm_table;
 pub mod nbody;
 pub mod perturber_ephemeris;
 pub mod planet_gm;
@@ -139,7 +140,10 @@ pub struct NBodyConfig {
     ///
     /// Defaults to `[Sun]`.  For each body the GM is taken from [`planet_gm`]
     /// and its ephemeris is obtained from the `JPLEphem` file passed to the
-    /// integrator at runtime.
+    /// integrator at runtime. Not every [`NaifIds`] variant is resolvable by
+    /// every ephemeris backend — see [`NaifIds`]'s "Ephemeris backend
+    /// support" section; a body the active backend cannot resolve surfaces as
+    /// an error from the propagation call, not a panic.
     pub perturbing_bodies: Vec<NaifIds>,
 
     /// Absolute tolerance for the DOP853 step-size control.
