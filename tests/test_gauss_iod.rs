@@ -1,8 +1,15 @@
+//! Exact-oracle non-regression tests for the Gauss IOD pipeline. The reference
+//! orbits below reproduce the in-house ephemeris reader's arithmetic bit-for-bit,
+//! so the whole file is gated on that backend; the ANISE backend is exercised by
+//! `test_ephemeris`, `test_diff_cor_nbody` and the parity tests in the library.
+#![cfg(feature = "ephem-builtin")]
+
 mod common;
 
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::initial_orbit_determination::IODParams;
+use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
 use outfit::orbit_type::keplerian_element::KeplerianElements;
 use outfit::orbit_type::OrbitalElements;
 use outfit::FitIOD;
@@ -72,13 +79,28 @@ fn expected_results() -> Vec<ExpectedResult> {
     ]
 }
 
+/// Load the DE440 in-house Horizon reader explicitly.
+///
+/// Unlike [`common::load_ephem`], this always resolves to the legacy DE
+/// binary reader, regardless of whether `ephem-anise` is also enabled —
+/// `JPLEphem::new` (which `common::load_ephem` follows) prefers ANISE
+/// whenever it is compiled in, even alongside `ephem-builtin`. This file's
+/// oracle values reproduce the Horizon reader's arithmetic bit-for-bit and
+/// only agree with ANISE to `~1e-8`, so the tests need this specific reader
+/// pinned explicitly rather than left to compile-time backend precedence.
+fn load_horizon_ephem() -> JPLEphem {
+    let source: EphemFileSource = "horizon:DE440"
+        .try_into()
+        .expect("failed to parse the Horizon ephemeris source");
+    JPLEphem::from_builtin(source)
+        .expect("failed to load the DE440 ephemeris through the in-house Horizon reader")
+}
+
 fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_ephem: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("Failed to load JPL ephemeris");
+    let jpl_ephem: JPLEphem = load_horizon_ephem();
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",

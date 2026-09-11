@@ -32,6 +32,7 @@ use std::{
 use crate::jpl_ephem::{
     download_jpl_file::EphemFilePath, horizon::interpolation_result::InterpResult,
 };
+use crate::outfit_errors::OutfitError;
 
 use super::{
     daf_header::DAFHeader, directory::DirectoryData, ephemeris_record::EphemerisRecord,
@@ -209,7 +210,8 @@ impl NaifData {
     /// Interpolate **position** and **velocity** for a `(target, center)` at an ET epoch.
     ///
     /// This fetches the covering record and evaluates Chebyshev polynomials to
-    /// return a Cartesian state vector in the Ecliptic J2000 frame.
+    /// return a Cartesian state vector in the equatorial mean J2000 (ICRF) frame
+    /// the SPK kernel is stored in (`frame_id = 1`).
     ///
     /// Arguments
     /// -----------------
@@ -220,21 +222,33 @@ impl NaifData {
     /// Return
     /// ----------
     /// * [`InterpResult`]: position in **km**, velocity in **km/s** (acceleration is `None`).
-    pub fn ephemeris(&self, target: NaifIds, center: NaifIds, et_seconds: f64) -> InterpResult {
-        let record = self
-            .get_record(target, center, et_seconds)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Failed to get ephemeris record for target: {target:?}, center: {center:?} at epoch: {et_seconds}"
-                )
-            });
+    ///
+    /// Errors
+    /// ------
+    /// Returns [`OutfitError::EphemerisBodyNotSupported`] when the loaded kernel
+    /// has no segment for `(target, center)`, or has one that does not cover
+    /// `et_seconds`. In particular, a body that this reader's kernel never
+    /// contains (e.g. a numbered asteroid, which only the `ephem-anise`
+    /// backend can resolve) fails this way rather than panicking.
+    pub fn ephemeris(
+        &self,
+        target: NaifIds,
+        center: NaifIds,
+        et_seconds: f64,
+    ) -> Result<InterpResult, OutfitError> {
+        let record = self.get_record(target, center, et_seconds).ok_or_else(|| {
+            OutfitError::EphemerisBodyNotSupported(format!(
+                "no ephemeris record for target {target:?} relative to {center:?} \
+                     at epoch {et_seconds} ET seconds"
+            ))
+        })?;
 
         let (position, velocity) = record.interpolate(et_seconds);
-        InterpResult {
+        Ok(InterpResult {
             position,
             velocity: Some(velocity),
             acceleration: None,
-        }
+        })
     }
 
     /// Print a human‑readable summary of the loaded kernel and segments.
@@ -483,11 +497,13 @@ mod test_naif_file {
     fn test_jpl_ephemeris() {
         let epoch1 = Epoch::from_mjd_in_time_scale(57028.479297592596, hifitime::TimeScale::TT);
 
-        let interp = get_naif_data().ephemeris(
-            NaifIds::PB(PlanetaryBary::EarthMoon),
-            NaifIds::SSB(SolarSystemBary::SSB),
-            epoch1.to_et_seconds(),
-        );
+        let interp = get_naif_data()
+            .ephemeris(
+                NaifIds::PB(PlanetaryBary::EarthMoon),
+                NaifIds::SSB(SolarSystemBary::SSB),
+                epoch1.to_et_seconds(),
+            )
+            .unwrap();
 
         assert_eq!(
             interp.to_au(),
@@ -500,9 +516,9 @@ mod test_naif_file {
                 .into(),
                 velocity: Some(
                     [[
-                        -3.8995165075699485e-7,
-                        -9.957615232661774e-8,
-                        -4.316895883931796e-8
+                        -1.9497582537849743e-7,
+                        -4.978807616330887e-8,
+                        -2.158447941965898e-8
                     ]]
                     .into()
                 ),
@@ -511,25 +527,48 @@ mod test_naif_file {
         );
 
         let epoch2 = Epoch::from_mjd_in_time_scale(57_049.231_857_592_59, hifitime::TimeScale::TT);
-        let interp = get_naif_data().ephemeris(
-            NaifIds::PB(PlanetaryBary::EarthMoon),
-            NaifIds::SSB(SolarSystemBary::SSB),
-            epoch2.to_et_seconds(),
-        );
+        let interp = get_naif_data()
+            .ephemeris(
+                NaifIds::PB(PlanetaryBary::EarthMoon),
+                NaifIds::SSB(SolarSystemBary::SSB),
+                epoch2.to_et_seconds(),
+            )
+            .unwrap();
         assert_eq!(
             interp.to_au(),
             InterpResult {
                 position: [[-0.5860307419898751, 0.7233961430776997, 0.31345193147254585]].into(),
                 velocity: Some(
                     [[
-                        -3.2554490509465264e-7,
-                        -2.1982148078907505e-7,
-                        -9.529706060142567e-8
+                        -1.6277245254732632e-7,
+                        -1.0991074039453752e-7,
+                        -4.764853030071284e-8
                     ]]
                     .into()
                 ),
                 acceleration: None
             }
         );
+    }
+
+    /// A body absent from the loaded kernel (here, a numbered asteroid — this
+    /// reader's `de440.bsp`-style kernels never carry small bodies) returns a
+    /// clean error instead of panicking.
+    #[test]
+    fn ephemeris_returns_an_error_for_a_body_absent_from_the_kernel() {
+        use crate::jpl_ephem::naif::naif_ids::main_belt::AsteroidNumber;
+
+        let epoch = Epoch::from_mjd_in_time_scale(57_028.479_297_592_596, hifitime::TimeScale::TT);
+        let err = get_naif_data()
+            .ephemeris(
+                NaifIds::AST(AsteroidNumber::CERES),
+                NaifIds::SSB(SolarSystemBary::SSB),
+                epoch.to_et_seconds(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::outfit_errors::OutfitError::EphemerisBodyNotSupported(_)
+        ));
     }
 }

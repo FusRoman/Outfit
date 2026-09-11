@@ -9,5 +9,13 @@ cargo clippy --all-targets --all-features -- -D warnings || exit 1
 echo "Running cargo check..."
 cargo check --all-targets --all-features || exit 1
 
+echo "Checking ephemeris backend feature gates..."
+cargo clippy --all-targets --no-default-features --features ephem-anise -- -D warnings || exit 1
+cargo check --all-targets --no-default-features --features ephem-builtin || exit 1
+if ! cargo check --no-default-features 2>&1 | grep -q "needs a planetary ephemeris backend"; then
+    echo "error: the 'no ephemeris backend' compile_error guard is missing"
+    exit 1
+fi
+
 echo "Checking documentation build..."
 RUSTDOCFLAGS="--html-in-header $(pwd)/katex-header.html -D warnings" cargo doc --no-deps --all-features || exit 1

@@ -398,7 +398,7 @@ pub use crate::constants::{
 };
 
 // JPL ephemeris enum for runtime inspection (optional but convenient)
-pub use crate::jpl_ephem::JPLEphem;
+pub use crate::jpl_ephem::{EphemerisFrame, JPLEphem};
 
 // Ephemeris façade
 pub use crate::ephemeris::{
@@ -427,7 +427,8 @@ pub type Result<T> = core::result::Result<T, OutfitError>;
 /// ```
 pub mod prelude {
     pub use crate::{
-        FitIOD, FullOrbitResult, GaussResult, IODParams, JPLEphem, OutfitError, IODRMS,
+        EphemerisFrame, FitIOD, FullOrbitResult, GaussResult, IODParams, JPLEphem, OutfitError,
+        IODRMS,
     };
     // Optionally include widely-used constants:
     pub use crate::{AU, GAUSS_GRAV, RADEG, RADH, RADSEC, SECONDS_PER_DAY, T2000, VLIGHT_AU};
@@ -448,18 +449,58 @@ pub(crate) mod test_fixture {
             .expect("Download of the JPL short time scale UT1 data failed")
     });
 
-    pub(crate) static JPL_EPHEM_HORIZON: LazyLock<JPLEphem> = LazyLock::new(|| {
-        let jpl_file: EphemFileSource = "horizon:DE440"
+    /// Load a DE440 ephemeris with the in-house reader from a source spec.
+    #[cfg(feature = "ephem-builtin")]
+    fn load_de440_builtin(spec: &str) -> JPLEphem {
+        let source: EphemFileSource = spec
             .try_into()
             .expect("Failed to parse JPL ephemeris source");
-        JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Horizon")
-    });
+        JPLEphem::from_builtin(&source).expect("Failed to load the in-house DE440 ephemeris")
+    }
 
-    pub(crate) static JPL_EPHEM_NAIF: LazyLock<JPLEphem> = LazyLock::new(|| {
-        let jpl_file: EphemFileSource = "naif:DE440"
+    /// Load DE440 as a NAIF SPK kernel through the ANISE backend.
+    #[cfg(feature = "ephem-anise")]
+    fn load_de440_anise() -> JPLEphem {
+        let source: EphemFileSource = "naif:DE440"
             .try_into()
             .expect("Failed to parse JPL ephemeris source");
-        JPLEphem::new(&jpl_file).expect("Failed to load JPL ephemeris from Naif")
+        JPLEphem::from_anise(&source).expect("Failed to load the ANISE DE440 ephemeris")
+    }
+
+    // The two named fixtures below stay available for every backend combination so
+    // that the crate's `#[cfg(test)]` pipeline tests compile unchanged. With
+    // `ephem-builtin` they are the legacy DE binary and the in-house SPK reader;
+    // with only `ephem-anise` they both resolve to the ANISE SPK backend.
+
+    #[cfg(feature = "ephem-builtin")]
+    pub(crate) static JPL_EPHEM_HORIZON: LazyLock<JPLEphem> =
+        LazyLock::new(|| load_de440_builtin("horizon:DE440"));
+    // Not every named fixture is referenced under an ANISE-only test build.
+    #[cfg(all(not(feature = "ephem-builtin"), feature = "ephem-anise"))]
+    #[allow(dead_code)]
+    pub(crate) static JPL_EPHEM_HORIZON: LazyLock<JPLEphem> = LazyLock::new(load_de440_anise);
+
+    #[cfg(feature = "ephem-builtin")]
+    pub(crate) static JPL_EPHEM_NAIF: LazyLock<JPLEphem> =
+        LazyLock::new(|| load_de440_builtin("naif:DE440"));
+    #[cfg(all(not(feature = "ephem-builtin"), feature = "ephem-anise"))]
+    #[allow(dead_code)]
+    pub(crate) static JPL_EPHEM_NAIF: LazyLock<JPLEphem> = LazyLock::new(load_de440_anise);
+
+    #[cfg(feature = "ephem-anise")]
+    pub(crate) static JPL_EPHEM_ANISE: LazyLock<JPLEphem> = LazyLock::new(load_de440_anise);
+
+    /// DE440 plus the main-belt asteroid supplementary kernel, through ANISE.
+    #[cfg(feature = "ephem-anise")]
+    pub(crate) static JPL_EPHEM_ANISE_WITH_ASTEROIDS: LazyLock<JPLEphem> = LazyLock::new(|| {
+        let source: EphemFileSource = "naif:DE440"
+            .try_into()
+            .expect("Failed to parse JPL ephemeris source");
+        let mut jpl =
+            JPLEphem::from_anise(&source).expect("Failed to load the ANISE DE440 ephemeris");
+        jpl.with_main_belt_asteroids()
+            .expect("Failed to load the main-belt asteroid supplementary kernel");
+        jpl
     });
 
     pub(crate) static DATASET_2015AB: LazyLock<ObsDataset> = LazyLock::new(|| {

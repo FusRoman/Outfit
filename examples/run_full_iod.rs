@@ -58,6 +58,8 @@ fn outfit_error_label(err: &OutfitError) -> &'static str {
         OutfitError::DifferentialCorrectionDiverged => "DifferentialCorrectionDiverged",
         OutfitError::DifferentialCorrectionFailed(_) => "DifferentialCorrectionFailed",
         OutfitError::EphemerisBodyNotSupported(_) => "EphemerisBodyNotSupported",
+        #[cfg(feature = "ephem-anise")]
+        OutfitError::AniseEphemerisError(_) => "AniseEphemerisError",
         OutfitError::NBodyPropagationFailed(_) => "NBodyPropagationFailed",
         OutfitError::DegenerateState(_) => "DegenerateState",
         OutfitError::NewtonRaphsonKeplerConvergence => "KeplerConvergence",

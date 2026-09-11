@@ -42,7 +42,7 @@ use crate::{
         obs_fit_data::ObsFitData,
     },
     ephemeris::observation_ephemeris::ObservationEphemeris,
-    propagator::PropagatorKind,
+    propagator::{perturber_ephemeris::PerturberEphemerisSet, PropagatorKind},
     EquinoctialElements, JPLEphem, OutfitError,
 };
 
@@ -125,6 +125,10 @@ pub struct SingleIterationResult {
 /// - `apply_correction` — if `true`, the element correction δx is applied to
 ///   produce [`SingleIterationResult::corrected_elements`]; if `false` only
 ///   the covariance is computed (matrix-only mode).
+/// - `propagator` — analytic two-body or numerical N-body propagator.
+/// - `perturber_ephem` — optional per-arc perturber-position interpolation used
+///   only by the N-body propagator; pass the trajectory-level table so it is
+///   shared across observations, or `None` to build one per propagation.
 ///
 /// # Errors
 ///
@@ -146,6 +150,7 @@ pub fn single_iteration(
     jpl: &JPLEphem,
     apply_correction: bool,
     propagator: &PropagatorKind,
+    perturber_ephem: Option<&PerturberEphemerisSet>,
 ) -> Result<SingleIterationResult, OutfitError> {
     assert_eq!(
         observations.len(),
@@ -186,9 +191,13 @@ pub fn single_iteration(
                     PropagatorKind::TwoBody => {
                         obs.compute_obs_and_partials_2body(cache, jpl, elements)
                     }
-                    PropagatorKind::NBody(nbody_config) => {
-                        obs.compute_obs_and_partials_nbody(cache, jpl, elements, nbody_config)
-                    }
+                    PropagatorKind::NBody(nbody_config) => obs.compute_obs_and_partials_nbody(
+                        cache,
+                        jpl,
+                        elements,
+                        nbody_config,
+                        perturber_ephem,
+                    ),
                 };
                 match partials_result {
                     Ok(partials) => {
@@ -421,6 +430,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             true,
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 
@@ -463,6 +473,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             false, // matonly
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 
@@ -503,6 +514,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             true,
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 
@@ -539,6 +551,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             true,
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 
@@ -579,6 +592,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             true,
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 
@@ -617,6 +631,7 @@ mod single_iteration_tests {
             &JPL_EPHEM_HORIZON,
             true,
             &PropagatorKind::TwoBody,
+            None,
         )
         .unwrap();
 

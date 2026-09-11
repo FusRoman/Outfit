@@ -1,17 +1,22 @@
 mod common;
 
-use crate::common::approx_equal;
-use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
 use outfit::jpl_ephem::naif::naif_ids::{
     planet_bary::PlanetaryBary, solar_system_bary::SolarSystemBary, NaifIds,
 };
-use outfit::orbit_type::uncertainty::{EquinoctialUncertainty, OrbitalCovariance};
 use outfit::{
     orbit_type::{equinoctial_element::EquinoctialElements, OrbitalElements},
     propagator::{NBodyConfig, PropagatorKind},
     DifferentialCorrectionConfig, FitLSQ, IODParams, JPLEphem,
 };
+
+// Used only by the exact-oracle tests gated on the in-house ephemeris reader.
+#[cfg(feature = "ephem-builtin")]
+use crate::common::approx_equal;
+#[cfg(feature = "ephem-builtin")]
+use approx::assert_relative_eq;
+#[cfg(feature = "ephem-builtin")]
+use outfit::orbit_type::uncertainty::{EquinoctialUncertainty, OrbitalCovariance};
 use photom::TrajId;
 use photom::{observation_dataset::ObsDataset, observer::error_model::ObsErrorModel};
 use rand::{rngs::StdRng, SeedableRng};
@@ -23,12 +28,42 @@ fn build_test_fixtures() -> (
     IODParams,
     DifferentialCorrectionConfig,
 ) {
+    build_test_fixtures_with(common::load_ephem())
+}
+
+/// Load the DE440 in-house Horizon reader explicitly.
+///
+/// Unlike [`common::load_ephem`], this always resolves to the legacy DE
+/// binary reader (`ephem-builtin`'s [`horizon`](outfit::jpl_ephem::horizon)
+/// backend), regardless of whether `ephem-anise` is also enabled — `naif:`
+/// sources would instead be resolved by ANISE whenever it is compiled in
+/// (see [`outfit::JPLEphem::new`]'s backend precedence). The exact-oracle
+/// tests in this file need this: their reference values were captured
+/// against this specific reader, and only agree with it to `1e-10` — ANISE
+/// and the built-in reader agree with each other to `~1e-8` only.
+#[cfg(feature = "ephem-builtin")]
+fn load_horizon_ephem() -> JPLEphem {
+    let source: outfit::jpl_ephem::download_jpl_file::EphemFileSource = "horizon:DE440"
+        .try_into()
+        .expect("failed to parse the Horizon ephemeris source");
+    JPLEphem::from_builtin(source)
+        .expect("failed to load the DE440 ephemeris through the in-house Horizon reader")
+}
+
+/// Same as [`build_test_fixtures`], but with an explicitly provided
+/// ephemeris backend instead of [`common::load_ephem`]'s compile-time
+/// default.
+fn build_test_fixtures_with(
+    jpl_ephem: JPLEphem,
+) -> (
+    JPLEphem,
+    Ut1Provider,
+    ObsDataset,
+    IODParams,
+    DifferentialCorrectionConfig,
+) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
-
-    let jpl_ephem: JPLEphem = "horizon:DE440"
-        .try_into()
-        .expect("Failed to load JPL ephemeris");
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
@@ -69,11 +104,16 @@ fn build_test_fixtures() -> (
 /// Oracle values were captured from a known-good Outfit run with seed 42.
 /// Tolerances:
 ///   - Non-regression (Outfit vs oracle): 1e-10 absolute
+// Exact-oracle reproduction of the in-house ephemeris reader; the ANISE pipeline
+// is covered by `test_diff_cor_nbody` (physical bounds) and the library parity
+// tests.
+#[cfg(feature = "ephem-builtin")]
 #[test]
 fn test_diff_cor() {
     let nr_tol = 1e-10;
 
-    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, diff_cor_config) = build_test_fixtures();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, diff_cor_config) =
+        build_test_fixtures_with(load_horizon_ephem());
 
     let full_orbit = obs_dataset
         .fit_lsq(
@@ -390,6 +430,7 @@ fn test_diff_cor_nbody() {
         ],
         abs_tol: 1e-12,
         rel_tol: 1e-12,
+        ..NBodyConfig::default()
     };
 
     let diff_cor_config = DifferentialCorrectionConfig {
@@ -541,13 +582,14 @@ fn test_diff_cor_nbody() {
     }
 }
 
-/// Strict non-regression test for the N-body differential corrector.
-///
-/// Reference values were captured from a deterministic run of `test_diff_cor_nbody`
-/// with `--nocapture` and must remain reproducible to 1e-10.
+/// Helper: dumps a converged N-body orbit as a ready-to-paste oracle block.
+/// Run with `cargo test --test test_diff_cor dump_nbody_nonregression_oracle -- --ignored --nocapture`.
+#[cfg(feature = "ephem-builtin")]
 #[test]
-fn test_diff_cor_nbody_nonregression() {
-    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) = build_test_fixtures();
+#[ignore = "prints regenerated oracle literals for test_diff_cor_nbody_nonregression"]
+fn dump_nbody_nonregression_oracle() {
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) =
+        build_test_fixtures_with(load_horizon_ephem());
 
     let nbody_config = NBodyConfig {
         perturbing_bodies: vec![
@@ -556,6 +598,124 @@ fn test_diff_cor_nbody_nonregression() {
         ],
         abs_tol: 1e-12,
         rel_tol: 1e-12,
+        ..NBodyConfig::default()
+    };
+    let diff_cor_config = DifferentialCorrectionConfig {
+        rms_divergence_ratio: 10.0,
+        propagator: PropagatorKind::NBody(nbody_config),
+        ..DifferentialCorrectionConfig::default()
+    };
+
+    let full_orbit = obs_dataset
+        .fit_lsq(
+            &jpl_ephem,
+            &ut1_provider,
+            ObsErrorModel::FCCT14,
+            &iod_params,
+            &diff_cor_config,
+            None,
+            &mut StdRng::seed_from_u64(42),
+        )
+        .unwrap();
+
+    for label in ["8467", "33803", "K09R05F"] {
+        let key = match label {
+            "K09R05F" => TrajId::from("K09R05F"),
+            n => TrajId::Int(n.parse().unwrap()),
+        };
+        let orbit = full_orbit.get(&key).unwrap().as_ref().unwrap();
+        let (elements, unc, cov) = match orbit.orbital_elements() {
+            OrbitalElements::Equinoctial {
+                elements,
+                uncertainty,
+                covariance,
+            } => (
+                elements,
+                uncertainty.as_ref().unwrap(),
+                covariance.as_ref().unwrap(),
+            ),
+            _ => unreachable!(),
+        };
+        println!("// ---- {label} ----");
+        println!("let expected = OrbitalElements::Equinoctial {{");
+        println!("    elements: EquinoctialElements {{");
+        println!("        reference_epoch: {:?},", elements.reference_epoch);
+        println!("        semi_major_axis: {:?},", elements.semi_major_axis);
+        println!(
+            "        eccentricity_sin_lon: {:?},",
+            elements.eccentricity_sin_lon
+        );
+        println!(
+            "        eccentricity_cos_lon: {:?},",
+            elements.eccentricity_cos_lon
+        );
+        println!(
+            "        tan_half_incl_sin_node: {:?},",
+            elements.tan_half_incl_sin_node
+        );
+        println!(
+            "        tan_half_incl_cos_node: {:?},",
+            elements.tan_half_incl_cos_node
+        );
+        println!("        mean_longitude: {:?},", elements.mean_longitude);
+        println!("    }},");
+        println!("    uncertainty: Some(EquinoctialUncertainty {{");
+        println!("        semi_major_axis: {:?},", unc.semi_major_axis);
+        println!(
+            "        eccentricity_sin_lon: {:?},",
+            unc.eccentricity_sin_lon
+        );
+        println!(
+            "        eccentricity_cos_lon: {:?},",
+            unc.eccentricity_cos_lon
+        );
+        println!(
+            "        tan_half_incl_sin_node: {:?},",
+            unc.tan_half_incl_sin_node
+        );
+        println!(
+            "        tan_half_incl_cos_node: {:?},",
+            unc.tan_half_incl_cos_node
+        );
+        println!("        mean_longitude: {:?},", unc.mean_longitude);
+        println!("    }}),");
+        println!("    covariance: Some(OrbitalCovariance {{");
+        println!("        matrix: [");
+        for r in 0..6 {
+            println!("            [");
+            for c in 0..6 {
+                println!("                {:?},", cov.matrix[(r, c)]);
+            }
+            println!("            ],");
+        }
+        println!("        ]");
+        println!("        .into(),");
+        println!("    }}),");
+        println!("}};");
+        println!("// orbit_quality = {:?}", orbit.orbit_quality());
+        println!();
+    }
+}
+
+/// Strict non-regression test for the N-body differential corrector.
+///
+/// Reference values were captured from a deterministic run of
+/// `dump_nbody_nonregression_oracle` and must remain reproducible to 1e-10.
+// Exact-oracle reproduction of the in-house ephemeris reader.
+#[cfg(feature = "ephem-builtin")]
+#[test]
+fn test_diff_cor_nbody_nonregression() {
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) =
+        build_test_fixtures_with(load_horizon_ephem());
+
+    let nbody_config = NBodyConfig {
+        perturbing_bodies: vec![
+            NaifIds::SSB(SolarSystemBary::Sun),
+            NaifIds::PB(PlanetaryBary::Jupiter),
+        ],
+        abs_tol: 1e-12,
+        rel_tol: 1e-12,
+        ..NBodyConfig::default()
     };
 
     let diff_cor_config = DifferentialCorrectionConfig {
@@ -591,70 +751,70 @@ fn test_diff_cor_nbody_nonregression() {
         let expected = OrbitalElements::Equinoctial {
             elements: EquinoctialElements {
                 reference_epoch: 60672.2443617134,
-                semi_major_axis: 3.2064058028477604,
-                eccentricity_sin_lon: 0.053005209700682954,
-                eccentricity_cos_lon: -0.02319769270067204,
-                tan_half_incl_sin_node: 0.002896813138794329,
-                tan_half_incl_cos_node: 0.09181010554058008,
-                mean_longitude: 0.6256995904457957,
+                semi_major_axis: 3.2075709628598497,
+                eccentricity_sin_lon: 0.05358176605531737,
+                eccentricity_cos_lon: -0.023173718721778213,
+                tan_half_incl_sin_node: 0.0028881645534556155,
+                tan_half_incl_cos_node: 0.09179508427378168,
+                mean_longitude: 0.6266478312914119,
             },
             uncertainty: Some(EquinoctialUncertainty {
-                semi_major_axis: 0.007572375820104381,
-                eccentricity_sin_lon: 0.0024777464468933156,
-                eccentricity_cos_lon: 0.0007445419051153811,
-                tan_half_incl_sin_node: 4.2789628256661375e-5,
-                tan_half_incl_cos_node: 5.7090614265788426e-5,
-                mean_longitude: 0.003334899745150928,
+                semi_major_axis: 0.0075834386193465685,
+                eccentricity_sin_lon: 0.0024784508747146784,
+                eccentricity_cos_lon: 0.0007444024450377598,
+                tan_half_incl_sin_node: 4.277180138435706e-5,
+                tan_half_incl_cos_node: 5.7063498440961735e-5,
+                mean_longitude: 0.00333412680819657,
             }),
             covariance: Some(OrbitalCovariance {
                 matrix: [
                     [
-                        5.73408755609015e-5,
-                        1.869803895909995e-5,
-                        5.597518961032454e-6,
-                        -3.23358524526529e-7,
-                        -4.293184367946207e-7,
-                        2.5017097632757542e-5,
+                        5.7508541293396986e-5,
+                        1.873085678575111e-5,
+                        5.604551716850951e-6,
+                        -3.2369631231954327e-7,
+                        -4.297430467785363e-7,
+                        2.5048162288448977e-5,
                     ],
                     [
-                        1.8698038959099974e-5,
-                        6.139227455092451e-6,
-                        1.8070844259588129e-6,
-                        -1.0561768228833672e-7,
-                        -1.409534091855587e-7,
-                        8.251003158870094e-6,
+                        1.873085678575113e-5,
+                        6.1427187383739545e-6,
+                        1.8072496633933745e-6,
+                        -1.0560371366948271e-7,
+                        -1.4092617909138465e-7,
+                        8.251426900729693e-6,
                     ],
                     [
-                        5.597518961032457e-6,
-                        1.8070844259588129e-6,
-                        5.543426484728413e-7,
-                        -3.149123145262512e-8,
-                        -4.1500376105573355e-8,
-                        2.4017490220016504e-6,
+                        5.60455171685095e-6,
+                        1.8072496633933745e-6,
+                        5.54135000178195e-7,
+                        -3.147198487285182e-8,
+                        -4.1472239228740826e-8,
+                        2.4007128236500167e-6,
                     ],
                     [
-                        -3.233585245265291e-7,
-                        -1.0561768228833674e-7,
-                        -3.149123145262512e-8,
-                        1.8309522863432738e-9,
-                        2.4373900210699776e-9,
-                        -1.4146340017585484e-7,
+                        -3.236963123195433e-7,
+                        -1.0560371366948272e-7,
+                        -3.147198487285183e-8,
+                        1.829426993662889e-9,
+                        2.4352134859800713e-9,
+                        -1.4137151747287231e-7,
                     ],
                     [
-                        -4.2931843679462117e-7,
-                        -1.4095340918555872e-7,
-                        -4.1500376105573355e-8,
-                        2.4373900210699772e-9,
-                        3.259338237245045e-9,
-                        -1.894260958072586e-7,
+                        -4.297430467785363e-7,
+                        -1.4092617909138465e-7,
+                        -4.147223922874081e-8,
+                        2.435213485980071e-9,
+                        3.2562428543216423e-9,
+                        -1.892919739276469e-7,
                     ],
                     [
-                        2.501709763275752e-5,
-                        8.251003158870094e-6,
-                        2.401749022001649e-6,
-                        -1.414634001758548e-7,
-                        -1.894260958072586e-7,
-                        1.1121556310207724e-5,
+                        2.5048162288448987e-5,
+                        8.251426900729693e-6,
+                        2.400712823650017e-6,
+                        -1.4137151747287231e-7,
+                        -1.892919739276469e-7,
+                        1.1116401573135049e-5,
                     ],
                 ]
                 .into(),
@@ -665,7 +825,7 @@ fn test_diff_cor_nbody_nonregression() {
             approx_equal(&expected, orbit.orbital_elements(), tol),
             "8467 N-body orbital elements differ from oracle beyond tolerance {tol}"
         );
-        assert_relative_eq!(orbit.orbit_quality(), 0.3486122845928445, epsilon = tol);
+        assert_relative_eq!(orbit.orbit_quality(), 0.3450677500966914, epsilon = tol);
     }
 
     // -------------------------------------------------------------------------
@@ -681,70 +841,70 @@ fn test_diff_cor_nbody_nonregression() {
         let expected = OrbitalElements::Equinoctial {
             elements: EquinoctialElements {
                 reference_epoch: 60465.26777915681,
-                semi_major_axis: 2.190348311458185,
-                eccentricity_sin_lon: -0.13373910921857446,
-                eccentricity_cos_lon: 0.15339157238172804,
-                tan_half_incl_sin_node: 0.0029876412023201416,
-                tan_half_incl_cos_node: -0.05950692044872062,
-                mean_longitude: 4.224365041422834,
+                semi_major_axis: 2.1907001009004063,
+                eccentricity_sin_lon: -0.13400272182063963,
+                eccentricity_cos_lon: 0.15338009135380934,
+                tan_half_incl_sin_node: 0.0029985238451201465,
+                tan_half_incl_cos_node: -0.05948593480260206,
+                mean_longitude: 4.224751249408142,
             },
             uncertainty: Some(EquinoctialUncertainty {
-                semi_major_axis: 2.1385808329040844e-5,
-                eccentricity_sin_lon: 1.3645976741407893e-5,
-                eccentricity_cos_lon: 5.318680335330679e-6,
-                tan_half_incl_sin_node: 3.4498285885877785e-7,
-                tan_half_incl_cos_node: 8.504424577287931e-7,
-                mean_longitude: 2.6647348205193914e-5,
+                semi_major_axis: 2.1404880736386688e-5,
+                eccentricity_sin_lon: 1.3646865441167257e-5,
+                eccentricity_cos_lon: 5.318472489593462e-6,
+                tan_half_incl_sin_node: 3.449533103891244e-7,
+                tan_half_incl_cos_node: 8.503524434876494e-7,
+                mean_longitude: 2.664139085596166e-5,
             }),
             covariance: Some(OrbitalCovariance {
                 matrix: [
                     [
-                        4.573527978864727e-10,
-                        -2.441395550149477e-10,
-                        7.195967928874385e-11,
-                        -1.8832832793515527e-12,
-                        -6.328517179823655e-12,
-                        4.340505064567979e-10,
+                        4.581689193389379e-10,
+                        -2.4444869402655374e-10,
+                        7.20516937585694e-11,
+                        -1.8829447695752316e-12,
+                        -6.3276333857022975e-12,
+                        4.3450961652176595e-10,
                     ],
                     [
-                        -2.4413955501494734e-10,
-                        1.862126812270452e-10,
-                        -6.032972260112714e-11,
-                        8.172697046412589e-15,
-                        -6.596088825542575e-13,
-                        -3.58336068263501e-10,
+                        -2.4444869402655374e-10,
+                        1.862369363693252e-10,
+                        -6.032989819801514e-11,
+                        7.88198535010003e-15,
+                        -6.599946297608992e-13,
+                        -3.5827702309231364e-10,
                     ],
                     [
-                        7.195967928874368e-11,
-                        -6.032972260112711e-11,
-                        2.8288360509433262e-11,
-                        2.035203222614985e-14,
-                        1.4220205527899883e-13,
-                        1.2761184787385386e-10,
+                        7.205169375856947e-11,
+                        -6.032989819801514e-11,
+                        2.8286149622562476e-11,
+                        2.047044860400452e-14,
+                        1.4233196526634721e-13,
+                        1.2757883513045594e-10,
                     ],
                     [
-                        -1.8832832793515527e-12,
-                        8.17269704641279e-15,
-                        2.0352032226149824e-14,
-                        1.1901317290637546e-13,
-                        2.6436375372263e-13,
-                        3.754248073793805e-13,
+                        -1.8829447695752336e-12,
+                        7.881985350100153e-15,
+                        2.047044860400451e-14,
+                        1.1899278634841562e-13,
+                        2.6430760135859734e-13,
+                        3.758769572765907e-13,
                     ],
                     [
-                        -6.328517179823653e-12,
-                        -6.596088825542574e-13,
-                        1.4220205527899883e-13,
-                        2.6436375372262996e-13,
-                        7.2325237390779e-13,
-                        2.605903338872906e-12,
+                        -6.327633385702298e-12,
+                        -6.599946297608993e-13,
+                        1.4233196526634721e-13,
+                        2.6430760135859734e-13,
+                        7.230992781454159e-13,
+                        2.6058289247883292e-12,
                     ],
                     [
-                        4.340505064567979e-10,
-                        -3.5833606826350087e-10,
-                        1.2761184787385386e-10,
-                        3.754248073793805e-13,
-                        2.6059033388729057e-12,
-                        7.100811663688513e-10,
+                        4.345096165217667e-10,
+                        -3.582770230923137e-10,
+                        1.2757883513045594e-10,
+                        3.7587695727659063e-13,
+                        2.605828924788329e-12,
+                        7.097637067401174e-10,
                     ],
                 ]
                 .into(),
@@ -755,7 +915,7 @@ fn test_diff_cor_nbody_nonregression() {
             approx_equal(&expected, orbit.orbital_elements(), tol),
             "33803 N-body orbital elements differ from oracle beyond tolerance {tol}"
         );
-        assert_relative_eq!(orbit.orbit_quality(), 0.7034091187041202, epsilon = tol);
+        assert_relative_eq!(orbit.orbit_quality(), 0.40877453793803264, epsilon = tol);
     }
 
     // -------------------------------------------------------------------------
@@ -771,70 +931,70 @@ fn test_diff_cor_nbody_nonregression() {
         let expected = OrbitalElements::Equinoctial {
             elements: EquinoctialElements {
                 reference_epoch: 57049.2684537375,
-                semi_major_axis: 1.8021517900042052,
-                eccentricity_sin_lon: 0.2694922786015968,
-                eccentricity_cos_lon: 0.08955282358108035,
-                tan_half_incl_sin_node: 0.0008974287327937245,
-                tan_half_incl_cos_node: 0.10167548786557225,
-                mean_longitude: 1.6921653421358704,
+                semi_major_axis: 1.8017539671066383,
+                eccentricity_sin_lon: 0.2693970247101432,
+                eccentricity_cos_lon: 0.08869492421101689,
+                tan_half_incl_sin_node: 0.0008307916711964613,
+                tan_half_incl_cos_node: 0.10167059716063825,
+                mean_longitude: 1.69365955893391,
             },
             uncertainty: Some(EquinoctialUncertainty {
-                semi_major_axis: 1.910876358918557e-6,
-                eccentricity_sin_lon: 2.7271919973585478e-6,
-                eccentricity_cos_lon: 1.2559941333300101e-5,
-                tan_half_incl_sin_node: 6.143234310625764e-7,
-                tan_half_incl_cos_node: 1.1476173256703189e-6,
-                mean_longitude: 2.1064465635865037e-5,
+                semi_major_axis: 8.91843297803619e-7,
+                eccentricity_sin_lon: 1.4528052999504664e-6,
+                eccentricity_cos_lon: 5.920319266940421e-6,
+                tan_half_incl_sin_node: 2.792168578051512e-7,
+                tan_half_incl_cos_node: 6.218091729543099e-7,
+                mean_longitude: 9.89691163439512e-6,
             }),
             covariance: Some(OrbitalCovariance {
                 matrix: [
                     [
-                        3.651448459073842e-12,
-                        -4.87907485491453e-13,
-                        2.321298362132558e-11,
-                        -3.7695250201166625e-13,
-                        8.511532638002078e-13,
-                        -3.91138523482157e-11,
+                        7.953844678372347e-13,
+                        -1.0232494678734991e-13,
+                        5.059210617753894e-12,
+                        -1.5066926551194571e-13,
+                        2.4607703529074084e-13,
+                        -8.52263281112491e-12,
                     ],
                     [
-                        -4.879074854914533e-13,
-                        7.437576190456506e-12,
-                        -1.1647669978804286e-11,
-                        9.359797430147383e-13,
-                        -2.8577594338429333e-12,
-                        1.853502993770551e-11,
+                        -1.0232494678735079e-13,
+                        2.110643239564165e-12,
+                        -3.0905811444958427e-12,
+                        2.483716495651774e-13,
+                        -7.926397586792164e-13,
+                        4.808599014203309e-12,
                     ],
                     [
-                        2.3212983621325566e-11,
-                        -1.164766997880434e-11,
-                        1.577521262959403e-10,
-                        -3.47676746499932e-12,
-                        8.610023673871895e-12,
-                        -2.644913915663376e-10,
+                        5.0592106177538936e-12,
+                        -3.0905811444958334e-12,
+                        3.505018022250596e-11,
+                        -1.2295382103666956e-12,
+                        2.4527485767320916e-12,
+                        -5.855948314983968e-11,
                     ],
                     [
-                        -3.7695250201166625e-13,
-                        9.359797430147385e-13,
-                        -3.4767674649993202e-12,
-                        3.7739327795249603e-13,
-                        -5.048815271306508e-13,
-                        5.7505636344116006e-12,
+                        -1.5066926551194556e-13,
+                        2.483716495651779e-13,
+                        -1.2295382103666956e-12,
+                        7.796205368258202e-14,
+                        -1.4540027906052378e-13,
+                        2.0297758780260734e-12,
                     ],
                     [
-                        8.511532638002078e-13,
-                        -2.857759433842935e-12,
-                        8.610023673871898e-12,
-                        -5.048815271306507e-13,
-                        1.3170255261786945e-12,
-                        -1.4110008489365913e-11,
+                        2.460770352907407e-13,
+                        -7.926397586792161e-13,
+                        2.452748576732091e-12,
+                        -1.454002790605238e-13,
+                        3.866466475701229e-13,
+                        -3.988850346505511e-12,
                     ],
                     [
-                        -3.911385234821569e-11,
-                        1.8535029937705585e-11,
-                        -2.6449139156633765e-10,
-                        5.750563634411601e-12,
-                        -1.4110008489365913e-11,
-                        4.437117125245391e-10,
+                        -8.522632811124905e-12,
+                        4.808599014203313e-12,
+                        -5.855948314983968e-11,
+                        2.0297758780260734e-12,
+                        -3.988850346505511e-12,
+                        9.794885989902548e-11,
                     ],
                 ]
                 .into(),
@@ -845,6 +1005,6 @@ fn test_diff_cor_nbody_nonregression() {
             approx_equal(&expected, orbit.orbital_elements(), tol),
             "K09R05F N-body orbital elements differ from oracle beyond tolerance {tol}"
         );
-        assert_relative_eq!(orbit.orbit_quality(), 0.3608868439717083, epsilon = tol);
+        assert_relative_eq!(orbit.orbit_quality(), 0.6128100691261191, epsilon = tol);
     }
 }

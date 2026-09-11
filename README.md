@@ -396,6 +396,75 @@ The pipeline converts elements to **equinoctial form**, propagates with the sele
 
 ---
 
+## Cargo Feature Flags
+
+| Feature | Default | Description |
+|---|---|---|
+| `ephem-builtin` | ✅ | Planetary ephemeris backend: the in-house reader for legacy JPL DE binaries (`horizon:DE###`) and NAIF SPK/DAF kernels (`naif:DE###`). |
+| `ephem-anise` | | Planetary ephemeris backend: the [`anise`](https://crates.io/crates/anise) toolkit, validated against the NAIF SPICE toolkit to machine precision. Reads NAIF SPK kernels only, so it requires a `naif:DE###` source. |
+| `parallel` | | Rayon-backed parallel batch execution (`fit_full_iod_parallel`, `compute_ephemerides_parallel`). |
+| `serde` | | `Serialize` / `Deserialize` derives on the solver-configuration types. |
+
+At least one `ephem-*` backend must be enabled; building with neither is a compile error. Enabling both compiles both, and `JPLEphem::new` then selects the ANISE backend — call `JPLEphem::from_builtin` to force the in-house reader.
+
+```toml
+# In-house reader (default)
+outfit = "5.0"
+
+# ANISE backend instead
+outfit = { version = "5.0", default-features = false, features = ["ephem-anise"] }
+```
+
+### Main-belt asteroids as N-body perturbers (`ephem-anise`)
+
+With the ANISE backend, the N-body propagator can also account for the
+gravitational pull of main-belt asteroids, not just the Sun and planets.
+`JPLEphem::from_anise_with_main_belt_asteroids` loads DE440 together with a
+supplementary kernel covering 300 numbered asteroids, each with a known name
+and mass; `propagator::planet_gm::known_main_belt_asteroids_by_mass()` lists
+them all as ready-to-use perturbers, most influential first.
+
+```rust,no_run
+use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
+use outfit::jpl_ephem::naif::naif_ids::main_belt::AsteroidNumber;
+use outfit::jpl_ephem::naif::naif_ids::{solar_system_bary::SolarSystemBary, NaifIds};
+use outfit::propagator::planet_gm::{known_main_belt_asteroids_by_mass, main_belt_asteroid_catalog};
+use outfit::propagator::NBodyConfig;
+use outfit::JPLEphem;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let source: EphemFileSource = "naif:DE440".try_into()?;
+    let jpl = JPLEphem::from_anise_with_main_belt_asteroids(&source)?;
+
+    // Pick specific bodies by number...
+    let config = NBodyConfig {
+        perturbing_bodies: vec![
+            NaifIds::SSB(SolarSystemBary::Sun),
+            NaifIds::AST(AsteroidNumber::CERES),
+            NaifIds::AST(AsteroidNumber::VESTA),
+            NaifIds::AST(AsteroidNumber::PALLAS),
+        ],
+        ..NBodyConfig::default()
+    };
+
+    // ...or take the 16 asteroids that perturb the main belt the most.
+    let config_top16 = NBodyConfig {
+        perturbing_bodies: known_main_belt_asteroids_by_mass().take(16).collect(),
+        ..NBodyConfig::default()
+    };
+
+    // Browse the catalog (name, number, GM), most massive first.
+    for entry in main_belt_asteroid_catalog().iter().take(5) {
+        println!("{entry}"); // e.g. "Ceres (1) — GM = 1.402e-13 AU³/day²"
+    }
+
+    let _ = (jpl, config, config_top16);
+    Ok(())
+}
+```
+
+---
+
 ## Performance & Reproducibility
 
 - **Deterministic runs** by default (set RNG seeds explicitly when noise is used).

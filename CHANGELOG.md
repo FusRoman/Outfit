@@ -2,6 +2,226 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-09-11
+
+### Added
+
+- **Alternative planetary ephemeris backend via ANISE (`ephem-anise` feature)**
+  - The planetary ephemeris backend is now chosen at compile time by Cargo
+    feature. `ephem-builtin` (in the `default` set) keeps the in-house JPL DE /
+    NAIF SPK reader; `ephem-anise` swaps in the [`anise`](https://crates.io/crates/anise)
+    toolkit, a Rust reimplementation of the NAIF SPICE toolkit validated against
+    SPICE to machine precision.
+  - New constructors on `JPLEphem`: `from_builtin` and `from_anise`. `JPLEphem::new`
+    is unchanged and selects the backend from the enabled features — the ANISE
+    backend when both are on; use `from_builtin` to force the in-house reader.
+    Building with neither `ephem-builtin` nor `ephem-anise` is a compile error.
+  - The ANISE backend reads NAIF SPK kernels only; a `horizon:` (legacy DE binary)
+    source returns `OutfitError::InvalidJPLEphemFileSource`. It reuses Outfit's
+    existing ephemeris downloader and on-disk cache (no `anise/metaload`).
+  - New error variant `OutfitError::AniseEphemerisError(String)` (feature-gated).
+  - `earth_ephemeris` under ANISE returns the Earth **geocenter** relative to the
+    Sun, matching the built-in Horizon reader (the built-in NAIF reader returns
+    the Earth–Moon barycenter relative to the Solar System Barycenter). Parity
+    tests check ANISE against the Horizon reader to `1e-8` AU on planet positions
+    and `1e-9` AU / `1e-10` AU·day⁻¹ on Earth.
+  - `hifitime` requirement bumped to `4.3` (shared, unchanged epoch type). The
+    `nalgebra` requirement is unchanged; the ANISE state is converted at the
+    backend boundary.
+
+- **Main-belt asteroids as N-body perturbers (ANISE backend)**
+  - `NaifIds` gained an `AST(AsteroidNumber)` variant identifying a numbered
+    main-belt asteroid by its official minor-planet number (e.g. `1` for
+    Ceres); `AsteroidNumber::CERES` / `PALLAS` / `VESTA` are provided for
+    convenience.
+  - New method `JPLEphem::with_main_belt_asteroids(&mut self)` loads a
+    supplementary NAIF SPK kernel (`codes_300ast_20100725.bsp`, downloaded
+    and cached like the primary kernel) covering 300 numbered asteroids into
+    an existing ANISE-backed handle (built with `JPLEphem::from_anise`), in
+    place. Once loaded, any of them can be added to
+    `NBodyConfig::perturbing_bodies` like any other body.
+  - `propagator::planet_gm::known_main_belt_asteroids()` returns all 300 as
+    ready-to-use `NaifIds::AST(_)` perturbers, each with a gravitational
+    parameter from the kernel's own published mass table — pick as many or as
+    few as needed.
+  - This is ANISE-specific: the in-house reader has no code path for
+    supplementary small-body kernels, so `NaifIds::AST(_)` only resolves under
+    the `ephem-anise` backend.
+  - `AsteroidNumber` now carries a name (`.name()`, e.g. `"Ceres"`), sourced
+    from the same supplementary kernel's own name table and cross-checked
+    against its mass table (both cover exactly the same 300 bodies).
+    `Display` uses it (`"Ceres (1)"`), falling back to `"Asteroid {n}"` for a
+    number outside the table.
+  - New `propagator::planet_gm::known_main_belt_asteroids_by_mass()` — the
+    same 300 perturbers as `known_main_belt_asteroids()`, but ordered by
+    decreasing gravitational parameter (most perturbing first), which is the
+    natural order for picking "the top N" with `.take(n)`. New
+    `main_belt_asteroid_catalog()` / `MainBeltAsteroidInfo` bundle name +
+    number + GM with a `Display` (`"Ceres (1) — GM = 1.402e-13 AU³/day²"`) for
+    browsing the catalog.
+
+### Changed
+
+- **Planetary ephemeris readers are behind `feature = "ephem-builtin"`** (breaking)
+  - The `jpl_ephem::horizon` and `jpl_ephem::naif` reader submodules,
+    `JPLEphem::HorizonFile` / `JPLEphem::NaifFile`, and
+    `JPLEphem::try_into_horizon` / `try_into_naif` now require the
+    `ephem-builtin` feature, which is enabled by the `default` feature set. The
+    lightweight `horizon_version`, `naif_version` and `naif_ids` modules stay
+    available for every feature combination.
+
+- **`JPLEphem::earth_ephemeris` / `body_ephemeris` — explicit output frame** (breaking)
+  - Both methods now take an `EphemerisFrame` argument (`Equatorial` or
+    `Ecliptic`). JPL DE and NAIF SPK data are stored in equatorial mean J2000
+    (ICRF); `EphemerisFrame::Equatorial` returns it unchanged,
+    `EphemerisFrame::Ecliptic` rotates the state to ecliptic mean J2000 with
+    `ROT_EQUMJ2000_TO_ECLMJ2000`. `EphemerisFrame` is re-exported at the crate
+    root and in the prelude.
+  - Fixes an out-of-plane perturbation error: the N-body propagator integrates in
+    ecliptic mean J2000 but `perturber_ephemeris` sampled `body_ephemeris`
+    without rotating, so every perturber sat up to ~2 AU off the ecliptic. It now
+    samples in `EphemerisFrame::Ecliptic`. The stray force coupled the fitted
+    inclination and ascending node; the ephemeris residuals for the N-body
+    reference objects drop accordingly (e.g. K09R05F per-site median from ~2.7″
+    to ~0.2″).
+  - The four `earth_ephemeris` call sites already treated the output as
+    equatorial and now pass `EphemerisFrame::Equatorial` — no numerical change.
+    The mislabeled "ecliptic J2000" docs on `body_ephemeris`,
+    `HorizonData::ephemeris` and `NaifData::ephemeris` were corrected.
+  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated; the
+    `tests/test_ephemeris.rs` `*_nbody` thresholds are now 0.3″ / 0.4″ / 0.5″.
+    Added frame-consistency unit and property tests in `jpl_ephem` and a
+    `perturber_positions_are_ecliptic` guard in `perturber_ephemeris`. The
+    Sun-only propagation path is unchanged (rotation-invariant).
+
+### Fixed
+
+- **Built-in NAIF SPK backend — velocity wrong by a factor of ~2/86400²**
+  - `EphemerisRecord::interpolate` scaled the Chebyshev derivative by
+    `2.0 / radius` instead of the correct chain-rule factor `1.0 / radius`
+    (`t = (et - mid) / radius` is linear in `et` with slope `1 / radius`),
+    making every interpolated velocity exactly twice too large.
+  - Separately, `JPLEphem::earth_ephemeris` and `JPLEphem::body_ephemeris`
+    (`JPLEphem::NaifFile` branches, in `jpl_ephem::mod`) *divided* the
+    resulting AU/s velocity by `86400.0` where converting AU/s to AU/day
+    requires *multiplying* by it (1 day = 86 400 s).
+  - Combined, every velocity returned by the built-in NAIF SPK reader
+    (`JPLEphem::from_builtin("naif:...")`, and `JPLEphem::new`/`TryFrom<&str>`
+    when only `ephem-builtin` is enabled) was off by a factor of
+    `2 / 86400² ≈ 2.7 × 10⁻¹⁰` — numerically indistinguishable from zero for
+    any practical purpose. Positions were unaffected. This path had no test
+    coverage under default features: the shared test fixtures load the
+    Horizon reader for `ephem-builtin` builds, so the built-in NAIF reader's
+    velocity was only ever exercised together with `ephem-anise`, where
+    `JPLEphem::Anise` answers the query instead of `JPLEphem::NaifFile`.
+  - Fixed both the interpolation scale factor and the two unit conversions.
+    Un-ignored and fixed the existing regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative` (previously
+    `#[ignore]`d, documenting the bug), added its property-based counterpart
+    `naif_velocity_matches_central_difference` (mirroring the existing
+    Horizon-backend property test), and added a property test directly on
+    `EphemerisRecord::interpolate` (`velocity_is_the_position_time_derivative`)
+    checking the analytic velocity against a central finite difference of the
+    position for arbitrary Chebyshev coefficients.
+
+- **`NaifData::ephemeris` (built-in NAIF SPK backend) — panicked instead of
+  returning an error**
+  - Querying a `(target, center)` pair absent from the loaded kernel, or an
+    epoch outside a segment's coverage, made `naif_data::NaifData::ephemeris`
+    panic. `NaifIds::AST(_)` (main-belt asteroids) made this easy to trigger,
+    since `de440.bsp`-style kernels never carry small bodies, but the bug is
+    general — any unsupported body/epoch combination on this backend hit it.
+    `ephemeris` now returns `Result<InterpResult, OutfitError>`
+    (`OutfitError::EphemerisBodyNotSupported` on failure); the two
+    `JPLEphem::NaifFile` call sites in `jpl_ephem::mod` propagate it through
+    the existing `body_ephemeris` `Result`, matching how the built-in Horizon
+    reader and the ANISE backend already report the same situation.
+    `earth_ephemeris` keeps its infallible contract (Earth is always present
+    in a real kernel) by panicking with a clear message on failure instead,
+    consistent with the ANISE backend's documented behaviour for Earth. This
+    is a breaking change to `NaifData::ephemeris`'s public signature.
+  - Documented, on `NaifIds`, exactly which variant each backend can resolve
+    and what happens when it can't (always an error, never a panic, except
+    for the documented `earth_ephemeris` case above).
+
+- **N-body propagator — inverted sign on the indirect perturbation term**
+  - `indirect_acceleration` returned `+GM·r_p/|r_p|³` instead of
+    `−GM·r_p/|r_p|³`. In the heliocentric equation of motion the indirect term
+    subtracts the acceleration imparted by each perturber to the (non-inertial)
+    Sun; with the wrong sign the perturbation was added twice in the in-plane
+    direction, so enabling planets *degraded* the fit and the residual grew with
+    arc length. Fixed the sign; module and function docs updated to match.
+  - The direct term and the gravity gradient `∂a/∂r` are unaffected (the
+    indirect term does not depend on the small-body position), so the state
+    transition matrix and covariance are unchanged. The Sun-only path is
+    unchanged bit-for-bit (the Sun's heliocentric position is identically zero,
+    so its indirect term is skipped).
+  - Added a `#[cfg(test)] mod tests` in `propagator::nbody` with unit and
+    property-based tests: the net perturbation (direct + indirect) vanishes as
+    the small body approaches the Sun, the indirect term is antiparallel to the
+    perturber position, and the gravity gradient is untouched.
+  - Reference values in `test_diff_cor_nbody_nonregression` were regenerated and
+    the `*_nbody` thresholds in `tests/test_ephemeris.rs` were tightened to the
+    residuals now reached (see also the frame fix below).
+  - Also realigned the `direct_acceleration` argument doc with the code
+    (`r_asteroid − r_perturber`).
+
+- **`JPLEphem::body_ephemeris` — spurious ×86400 on Horizon velocity**
+  - The Horizon branch multiplied the returned velocity by `86400.0` (comment
+    "AU/s → AU/day"), but the Horizon backend already yields AU/day after
+    `InterpResult::to_au()` — there is no per-second quantity anywhere in that
+    path. The velocity was therefore 86400× too large. Removed the scaling so
+    the Horizon branch matches `earth_ephemeris` and the documented AU/day
+    contract; added regression tests (`body_ephemeris(EarthMoon)` vs
+    `earth_ephemeris`, and velocity vs a central finite difference of the
+    position). No production result changed: the only callers of
+    `body_ephemeris` read the position and discard the velocity.
+  - Also documented (ignored regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative`): the **NAIF**
+    velocity chain is independently wrong — `EphemerisRecord::interpolate`
+    scales by `2.0 / radius` instead of `1.0 / radius`, and the NAIF branches of
+    `body_ephemeris` / `earth_ephemeris` divide by 86400 where they must
+    multiply. This is only reachable with the NAIF backend selected and is left
+    for a dedicated fix (it needs the `test_record_interpolation` /
+    `test_jpl_ephemeris` oracles regenerated).
+
+- **N-body propagator — time-independent perturber positions**
+  - `NBodyOde::diff` ignored its time argument: every perturbing body's
+    heliocentric position was sampled once at `t0` (`build_perturber_snapshots`)
+    and held fixed for the whole integration arc. The integrated force field was
+    therefore static, which is only acceptable for very short arcs (the previous
+    doc comment claimed ≲ 30 days). On the observation arcs actually used by the
+    fitting pipeline (median ~90 days, up to ~500 days for the backward
+    ground-truth propagation) this *degraded* the fit when planetary
+    perturbations were enabled instead of improving it.
+  - Perturber positions are now evaluated at the current integration epoch from
+    a per-arc **piecewise Chebyshev interpolation**
+    (`propagator::perturber_ephemeris`), built once per trajectory in
+    `run_differential_correction` and reused by every observation propagation.
+    The ephemeris-request path (`EphemerisConfig` / `apparent_position`) builds an
+    equivalent table on the fly per call.
+  - The Sun keeps an exact special case (identically-zero heliocentric position),
+    so the Sun-only path is unchanged bit-for-bit; a new
+    `tests/test_nbody_propagator.rs` pins it against the analytic two-body
+    solution. Reference values in `test_diff_cor_nbody_nonregression` were
+    regenerated (Jupiter is now time-dependent).
+  - Backward propagation (negative spans) is fully supported: the interpolation
+    window covers `[min(t0, t1), max(t0, t1)]` plus a small margin.
+  - Fixed an inverted doc comment on `direct_acceleration` (argument is
+    `r_asteroid − r_perturber`).
+
+### Added
+
+- **`NBodyConfig::perturber_interp_degree` / `perturber_panel_days`**
+  - Tuning knobs for the perturber-position interpolation: Chebyshev degree per
+    panel (default `12`) and maximum panel length in days (default `16.0`, which
+    keeps the worst body — Mercury — below `1e-10` AU).
+- **`propagator::perturber_ephemeris`** module
+  - `PerturberEphemerisSet` / `PerturberEphemeris`: per-arc Chebyshev
+    interpolation of heliocentric perturber positions, with pure, individually
+    tested helpers (Chebyshev–Gauss nodes, series fit, Clenshaw evaluation, panel
+    layout/selection) plus property-based tests and an ephemeris oracle test.
+
 ## [4.1.0] - 2026-07-20
 
 ### Fixed

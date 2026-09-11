@@ -105,15 +105,21 @@
 //! * [`naif_ids`]   – typed NAIF identifiers (targets/centers, SPK types),
 //! * [`naif_version`] – enum of known JPL kernel versions.
 
+#[cfg(feature = "ephem-builtin")]
 mod daf_header; // DAF header reader (binary, private)
+#[cfg(feature = "ephem-builtin")]
 mod directory; // Directory/footer per segment (private)
+#[cfg(feature = "ephem-builtin")]
 mod ephemeris_record; // Chebyshev records + interpolation (private)
+#[cfg(feature = "ephem-builtin")]
 mod jpl_ephem_header; // ASCII JPL header parser (private)
+#[cfg(feature = "ephem-builtin")]
 mod summary_record; // Segment summary record (private)
 
-pub mod naif_data; // High-level loader (public API)
-pub mod naif_ids; // NAIF identifiers & types (public API)
-pub mod naif_version; // Known JPL ephemeris versions (public API)
+#[cfg(feature = "ephem-builtin")]
+pub mod naif_data; // High-level loader (built-in backend only)
+pub mod naif_ids; // NAIF identifiers & types (public API, every backend)
+pub mod naif_version; // Known JPL ephemeris versions (public API, every backend)
 
 /// Print a hex + ASCII dump of a byte slice (debug/inspection).
 ///
@@ -129,6 +135,7 @@ pub mod naif_version; // Known JPL ephemeris versions (public API)
 /// ------------
 /// * `naif_data` – for reading raw blocks before decoding (useful when debugging).
 /// * `daf_header`/`summary_record` – to correlate offsets with decoded structures.
+#[cfg(feature = "ephem-builtin")]
 pub fn print_hex_dump(data: &[u8]) {
     const BYTES_PER_LINE: usize = 40;
 

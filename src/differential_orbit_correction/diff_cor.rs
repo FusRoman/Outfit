@@ -59,11 +59,56 @@ use crate::{
         equinoctial_element::EquinoctialLimits,
         uncertainty::{EquinoctialUncertainty, OrbitalCovariance},
     },
-    propagator::PropagatorKind,
+    propagator::{perturber_ephemeris::PerturberEphemerisSet, PropagatorKind},
     EquinoctialElements, JPLEphem, OrbitalElements, OutfitError,
 };
 
 use super::least_square::OrbitalUncertainty;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Observation-arc time window helpers (pure)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Smallest closed time window (MJD TT) that contains every observation epoch
+/// and the propagation anchor `t0`.
+///
+/// # Arguments
+///
+/// * `observations` — observation slice; only `mjd_tt()` is read.
+/// * `t0_mjd_tt` — propagation reference epoch that must also lie in the window.
+///
+/// # Returns
+///
+/// `(lo, hi)` with `lo <= t0 <= hi` and `lo`/`hi` bounding all observation epochs.
+fn observation_arc_window(observations: &[Observation], t0_mjd_tt: f64) -> (f64, f64) {
+    observations
+        .iter()
+        .fold((t0_mjd_tt, t0_mjd_tt), |(lo, hi), obs| {
+            let t = obs.mjd_tt();
+            (lo.min(t), hi.max(t))
+        })
+}
+
+/// Widens a `(lo, hi)` window by a symmetric margin of
+/// `max(min_margin_days, fraction · (hi − lo))` on each side.
+///
+/// The margin absorbs the slight over-range evaluations an adaptive integrator
+/// makes when it rejects a step near an endpoint.
+///
+/// # Arguments
+///
+/// * `window` — `(lo, hi)` bounds in MJD TT with `lo <= hi`.
+/// * `fraction` — relative margin as a fraction of the window width.
+/// * `min_margin_days` — lower bound on the margin, in days.
+///
+/// # Returns
+///
+/// The padded `(lo − m, hi + m)` window.
+fn pad_window(window: (f64, f64), fraction: f64, min_margin_days: f64) -> (f64, f64) {
+    let (lo, hi) = window;
+    let margin = (fraction * (hi - lo)).max(min_margin_days);
+    (lo - margin, hi + margin)
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -295,6 +340,26 @@ pub fn run_differential_correction(
 
     let num_free = config.free_elements.iter().filter(|&&f| f).count();
 
+    // Per-trajectory perturber-position interpolation, shared by every N-body
+    // propagation below.  Built once here so the cost is amortised over all
+    // observations and Newton iterations; two-body fits need nothing.
+    let perturber_ephem = match &config.propagator {
+        PropagatorKind::TwoBody => None,
+        PropagatorKind::NBody(nbody_config) => {
+            let (t_start, t_end) = pad_window(
+                observation_arc_window(observations, initial_elements.reference_epoch),
+                0.02,
+                1.0,
+            );
+            Some(PerturberEphemerisSet::build(
+                nbody_config,
+                jpl,
+                t_start,
+                t_end,
+            )?)
+        }
+    };
+
     // Working copies — updated at the end of every Newton step.
     let mut elements = initial_elements.clone();
     let mut obs_fit_data = initial_obs_fit_data.to_vec();
@@ -331,6 +396,7 @@ pub fn run_differential_correction(
                 jpl,
                 true,
                 &config.propagator,
+                perturber_ephem.as_ref(),
             )?;
 
             // ── Check inversion ──────────────────────────────────────────────
@@ -726,5 +792,45 @@ mod diff_cor_tests {
             Err(OutfitError::BizarreOrbit) => {}
             Err(e) => panic!("unexpected error: {e:?}"),
         }
+    }
+
+    // ── Observation-arc window helpers ───────────────────────────────────────
+
+    #[test]
+    fn observation_arc_window_bounds_all_epochs_and_anchor() {
+        let t0 = 59_000.0;
+        let (obs_dataset, _cache) = make_dataset_and_cache(t0 + 10.0, 100.0, 6);
+        let observations: Vec<_> = (0..6)
+            .map(|i| obs_dataset.get_observation(i as u64).unwrap().clone())
+            .collect();
+
+        // Anchor before the first observation: window must stretch back to it.
+        let (lo, hi) = observation_arc_window(&observations, t0);
+        let obs_lo = observations
+            .iter()
+            .map(|o| o.mjd_tt())
+            .fold(f64::INFINITY, f64::min);
+        let obs_hi = observations
+            .iter()
+            .map(|o| o.mjd_tt())
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(lo <= hi);
+        assert_eq!(lo, t0.min(obs_lo));
+        assert_eq!(hi, t0.max(obs_hi));
+        assert!(lo <= t0 && t0 <= hi);
+    }
+
+    #[test]
+    fn observation_arc_window_handles_empty_slice() {
+        let (lo, hi) = observation_arc_window(&[], 59_123.0);
+        assert_eq!((lo, hi), (59_123.0, 59_123.0));
+    }
+
+    #[test]
+    fn pad_window_uses_the_larger_of_relative_and_absolute_margin() {
+        // Relative margin wins: 0.02 * 1000 = 20 > 1.
+        assert_eq!(pad_window((100.0, 1100.0), 0.02, 1.0), (80.0, 1120.0));
+        // Absolute floor wins: 0.02 * 10 = 0.2 < 1.
+        assert_eq!(pad_window((0.0, 10.0), 0.02, 1.0), (-1.0, 11.0));
     }
 }

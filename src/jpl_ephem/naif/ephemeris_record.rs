@@ -17,7 +17,9 @@
 //! 5. `ncoeff` for Z (km).
 //!
 //! The normalized time is `t = (et - mid) / radius`, clamped to `[-1, 1]`.
-//! Position uses `T_n(t)`; velocity uses `T'_n(t)` scaled by `2/radius`.
+//! Position uses `T_n(t)`; velocity uses `T'_n(t)` scaled by `1/radius`
+//! (the chain-rule factor `dt/d(et)`, since `t` is linear in `et` with
+//! slope `1/radius`).
 //!
 //! ## Units & time scales
 //! * `mid` and `radius` are in **seconds** of ET/TDB (consistent with SPK).
@@ -176,8 +178,9 @@ impl EphemerisRecord {
     /// Interpolate Cartesian **position** and **velocity** at an ET epoch.
     ///
     /// The time is first normalized to `t = (et - mid) / radius` and clamped to
-    /// `[-1, 1]`. Position uses Chebyshev polynomials `T_n(t)`. Velocity uses
-    /// the derivatives `T'_n(t)` and is scaled by `2 / radius`.
+    /// `[-1, 1]`. Position uses Chebyshev polynomials `T_n(t)`. Velocity is the
+    /// time derivative of that sum: it uses the derivatives `T'_n(t)` and is
+    /// scaled by `1 / radius` (the chain-rule factor `dt/d(et)`).
     ///
     /// Arguments
     /// -----------------
@@ -191,7 +194,7 @@ impl EphemerisRecord {
     /// See also
     /// ------------
     /// * [`Self::parse`] – To load records before interpolation.
-    /// * NAIF SPK docs – Chebyshev series for states and the `2/radius` factor.
+    /// * NAIF SPK Required Reading – Chebyshev series for states.
     pub fn interpolate(&self, ephem_time: f64) -> (Vector3<f64>, Vector3<f64>) {
         let normalized_time = (ephem_time - self.mid) / self.radius;
         let clamped_time = normalized_time.clamp(-1.0, 1.0);
@@ -229,7 +232,7 @@ impl EphemerisRecord {
                 .sum(),
         );
 
-        // Velocity using T'_n(t) and scale 2/radius
+        // Velocity using T'_n(t) and scale 1/radius
         let mut velocity = Vector3::zeros();
         if num_coefficients > 1 {
             let mut chebyshev_derivatives = vec![0.0; num_coefficients];
@@ -247,7 +250,7 @@ impl EphemerisRecord {
                 }
             }
 
-            let velocity_scaling_factor = 2.0 / self.radius;
+            let velocity_scaling_factor = 1.0 / self.radius;
 
             velocity[0] = self
                 .x
@@ -386,6 +389,7 @@ impl fmt::Display for EphemerisRecord {
 #[cfg(test)]
 mod test_ephemeris_record {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_ephem_record_display() {
@@ -535,11 +539,43 @@ mod test_ephemeris_record {
 
         assert_eq!(
             velocity,
-            Vector3::new(
-                -51.663380462484454,
-                -28.897503577030022,
-                -12.568179510296154
-            )
+            Vector3::new(-25.831690231242227, -14.448751788515011, -6.284089755148077)
         )
+    }
+
+    proptest! {
+        /// Regression/property test for the `interpolate` velocity scaling
+        /// factor: the analytic velocity must equal the central-difference
+        /// derivative of the position, for arbitrary Chebyshev coefficients.
+        ///
+        /// `frac` is kept inside `(-0.9, 0.9)` so the finite-difference probe
+        /// epochs stay away from the `[-1, 1]` clamp boundary, where the
+        /// derivative of `clamp` is discontinuous and a finite difference
+        /// would not agree with the analytic (unclamped-branch) derivative.
+        #[test]
+        fn velocity_is_the_position_time_derivative(
+            mid in -1.0e9_f64..1.0e9,
+            radius in 1_000.0_f64..1_000_000.0,
+            coeffs in prop::collection::vec(-1.0e4_f64..1.0e4, 2..8),
+            frac in -0.9_f64..0.9,
+        ) {
+            let record = EphemerisRecord {
+                mid,
+                radius,
+                x: coeffs.clone(),
+                y: coeffs.clone(),
+                z: coeffs,
+            };
+
+            let et = mid + frac * radius;
+            let h = radius * 1e-6;
+
+            let (_, v) = record.interpolate(et);
+            let (p_plus, _) = record.interpolate(et + h);
+            let (p_minus, _) = record.interpolate(et - h);
+            let v_fd = (p_plus - p_minus) / (2.0 * h);
+
+            prop_assert!((v - v_fd).norm() / v_fd.norm().max(1e-9) < 1e-4);
+        }
     }
 }

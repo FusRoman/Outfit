@@ -32,7 +32,7 @@
 //! 1. Select a
 //!    [`JPLHorizonVersion`](crate::jpl_ephem::horizon::horizon_version::JPLHorizonVersion)
 //!    and resolve the file path (via
-//!    \[`crate::jpl_ephem::download_jpl_file::download_big_file`\], gated by the `jpl-download` feature).
+//!    \[`crate::jpl_ephem::download_jpl_file::download_big_file`\]).
 //! 2. Construct a
 //!    [`HorizonData`](crate::jpl_ephem::horizon::horizon_data::HorizonData)
 //!    by reading the binary file.
@@ -134,12 +134,19 @@
 //! * JPL Horizons FTP: <https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/>
 
 /// High-level API: load DE binaries, manage records, query state vectors.
+#[cfg(feature = "ephem-builtin")]
 pub mod horizon_data;
 /// Body/center identifiers (HorizonID) mapped to official JPL numbering.
+#[cfg(feature = "ephem-builtin")]
 pub mod horizon_ids;
 /// Low-level Chebyshev coefficient records extracted from the binary file.
+#[cfg(feature = "ephem-builtin")]
 pub mod horizon_records;
 /// Version management: DE labels to official filenames and metadata.
+///
+/// Always compiled: [`crate::jpl_ephem::download_jpl_file`] resolves and caches
+/// ephemeris files for every backend and needs the DE-label to filename mapping.
 pub mod horizon_version;
 /// Interpolation outputs (position, velocity, acceleration) with unit conversions.
+#[cfg(feature = "ephem-builtin")]
 pub mod interpolation_result;

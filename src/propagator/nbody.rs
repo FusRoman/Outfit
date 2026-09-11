@@ -22,13 +22,21 @@
 //! The Newtonian heliocentric acceleration for perturber `i` is
 //!
 //! ```text
-//! a += −GMᵢ/|d|³ · d  +  GMᵢ/|rᵢ|³ · rᵢ        (indirect term)
+//! a += −GMᵢ/|d|³ · d  −  GMᵢ/|rᵢ(t)|³ · rᵢ(t)        (indirect term)
 //! ```
 //!
-//! where `d = r − rᵢ` is the asteroid–perturber vector, and the second term
-//! removes the Sun's perturbation on the integration centre (heliocentric
-//! formulation).  When the Sun itself is a perturber the indirect term cancels
-//! the direct term exactly, yielding the standard two-body acceleration.
+//! where `d = r − rᵢ(t)` is the asteroid–perturber vector.  The integration
+//! centre (the Sun) is not inertial: it is itself accelerated toward each
+//! perturber by `GMᵢ/|rᵢ(t)|³ · rᵢ(t)`.  Describing the motion *relative* to the
+//! Sun requires subtracting that acceleration, which is the indirect term.  When
+//! the Sun itself is a perturber the indirect term vanishes and the direct term
+//! alone yields the standard two-body acceleration.
+//!
+//! The perturber positions `rᵢ(t)` are evaluated at the current integration time
+//! from a per-arc Chebyshev interpolation
+//! ([`perturber_ephemeris`](super::perturber_ephemeris)), so the integrated
+//! force field follows real planetary motion over the whole arc (not just short
+//! ones).
 //!
 //! ## Variational equations
 //! ```text
@@ -57,9 +65,9 @@ use differential_equations::ode::ODE;
 use differential_equations::prelude::*;
 use nalgebra::{Matrix3, Matrix6, Matrix6x3, Vector3};
 
-use crate::{jpl_ephem::JPLEphem, outfit_errors::OutfitError};
+use crate::outfit_errors::OutfitError;
 
-use super::{planet_gm::gm_au3_day2, NBodyConfig};
+use super::{perturber_ephemeris::PerturberEphemeris, NBodyConfig};
 
 // ---------------------------------------------------------------------------
 // ODE right-hand side
@@ -70,35 +78,23 @@ use super::{planet_gm::gm_au3_day2, NBodyConfig};
 //   y[3..6]  = velocity (AU/day)
 //   y[6..42] = STM Φ stored col-major
 
-/// Snapshot of a perturbing body at a fixed epoch.
-///
-/// The snapshot is taken at t0 and held constant over the integration arc.
-/// This is accurate for short arcs (≲ 30 days) where planetary motion is slow.
-pub(crate) struct PerturberSnapshot {
-    /// Heliocentric position of the perturber at t0, in the ecliptic J2000 frame.
-    ///
-    /// Units: AU.
-    heliocentric_position: Vector3<f64>,
-
-    /// Gravitational parameter GM of the perturber.
-    ///
-    /// Units: AU³/day².
-    gravitational_parameter: f64,
-}
-
 /// ODE right-hand side for the augmented state (position, velocity, STM).
 ///
 /// Implements [`ODE<f64, [f64; 42]>`] so that it can be driven by the DOP853
-/// integrator.  The dynamics are frozen at t0: perturber positions are sampled
-/// once and held constant throughout the integration arc.
-pub(crate) struct NBodyOde {
-    /// Perturber snapshots evaluated at t0.
+/// integrator.  Perturber positions are **time-dependent**: on every call to
+/// [`ODE::diff`] each body's heliocentric position is read from a per-arc
+/// Chebyshev interpolation ([`PerturberEphemeris`]) at the current integration
+/// epoch `t0_mjd_tt + time`.
+pub(crate) struct NBodyOde<'a> {
+    /// Per-body position interpolation for the whole integration arc.
     ///
-    /// Each entry holds the heliocentric position and GM of one perturbing body.
-    /// These values are used on every call to [`ODE::diff`] to compute the total
-    /// heliocentric acceleration and the gravity-gradient matrix required by the
-    /// variational equations.
-    pub(crate) perturbers: Vec<PerturberSnapshot>,
+    /// Borrowed (not owned) so the table is built once per trajectory and shared
+    /// by every observation propagation without cloning its coefficients.
+    pub(crate) perturbers: &'a [PerturberEphemeris],
+
+    /// Integration origin (MJD TT).  DOP853 drives `time` relative to this, so
+    /// the absolute epoch inside [`ODE::diff`] is `t0_mjd_tt + time`.
+    pub(crate) t0_mjd_tt: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -114,16 +110,15 @@ pub(crate) struct NBodyOde {
 ///
 /// # Arguments
 ///
-/// * `asteroid_to_perturber` – Vector from the heliocentric position of the
-///   small body to the heliocentric position of the perturber, i.e.
-///   `r_perturber − r_asteroid`. Units: AU.
+/// * `asteroid_to_perturber` – Vector from the perturber to the small body,
+///   i.e. `r_asteroid − r_perturber`. Units: AU.
 /// * `gravitational_parameter` – Gravitational parameter GM of the perturber.
 ///   Units: AU³/day².
 ///
 /// # Returns
 ///
 /// The direct acceleration vector (AU/day²) pointing from the small body
-/// toward the perturber, scaled by GM / |d|³.
+/// toward the perturber, with magnitude `GM / |asteroid_to_perturber|²`.
 fn direct_acceleration(
     asteroid_to_perturber: Vector3<f64>,
     gravitational_parameter: f64,
@@ -133,15 +128,17 @@ fn direct_acceleration(
     -gravitational_parameter / distance_cubed * asteroid_to_perturber
 }
 
-/// Computes the indirect (heliocentric frame correction) acceleration from a
-/// single perturber:
+/// Computes the indirect acceleration from a single perturber, i.e. the
+/// acceleration imparted by that perturber to the heliocentric origin:
 ///
 /// ```text
-/// a_indirect = +GM / |perturber_heliocentric_pos|³ · perturber_heliocentric_pos
+/// a_indirect = −GM / |perturber_heliocentric_pos|³ · perturber_heliocentric_pos
 /// ```
 ///
-/// Returns zero if the perturber is at (or very near) the origin (i.e. it is
-/// the Sun itself, which cancels with its direct term).
+/// The heliocentric frame is non-inertial: the Sun is accelerated toward the
+/// perturber. Subtracting this term expresses the small body's motion relative
+/// to the Sun. The returned vector is therefore antiparallel to the perturber's
+/// heliocentric position.
 ///
 /// # Arguments
 ///
@@ -152,10 +149,12 @@ fn direct_acceleration(
 ///
 /// # Returns
 ///
-/// The indirect acceleration correction vector (AU/day²) that removes the
-/// apparent acceleration of the heliocentric origin due to the perturber.
-/// Returns [`Vector3::zeros`] when the perturber distance is ≤ 1 × 10⁻¹⁰ AU
-/// (i.e. the perturber coincides with the Sun).
+/// The indirect acceleration vector (AU/day²), antiparallel to
+/// `perturber_heliocentric_position` with magnitude
+/// `GM / |perturber_heliocentric_position|²`. Returns [`Vector3::zeros`] when the
+/// perturber distance is ≤ 1 × 10⁻¹⁰ AU, i.e. the perturber coincides with the
+/// heliocentric origin (the Sun), where the term is undefined and physically
+/// absent.
 fn indirect_acceleration(
     perturber_heliocentric_position: Vector3<f64>,
     gravitational_parameter: f64,
@@ -163,7 +162,7 @@ fn indirect_acceleration(
     let perturber_distance = perturber_heliocentric_position.norm();
     if perturber_distance > 1e-10 {
         let perturber_distance_cubed = perturber_distance.powi(3);
-        gravitational_parameter / perturber_distance_cubed * perturber_heliocentric_position
+        -gravitational_parameter / perturber_distance_cubed * perturber_heliocentric_position
     } else {
         Vector3::zeros()
     }
@@ -179,7 +178,7 @@ fn indirect_acceleration(
 /// # Arguments
 ///
 /// * `asteroid_to_perturber` – Vector from the heliocentric position of the
-///   small body to that of the perturber (`r_perturber − r_asteroid`).
+///   perturber to that of the small body (`r_asteroid − r_perturber`).
 ///   Units: AU.
 /// * `gravitational_parameter` – Gravitational parameter GM of the perturber.
 ///   Units: AU³/day².
@@ -205,18 +204,20 @@ fn gravity_gradient_contribution(
 }
 
 /// Accumulates total heliocentric acceleration and gravity-gradient matrix
-/// over all perturbers.
+/// over all perturbers at a given epoch.
 ///
-/// Iterates over every [`PerturberSnapshot`] and sums the direct acceleration,
-/// indirect acceleration correction, and gravity-gradient contribution from
-/// each body.
+/// For every [`PerturberEphemeris`] the position is evaluated at `mjd_tt` and
+/// the direct acceleration, indirect acceleration correction, and gravity-
+/// gradient contribution are summed.  Acceleration and gradient are accumulated
+/// together so the STM (hence the covariance) stays consistent with the
+/// integrated dynamics.
 ///
 /// # Arguments
 ///
 /// * `asteroid_heliocentric_position` – Heliocentric position of the small body
 ///   in the ecliptic J2000 frame. Units: AU.
-/// * `perturbers` – Slice of perturber snapshots evaluated at t0. Each entry
-///   provides the perturber's heliocentric position (AU) and GM (AU³/day²).
+/// * `perturbers` – Per-body position interpolators for the arc.
+/// * `mjd_tt` – Absolute epoch (MJD TT) at which perturber positions are read.
 ///
 /// # Returns
 ///
@@ -228,24 +229,20 @@ fn gravity_gradient_contribution(
 ///   matrix for the STM variational equations.
 fn accumulate_perturber_effects(
     asteroid_heliocentric_position: Vector3<f64>,
-    perturbers: &[PerturberSnapshot],
+    perturbers: &[PerturberEphemeris],
+    mjd_tt: f64,
 ) -> (Vector3<f64>, Matrix3<f64>) {
     perturbers.iter().fold(
         (Vector3::zeros(), Matrix3::zeros()),
         |(acc_total, da_dr_total), perturber| {
-            let asteroid_to_perturber =
-                asteroid_heliocentric_position - perturber.heliocentric_position;
+            let perturber_position = perturber.position_at(mjd_tt);
+            let gravitational_parameter = perturber.gm();
+            let asteroid_to_perturber = asteroid_heliocentric_position - perturber_position;
 
-            let acc_direct =
-                direct_acceleration(asteroid_to_perturber, perturber.gravitational_parameter);
-            let acc_indirect = indirect_acceleration(
-                perturber.heliocentric_position,
-                perturber.gravitational_parameter,
-            );
-            let da_dr_contribution = gravity_gradient_contribution(
-                asteroid_to_perturber,
-                perturber.gravitational_parameter,
-            );
+            let acc_direct = direct_acceleration(asteroid_to_perturber, gravitational_parameter);
+            let acc_indirect = indirect_acceleration(perturber_position, gravitational_parameter);
+            let da_dr_contribution =
+                gravity_gradient_contribution(asteroid_to_perturber, gravitational_parameter);
 
             (
                 acc_total + acc_direct + acc_indirect,
@@ -335,13 +332,17 @@ fn write_stm_derivative(
     state_derivative[6..42].copy_from_slice(dphi_dt.as_slice());
 }
 
-impl ODE<f64, [f64; 42]> for NBodyOde {
-    fn diff(&self, _time: f64, augmented_state: &[f64; 42], state_derivative: &mut [f64; 42]) {
+impl ODE<f64, [f64; 42]> for NBodyOde<'_> {
+    fn diff(&self, time: f64, augmented_state: &[f64; 42], state_derivative: &mut [f64; 42]) {
         let asteroid_heliocentric_position =
             Vector3::new(augmented_state[0], augmented_state[1], augmented_state[2]);
 
+        // DOP853 drives `time` relative to t0; perturber positions are read at
+        // the corresponding absolute epoch.
+        let mjd_tt = self.t0_mjd_tt + time;
+
         let (total_acceleration, gravity_gradient) =
-            accumulate_perturber_effects(asteroid_heliocentric_position, &self.perturbers);
+            accumulate_perturber_effects(asteroid_heliocentric_position, self.perturbers, mjd_tt);
 
         write_position_velocity_derivatives(augmented_state, total_acceleration, state_derivative);
 
@@ -422,57 +423,6 @@ pub(crate) fn build_augmented_initial_state(
     augmented_state
 }
 
-/// Queries the ephemeris and builds a perturber snapshot vector at the given
-/// epoch.
-///
-/// For each body listed in [`NBodyConfig::perturbing_bodies`], this function
-/// looks up the gravitational parameter from the static table in
-/// [`planet_gm`](super::planet_gm) and queries the heliocentric position from
-/// the supplied JPL ephemeris file.
-///
-/// # Arguments
-///
-/// * `config` – N-body configuration specifying which perturbing bodies to
-///   include and the integrator tolerances.
-/// * `jpl` – Opened JPL ephemeris file used to query the heliocentric position
-///   of each perturbing body.
-/// * `epoch` – Reference epoch at which perturber positions are sampled.
-///   Passed directly to [`JPLEphem::body_ephemeris`].
-///
-/// # Returns
-///
-/// A [`Vec<PerturberSnapshot>`] with one entry per body listed in
-/// `config.perturbing_bodies`, ordered identically. Each entry contains the
-/// body's heliocentric position (AU) and GM (AU³/day²) at the given epoch.
-///
-/// # Errors
-///
-/// - Returns [`OutfitError::EphemerisBodyNotSupported`] if a perturbing body
-///   has no GM entry in the static table or cannot be resolved by the JPL
-///   ephemeris file.
-pub(crate) fn build_perturber_snapshots(
-    config: &NBodyConfig,
-    jpl: &JPLEphem,
-    epoch: &hifitime::Epoch,
-) -> Result<Vec<PerturberSnapshot>, OutfitError> {
-    config
-        .perturbing_bodies
-        .iter()
-        .map(|&body| {
-            let gravitational_parameter = gm_au3_day2(body).ok_or_else(|| {
-                OutfitError::EphemerisBodyNotSupported(format!(
-                    "No GM available for perturber {body:?}"
-                ))
-            })?;
-            let (heliocentric_position, _velocity) = jpl.body_ephemeris(body, epoch)?;
-            Ok(PerturberSnapshot {
-                heliocentric_position,
-                gravitational_parameter,
-            })
-        })
-        .collect()
-}
-
 /// Runs the DOP853 integrator from t=0 to t=`time_span_days` and returns the
 /// final augmented state vector.
 ///
@@ -482,8 +432,8 @@ pub(crate) fn build_perturber_snapshots(
 ///
 /// # Arguments
 ///
-/// * `ode` – Reference to the [`NBodyOde`] instance holding the frozen perturber
-///   snapshots. Implements the ODE right-hand side.
+/// * `ode` – Reference to the [`NBodyOde`] instance holding the per-arc perturber
+///   position interpolation. Implements the ODE right-hand side.
 /// * `augmented_initial_state` – 42-element initial augmented state vector at
 ///   t=0, as produced by [`build_augmented_initial_state`].
 /// * `time_span_days` – Integration duration. Positive for forward propagation,
@@ -503,7 +453,7 @@ pub(crate) fn build_perturber_snapshots(
 /// - Returns [`OutfitError::NBodyPropagationFailed`] if the DOP853 solver
 ///   returns an error or if the solution contains no steps.
 pub(crate) fn integrate_augmented_state(
-    ode: &NBodyOde,
+    ode: &NBodyOde<'_>,
     augmented_initial_state: [f64; 42],
     time_span_days: f64,
     config: &NBodyConfig,
@@ -601,4 +551,175 @@ pub(crate) fn split_propagated_jacobian(
         }
     }
     (dpos_delem_at_t1, dvel_delem_at_t1)
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Tests
+// ───────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use proptest::prelude::*;
+
+    /// Gravitational parameter of Jupiter in AU³/day², used as a representative
+    /// perturber strength.
+    const GM_JUPITER: f64 = 2.8253e-7;
+
+    /// Closed-form gravity gradient `−GM · (I/|d|³ − 3 d dᵀ/|d|⁵)`, recomputed
+    /// independently of [`gravity_gradient_contribution`] for cross-checking.
+    fn reference_gravity_gradient(asteroid_to_perturber: Vector3<f64>, gm: f64) -> Matrix3<f64> {
+        let d = asteroid_to_perturber.norm();
+        let identity_term = Matrix3::<f64>::identity() / d.powi(3);
+        let outer_term =
+            3.0 * asteroid_to_perturber * asteroid_to_perturber.transpose() / d.powi(5);
+        -gm * (identity_term - outer_term)
+    }
+
+    // ── Unit tests: pure helpers ─────────────────────────────────────────────
+
+    /// With the small body at the heliocentric origin, the small body and the
+    /// Sun feel the same pull from the perturber, so the net perturbation
+    /// (direct + indirect) must cancel.
+    #[test]
+    fn net_perturbation_vanishes_at_the_origin() {
+        let perturber_position = Vector3::new(5.2, 0.0, 0.0);
+        let asteroid_position = Vector3::new(1e-9, 0.0, 0.0);
+        let asteroid_to_perturber = asteroid_position - perturber_position;
+
+        let net = direct_acceleration(asteroid_to_perturber, GM_JUPITER)
+            + indirect_acceleration(perturber_position, GM_JUPITER);
+
+        assert!(
+            net.norm() < 1e-15,
+            "net perturbation should vanish at the origin, got {net:?}"
+        );
+    }
+
+    /// The indirect term is antiparallel to the perturber's heliocentric
+    /// position and has magnitude `GM / |r_p|²`.
+    #[test]
+    fn indirect_acceleration_is_antiparallel_to_perturber() {
+        let perturber_position = Vector3::new(3.0, -2.0, 1.5);
+        let acc = indirect_acceleration(perturber_position, GM_JUPITER);
+
+        // Opposite direction: negative projection onto the perturber position.
+        assert!(
+            acc.dot(&perturber_position) < 0.0,
+            "indirect term must point away from the perturber, got {acc:?}"
+        );
+        // Colinear: the cross product with the perturber position is zero.
+        assert!(acc.cross(&perturber_position).norm() < 1e-20);
+        // Magnitude GM / |r_p|².
+        assert_abs_diff_eq!(
+            acc.norm(),
+            GM_JUPITER / perturber_position.norm().powi(2),
+            epsilon = 1e-20
+        );
+    }
+
+    /// The indirect term matches the magnitude-times-unit-vector form
+    /// `−(GM / |r_p|²) · r_p / |r_p|`.
+    #[test]
+    fn indirect_acceleration_matches_closed_form() {
+        for perturber_position in [
+            Vector3::new(0.39, 0.0, 0.0),
+            Vector3::new(-1.0, 0.7, 0.2),
+            Vector3::new(9.5, -3.1, 0.8),
+        ] {
+            let acc = indirect_acceleration(perturber_position, GM_JUPITER);
+            let expected =
+                -GM_JUPITER / perturber_position.norm().powi(2) * perturber_position.normalize();
+            assert_abs_diff_eq!(acc, expected, epsilon = 1e-20);
+        }
+    }
+
+    /// A perturber sitting on the heliocentric origin (the Sun) yields an exact
+    /// zero indirect term, leaving only its direct contribution.
+    #[test]
+    fn indirect_acceleration_returns_zero_near_origin() {
+        let near_origin = Vector3::new(1e-11, 0.0, 0.0);
+        assert_eq!(
+            indirect_acceleration(near_origin, GM_JUPITER),
+            Vector3::zeros()
+        );
+    }
+
+    /// The sign fix does not touch the gravity gradient: it stays symmetric and
+    /// equal to its closed form (the indirect term does not depend on `r`).
+    #[test]
+    fn gravity_gradient_is_symmetric_and_matches_closed_form() {
+        let asteroid_to_perturber = Vector3::new(-2.4, 1.1, 0.35);
+        let gradient = gravity_gradient_contribution(asteroid_to_perturber, GM_JUPITER);
+
+        assert_abs_diff_eq!(gradient, gradient.transpose(), epsilon = 1e-20);
+        assert_abs_diff_eq!(
+            gradient,
+            reference_gravity_gradient(asteroid_to_perturber, GM_JUPITER),
+            epsilon = 1e-20
+        );
+    }
+
+    // ── Property-based tests ─────────────────────────────────────────────────
+
+    proptest! {
+        /// As the small body approaches the heliocentric origin, the net
+        /// perturbation (direct + indirect) goes to zero, bounded by the
+        /// gravity gradient times the displacement: `4 GM s / |r_p|³`.
+        #[test]
+        fn net_perturbation_vanishes_as_asteroid_approaches_sun(
+            px in -6.0_f64..6.0, py in -6.0_f64..6.0, pz in -6.0_f64..6.0,
+            ux in -1.0_f64..1.0, uy in -1.0_f64..1.0, uz in -1.0_f64..1.0,
+            gm in 1e-10_f64..1e-6,
+            scale in 1e-12_f64..1e-8,
+        ) {
+            let perturber_position = Vector3::new(px, py, pz);
+            let direction = Vector3::new(ux, uy, uz);
+            prop_assume!(perturber_position.norm() > 0.5);
+            prop_assume!(direction.norm() > 1e-3);
+
+            let asteroid_position = scale * direction.normalize();
+            let net = direct_acceleration(asteroid_position - perturber_position, gm)
+                + indirect_acceleration(perturber_position, gm);
+
+            let bound = 10.0 * gm * scale / perturber_position.norm().powi(3);
+            prop_assert!(
+                net.norm() < bound,
+                "net {} exceeds bound {bound}", net.norm()
+            );
+        }
+
+        /// The indirect term always opposes the perturber direction, whatever
+        /// the geometry and (positive) mass.
+        #[test]
+        fn indirect_opposes_perturber_direction(
+            px in -6.0_f64..6.0, py in -6.0_f64..6.0, pz in -6.0_f64..6.0,
+            gm in 1e-12_f64..1e-4,
+        ) {
+            let perturber_position = Vector3::new(px, py, pz);
+            prop_assume!(perturber_position.norm() > 0.5);
+
+            let acc = indirect_acceleration(perturber_position, gm);
+            prop_assert!(acc.dot(&perturber_position) < 0.0);
+            prop_assert!(
+                acc.cross(&perturber_position).norm() < 1e-12 * perturber_position.norm()
+            );
+        }
+
+        /// The indirect term is linear in the gravitational parameter.
+        #[test]
+        fn indirect_scales_linearly_with_gm(
+            px in -6.0_f64..6.0, py in -6.0_f64..6.0, pz in -6.0_f64..6.0,
+            gm in 1e-12_f64..1e-4,
+            factor in 0.1_f64..10.0,
+        ) {
+            let perturber_position = Vector3::new(px, py, pz);
+            prop_assume!(perturber_position.norm() > 0.5);
+
+            let scaled = indirect_acceleration(perturber_position, factor * gm);
+            let expected = factor * indirect_acceleration(perturber_position, gm);
+            prop_assert!((scaled - expected).norm() <= 1e-12 * expected.norm() + 1e-300);
+        }
+    }
 }
