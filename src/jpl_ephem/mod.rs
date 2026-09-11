@@ -346,40 +346,37 @@ impl JPLEphem {
         )?))
     }
 
-    /// Construct a [`JPLEphem`] backed by the ANISE toolkit, with the
-    /// main-belt asteroid supplementary kernel also loaded.
+    /// Load the main-belt asteroid supplementary kernel into this handle, in
+    /// place.
     ///
-    /// Like [`JPLEphem::from_anise`], plus a second SPK kernel
-    /// (`codes_300ast_20100725.bsp`, downloaded into the local cache on first
-    /// use) covering 300 numbered main-belt asteroids. Once loaded,
-    /// `NaifIds::AST(_)` bodies (see
+    /// Adds a second SPK kernel (`codes_300ast_20100725.bsp`, downloaded into
+    /// the local cache on first use) covering 300 numbered main-belt
+    /// asteroids, on top of whichever primary kernel this handle already has
+    /// loaded. Once this call returns, `NaifIds::AST(_)` bodies (see
     /// [`crate::propagator::planet_gm::known_main_belt_asteroids`]) resolve
     /// through [`JPLEphem::body_ephemeris`] like any other body.
     ///
-    /// # Arguments
-    ///
-    /// * `source` – ephemeris source policy for the primary kernel; only the
-    ///   `naif:` token is supported.
-    ///
-    /// # Returns
-    ///
-    /// A [`JPLEphem`] wrapping an ANISE almanac loaded from both kernels.
-    ///
     /// # Errors
     ///
-    /// Returns [`OutfitError::InvalidJPLEphemFileSource`] for a legacy-DE
-    /// source, or [`OutfitError`] if either kernel cannot be resolved,
+    /// Returns [`OutfitError::InvalidJPLEphemFileSource`] if this handle is
+    /// not backed by the ANISE toolkit (see [`JPLEphem::from_anise`]) — the
+    /// in-house reader has no code path for supplementary kernels — or
+    /// [`OutfitError`] if the supplementary kernel cannot be resolved,
     /// downloaded, or parsed.
     #[cfg(feature = "ephem-anise")]
-    pub fn from_anise_with_main_belt_asteroids(
-        source: impl Into<EphemFileSource>,
-    ) -> Result<Self, OutfitError> {
-        let primary_path = EphemFilePath::get_ephemeris_file(&source.into())?;
-        let asteroids_path =
-            EphemFilePath::get_ephemeris_file(&EphemFileSource::MainBeltAsteroids)?;
-        let anise = anise_backend::AniseEphem::from_file_path(&primary_path)?
-            .with_supplementary_kernel(&asteroids_path)?;
-        Ok(JPLEphem::Anise(anise))
+    pub fn with_main_belt_asteroids(&mut self) -> Result<(), OutfitError> {
+        match self {
+            JPLEphem::Anise(anise) => {
+                let asteroids_path =
+                    EphemFilePath::get_ephemeris_file(&EphemFileSource::MainBeltAsteroids)?;
+                anise.with_supplementary_kernel(&asteroids_path)
+            }
+            #[cfg(feature = "ephem-builtin")]
+            _ => Err(OutfitError::InvalidJPLEphemFileSource(
+                "the main-belt asteroid supplementary kernel requires the ephem-anise backend"
+                    .to_string(),
+            )),
+        }
     }
 
     /// Return Earth's heliocentric state at `ephem_time`.
@@ -1013,6 +1010,22 @@ mod jpl_ephem_tests {
             prop_assert!((pos_ecl[0] - pos_equ[0]).abs() < 1e-12);
             prop_assert!((pos_ecl.norm() - pos_equ.norm()).abs() < 1e-12 * pos_equ.norm());
         }
+    }
+
+    /// `with_main_belt_asteroids` requires an ANISE-backed handle; called on
+    /// the in-house reader it must return a clean error, never panic. Only
+    /// reachable when both backends are compiled in — with `ephem-anise`
+    /// alone, `JPLEphem` has no other variant to call it on.
+    #[test]
+    #[cfg(all(feature = "ephem-builtin", feature = "ephem-anise"))]
+    fn with_main_belt_asteroids_rejects_the_builtin_backend() {
+        let source: EphemFileSource = "naif:DE440"
+            .try_into()
+            .expect("failed to parse JPL ephemeris source");
+        let mut jpl =
+            JPLEphem::from_builtin(source).expect("failed to load the in-house NAIF reader");
+        let err = jpl.with_main_belt_asteroids().unwrap_err();
+        assert!(matches!(err, OutfitError::InvalidJPLEphemFileSource(_)));
     }
 }
 

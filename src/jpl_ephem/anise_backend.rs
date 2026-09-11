@@ -226,30 +226,28 @@ impl AniseEphem {
     }
 
     /// Load an additional SPK kernel into this backend (e.g. the main-belt
-    /// asteroid supplementary kernel), returning a new handle.
+    /// asteroid supplementary kernel), in place.
+    ///
+    /// After this call, this handle can resolve every body covered by either
+    /// the kernel(s) it already had loaded or `path`.
     ///
     /// # Arguments
     ///
     /// * `path` – resolved ephemeris file to add; it must denote a NAIF SPK
     ///   kernel.
     ///
-    /// # Returns
-    ///
-    /// A new [`AniseEphem`] whose kernel can resolve every body covered by
-    /// either the original kernel(s) or `path`.
-    ///
     /// # Errors
     ///
     /// * [`OutfitError::InvalidJPLEphemFileSource`] – the path denotes a
     ///   legacy DE binary, which this backend cannot read.
     /// * [`OutfitError::AniseEphemerisError`] – the kernel could not be parsed.
-    pub fn with_supplementary_kernel(self, path: &EphemFilePath) -> Result<Self, OutfitError> {
-        let almanac = Arc::unwrap_or_clone(self.almanac)
+    pub fn with_supplementary_kernel(&mut self, path: &EphemFilePath) -> Result<(), OutfitError> {
+        let almanac = (*self.almanac)
+            .clone()
             .load(spk_path(path)?.as_str())
             .map_err(|err| OutfitError::AniseEphemerisError(err.to_string()))?;
-        Ok(Self {
-            almanac: Arc::new(almanac),
-        })
+        self.almanac = Arc::new(almanac);
+        Ok(())
     }
 
     /// Heliocentric equatorial-mean-J2000 state of a NAIF body relative to the

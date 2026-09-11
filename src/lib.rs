@@ -496,8 +496,11 @@ pub(crate) mod test_fixture {
         let source: EphemFileSource = "naif:DE440"
             .try_into()
             .expect("Failed to parse JPL ephemeris source");
-        JPLEphem::from_anise_with_main_belt_asteroids(&source)
-            .expect("Failed to load the ANISE DE440 ephemeris with main-belt asteroids")
+        let mut jpl =
+            JPLEphem::from_anise(&source).expect("Failed to load the ANISE DE440 ephemeris");
+        jpl.with_main_belt_asteroids()
+            .expect("Failed to load the main-belt asteroid supplementary kernel");
+        jpl
     });
 
     pub(crate) static DATASET_2015AB: LazyLock<ObsDataset> = LazyLock::new(|| {

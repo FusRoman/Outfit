@@ -1,7 +1,7 @@
 //! Integration test: main-belt asteroids as N-body perturbers (ANISE backend).
 //!
 //! Loads the supplementary asteroid kernel through
-//! [`JPLEphem::from_anise_with_main_belt_asteroids`] and checks that adding
+//! [`JPLEphem::with_main_belt_asteroids`] and checks that adding
 //! Ceres, Vesta and Pallas to `NBodyConfig::perturbing_bodies` perturbs the
 //! propagated orbit away from the Sun-only solution by a small, finite
 //! amount — the physical-bounds style used elsewhere for N-body
@@ -23,8 +23,10 @@ fn load_ephem_with_asteroids() -> JPLEphem {
     let source: EphemFileSource = "naif:DE440"
         .try_into()
         .expect("failed to parse JPL ephemeris source");
-    JPLEphem::from_anise_with_main_belt_asteroids(&source)
-        .expect("failed to load DE440 with the main-belt asteroid supplementary kernel")
+    let mut jpl = JPLEphem::from_anise(&source).expect("failed to load DE440 through ANISE");
+    jpl.with_main_belt_asteroids()
+        .expect("failed to load the main-belt asteroid supplementary kernel");
+    jpl
 }
 
 /// A main-belt-like test orbit whose reference epoch is `epoch` (MJD TT).

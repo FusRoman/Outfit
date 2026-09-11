@@ -168,7 +168,8 @@ pub fn known_main_belt_asteroids_by_mass() -> impl Iterator<Item = NaifIds> {
 /// Each entry is ready to push into
 /// [`NBodyConfig::perturbing_bodies`](crate::propagator::NBodyConfig::perturbing_bodies)
 /// once the ANISE backend is built with
-/// [`JPLEphem::from_anise_with_main_belt_asteroids`](crate::jpl_ephem::JPLEphem::from_anise_with_main_belt_asteroids).
+/// [`JPLEphem::from_anise`](crate::jpl_ephem::JPLEphem::from_anise) and
+/// [`JPLEphem::with_main_belt_asteroids`](crate::jpl_ephem::JPLEphem::with_main_belt_asteroids).
 /// The 300 bodies come from the `codes_300ast_20100725.bsp` supplementary
 /// kernel; see the embedded main-belt asteroid GM table for the exact list
 /// and its source.

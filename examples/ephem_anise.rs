@@ -31,8 +31,9 @@ fn main() -> Result<(), OutfitError> {
     // `ephem-builtin` is also enabled (unlike `JPLEphem::new`, which prefers
     // ANISE automatically whenever it is compiled in). The kernel is
     // downloaded into the same local cache directory as the other backends
-    // on first use.
-    let jpl_ephem = JPLEphem::from_anise(source)?;
+    // on first use. `mut` is needed for step 5 below, which loads a second
+    // kernel into this same handle.
+    let mut jpl_ephem = JPLEphem::from_anise(source)?;
 
     // Step 3 — Pick an evaluation epoch and query Earth, exactly as with the
     // other two backends: the public `earth_ephemeris` / `body_ephemeris` API
@@ -63,13 +64,13 @@ fn main() -> Result<(), OutfitError> {
 
     // Step 5 — Load the main-belt asteroid supplementary kernel and retry.
     //
-    // `from_anise_with_main_belt_asteroids` loads DE440 plus a second SPK
-    // kernel covering 300 numbered asteroids (downloaded once, then cached).
-    // Once loaded, `NaifIds::AST(_)` bodies resolve like any other body.
-    let source: EphemFileSource = "naif:DE440".try_into()?;
-    let jpl_ephem_with_asteroids = JPLEphem::from_anise_with_main_belt_asteroids(source)?;
+    // `with_main_belt_asteroids` mutates this handle in place, adding a
+    // second SPK kernel covering 300 numbered asteroids (downloaded once,
+    // then cached) on top of the DE440 kernel already loaded. Once it
+    // returns, `NaifIds::AST(_)` bodies resolve like any other body.
+    jpl_ephem.with_main_belt_asteroids()?;
     let (ceres_pos, ceres_vel) =
-        jpl_ephem_with_asteroids.body_ephemeris(ceres, &epoch, EphemerisFrame::Equatorial)?;
+        jpl_ephem.body_ephemeris(ceres, &epoch, EphemerisFrame::Equatorial)?;
     println!(
         "{ceres} heliocentric position (AU): x={:.9} y={:.9} z={:.9}",
         ceres_pos.x, ceres_pos.y, ceres_pos.z

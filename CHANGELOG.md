@@ -34,11 +34,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     main-belt asteroid by its official minor-planet number (e.g. `1` for
     Ceres); `AsteroidNumber::CERES` / `PALLAS` / `VESTA` are provided for
     convenience.
-  - New constructor `JPLEphem::from_anise_with_main_belt_asteroids` loads DE440
-    plus a supplementary NAIF SPK kernel
-    (`codes_300ast_20100725.bsp`, downloaded and cached like the primary
-    kernel) covering 300 numbered asteroids. Once loaded, any of them can be
-    added to `NBodyConfig::perturbing_bodies` like any other body.
+  - New method `JPLEphem::with_main_belt_asteroids(&mut self)` loads a
+    supplementary NAIF SPK kernel (`codes_300ast_20100725.bsp`, downloaded
+    and cached like the primary kernel) covering 300 numbered asteroids into
+    an existing ANISE-backed handle (built with `JPLEphem::from_anise`), in
+    place. Once loaded, any of them can be added to
+    `NBodyConfig::perturbing_bodies` like any other body.
   - `propagator::planet_gm::known_main_belt_asteroids()` returns all 300 as
     ready-to-use `NaifIds::AST(_)` perturbers, each with a gravitational
     parameter from the kernel's own published mass table — pick as many or as

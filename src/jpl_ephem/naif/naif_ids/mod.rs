@@ -129,7 +129,7 @@ pub enum ErrorId {
 /// * `AST` (a numbered main-belt asteroid) is resolvable only through the
 ///   ANISE backend, and only once the main-belt asteroid supplementary
 ///   kernel has been loaded with
-///   [`JPLEphem::from_anise_with_main_belt_asteroids`](crate::JPLEphem::from_anise_with_main_belt_asteroids).
+///   [`JPLEphem::with_main_belt_asteroids`](crate::JPLEphem::with_main_belt_asteroids).
 ///   With the in-house backend (`ephem-builtin`), or with the ANISE backend
 ///   built from [`JPLEphem::from_anise`](crate::JPLEphem::from_anise) alone
 ///   (no supplementary kernel), querying an `AST` id returns
