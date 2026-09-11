@@ -11,11 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     feature. `ephem-builtin` (in the `default` set) keeps the in-house JPL DE /
     NAIF SPK reader; `ephem-anise` swaps in the [`anise`](https://crates.io/crates/anise)
     toolkit, a Rust reimplementation of the NAIF SPICE toolkit validated against
-    SPICE to machine precision. This is motivated by the still-open velocity-chain
-    bug in the in-house NAIF reader (see the ignored regression test
-    `naif_body_ephemeris_velocity_is_the_position_derivative`): the ANISE backend
-    computes correct velocities, and a new regression test
-    (`body_velocity_matches_central_difference`) locks that in.
+    SPICE to machine precision.
   - New constructors on `JPLEphem`: `from_builtin` and `from_anise`. `JPLEphem::new`
     is unchanged and selects the backend from the enabled features — the ANISE
     backend when both are on; use `from_builtin` to force the in-house reader.
@@ -98,6 +94,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     Sun-only propagation path is unchanged (rotation-invariant).
 
 ### Fixed
+
+- **Built-in NAIF SPK backend — velocity wrong by a factor of ~2/86400²**
+  - `EphemerisRecord::interpolate` scaled the Chebyshev derivative by
+    `2.0 / radius` instead of the correct chain-rule factor `1.0 / radius`
+    (`t = (et - mid) / radius` is linear in `et` with slope `1 / radius`),
+    making every interpolated velocity exactly twice too large.
+  - Separately, `JPLEphem::earth_ephemeris` and `JPLEphem::body_ephemeris`
+    (`JPLEphem::NaifFile` branches, in `jpl_ephem::mod`) *divided* the
+    resulting AU/s velocity by `86400.0` where converting AU/s to AU/day
+    requires *multiplying* by it (1 day = 86 400 s).
+  - Combined, every velocity returned by the built-in NAIF SPK reader
+    (`JPLEphem::from_builtin("naif:...")`, and `JPLEphem::new`/`TryFrom<&str>`
+    when only `ephem-builtin` is enabled) was off by a factor of
+    `2 / 86400² ≈ 2.7 × 10⁻¹⁰` — numerically indistinguishable from zero for
+    any practical purpose. Positions were unaffected. This path had no test
+    coverage under default features: the shared test fixtures load the
+    Horizon reader for `ephem-builtin` builds, so the built-in NAIF reader's
+    velocity was only ever exercised together with `ephem-anise`, where
+    `JPLEphem::Anise` answers the query instead of `JPLEphem::NaifFile`.
+  - Fixed both the interpolation scale factor and the two unit conversions.
+    Un-ignored and fixed the existing regression test
+    `naif_body_ephemeris_velocity_is_the_position_derivative` (previously
+    `#[ignore]`d, documenting the bug), added its property-based counterpart
+    `naif_velocity_matches_central_difference` (mirroring the existing
+    Horizon-backend property test), and added a property test directly on
+    `EphemerisRecord::interpolate` (`velocity_is_the_position_time_derivative`)
+    checking the analytic velocity against a central finite difference of the
+    position for arbitrary Chebyshev coefficients.
 
 - **`NaifData::ephemeris` (built-in NAIF SPK backend) — panicked instead of
   returning an error**

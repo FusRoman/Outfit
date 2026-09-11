@@ -129,3 +129,22 @@ strip = false
 [package.metadata.docs.rs]
 features = ["parallel", "ephem-anise"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+[[example]]
+name = "ephem_horizon"
+path = "examples/ephem_horizon.rs"
+required-features = ["ephem-builtin"]
+
+[[example]]
+name = "ephem_naif"
+path = "examples/ephem_naif.rs"
+required-features = ["ephem-builtin"]
+
+[[example]]
+name = "ephem_anise"
+path = "examples/ephem_anise.rs"
+required-features = ["ephem-anise"]
+
+[[example]]
+name = "ephem_unified"
+path = "examples/ephem_unified.rs"

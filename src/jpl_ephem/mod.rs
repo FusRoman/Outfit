@@ -463,7 +463,7 @@ impl JPLEphem {
                     )
                     .unwrap_or_else(|err| panic!("NAIF Earth ephemeris lookup failed: {err}"))
                     .to_au();
-                (ephem_res.position, ephem_res.velocity.map(|v| v / 86400.0)) // Convert from AU/s to AU/day
+                (ephem_res.position, ephem_res.velocity.map(|v| v * 86400.0)) // Convert from AU/s to AU/day
             }
             #[cfg(feature = "ephem-anise")]
             JPLEphem::Anise(anise) => {
@@ -635,7 +635,7 @@ impl JPLEphem {
                 let pos = body_res.position - sun_res.position;
                 let vel = (body_res.velocity.unwrap_or_else(Vector3::zeros)
                     - sun_res.velocity.unwrap_or_else(Vector3::zeros))
-                    / 86400.0;
+                    * 86400.0;
                 Ok((pos, vel))
             }
         }
@@ -808,24 +808,40 @@ mod jpl_ephem_tests {
         }
     }
 
-    /// KNOWN BUG (tracked separately): the NAIF velocity chain is wrong by a
-    /// large factor. `EphemerisRecord::interpolate` scales the Chebyshev
-    /// derivative by `2.0 / radius` instead of `1.0 / radius` (velocities 2×
-    /// too fast), and both `body_ephemeris` / `earth_ephemeris` then *divide*
-    /// by 86400 where they must *multiply* (AU/s → AU/day). Net: NAIF
-    /// `body_ephemeris` velocity is ~`2 / 86400²` of the true value. This test
-    /// documents the discrepancy and will pass once the NAIF chain is fixed.
+    /// On the NAIF backend the returned velocity must be the time derivative
+    /// of the returned position, i.e. genuinely in AU/day — same contract as
+    /// [`horizon_body_ephemeris_velocity_is_the_position_derivative`].
+    ///
+    /// Regression test for a former bug: `EphemerisRecord::interpolate` scaled
+    /// the Chebyshev derivative by `2.0 / radius` instead of the correct
+    /// chain-rule factor `1.0 / radius` (velocities 2× too fast), and both
+    /// `body_ephemeris` / `earth_ephemeris` then *divided* by 86400 where they
+    /// must *multiply* (AU/s → AU/day). Net effect: NAIF `body_ephemeris`
+    /// velocity was `2 / 86400²` of the true value — a factor of about
+    /// 3.7 billion.
     #[test]
-    #[ignore = "NAIF velocity chain bug — see body of test; fix tracked separately"]
     fn naif_body_ephemeris_velocity_is_the_position_derivative() {
-        let body = NaifIds::PB(PlanetaryBary::Mars);
+        let bodies = [
+            NaifIds::PB(PlanetaryBary::EarthMoon),
+            NaifIds::PB(PlanetaryBary::Mars),
+            NaifIds::PB(PlanetaryBary::Jupiter),
+            NaifIds::PB(PlanetaryBary::Saturn),
+        ];
+        let h = 0.25_f64;
         let mjd_tt = 59_500.0_f64;
-        let v = JPL_EPHEM_NAIF
-            .body_ephemeris(body, &epoch_tt(mjd_tt), EphemerisFrame::Equatorial)
-            .unwrap()
-            .1;
-        let v_fd = velocity_by_central_difference(&JPL_EPHEM_NAIF, body, mjd_tt, 0.25);
-        assert!((v - v_fd).norm() / v.norm() < 1e-5);
+
+        for &body in &bodies {
+            let v = JPL_EPHEM_NAIF
+                .body_ephemeris(body, &epoch_tt(mjd_tt), EphemerisFrame::Equatorial)
+                .unwrap()
+                .1;
+            let v_fd = velocity_by_central_difference(&JPL_EPHEM_NAIF, body, mjd_tt, h);
+            let rel_err = (v - v_fd).norm() / v.norm();
+            assert!(
+                rel_err < 1e-5,
+                "{body:?}: velocity {v:?} vs finite difference {v_fd:?}, rel err {rel_err:e}"
+            );
+        }
     }
 
     proptest! {
@@ -849,6 +865,28 @@ mod jpl_ephem_tests {
                 .unwrap()
                 .1;
             let v_fd = velocity_by_central_difference(&JPL_EPHEM_HORIZON, body, mjd_tt, 0.25);
+            prop_assert!((v - v_fd).norm() / v.norm() < 1e-5);
+        }
+
+        /// Same property as [`horizon_velocity_matches_central_difference`],
+        /// on the NAIF backend.
+        #[test]
+        fn naif_velocity_matches_central_difference(
+            mjd_tt in 55_000.0_f64..62_000.0,
+            body_idx in 0usize..4,
+        ) {
+            let body = [
+                NaifIds::PB(PlanetaryBary::Mars),
+                NaifIds::PB(PlanetaryBary::Jupiter),
+                NaifIds::PB(PlanetaryBary::Saturn),
+                NaifIds::PB(PlanetaryBary::Uranus),
+            ][body_idx];
+
+            let v = JPL_EPHEM_NAIF
+                .body_ephemeris(body, &epoch_tt(mjd_tt), EphemerisFrame::Equatorial)
+                .unwrap()
+                .1;
+            let v_fd = velocity_by_central_difference(&JPL_EPHEM_NAIF, body, mjd_tt, 0.25);
             prop_assert!((v - v_fd).norm() / v.norm() < 1e-5);
         }
     }
