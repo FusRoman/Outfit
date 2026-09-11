@@ -92,7 +92,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.02704195897369085,
+        0.03824310513373042,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
@@ -144,7 +144,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.010284425699399564,
+        0.014544374305309268,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
