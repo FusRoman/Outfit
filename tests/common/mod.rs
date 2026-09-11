@@ -1,21 +1,25 @@
 use approx::abs_diff_eq;
 use outfit::{orbit_type::uncertainty::OrbitalCovariance, JPLEphem, OrbitalElements};
 
-/// Ephemeris source string for the planetary backend selected at compile time.
+/// Ephemeris source string for the planetary backend [`JPLEphem::new`] picks
+/// at compile time.
 ///
-/// The in-house reader (`ephem-builtin`) is exercised through the legacy DE
-/// binary; when only `ephem-anise` is enabled the ANISE backend is used, which
-/// reads NAIF SPK kernels only.
+/// `JPLEphem::new` builds the ANISE backend whenever `ephem-anise` is
+/// enabled — even if `ephem-builtin` is also on — and only falls back to the
+/// in-house reader otherwise. ANISE reads NAIF SPK kernels only, so the
+/// source token must match that same precedence: `"naif:DE440"` whenever
+/// `ephem-anise` is enabled, `"horizon:DE440"` (the in-house legacy DE
+/// reader) otherwise.
 ///
 /// # Returns
 ///
-/// `"horizon:DE440"` with `ephem-builtin`, otherwise `"naif:DE440"`.
+/// `"naif:DE440"` with `ephem-anise` enabled, otherwise `"horizon:DE440"`.
 #[allow(dead_code)]
 pub fn ephem_spec() -> &'static str {
-    if cfg!(feature = "ephem-builtin") {
-        "horizon:DE440"
-    } else {
+    if cfg!(feature = "ephem-anise") {
         "naif:DE440"
+    } else {
+        "horizon:DE440"
     }
 }
 

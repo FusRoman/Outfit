@@ -1,7 +1,16 @@
+//! Exact-oracle non-regression test for the Gauss IOD pipeline on a
+//! parquet-sourced dataset. The reference orbits reproduce the in-house
+//! Horizon ephemeris reader's arithmetic bit-for-bit (`1e-11`), so the whole
+//! file is gated on `ephem-builtin` and forces that reader explicitly rather
+//! than following `JPLEphem::new`'s compile-time backend precedence — ANISE
+//! only agrees with it to `~1e-8`.
+#![cfg(feature = "ephem-builtin")]
+
 mod common;
 
 use approx::assert_relative_eq;
 use hifitime::ut1::Ut1Provider;
+use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
 use outfit::orbit_type::{keplerian_element::KeplerianElements, OrbitalElements};
 use outfit::{FitIOD, IODParams, JPLEphem};
 use photom::io::polars::ContiguousChoice;
@@ -59,7 +68,11 @@ fn test_iod_from_polars() {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
 
-    let jpl_ephem: JPLEphem = common::load_ephem();
+    let source: EphemFileSource = "horizon:DE440"
+        .try_into()
+        .expect("failed to parse the Horizon ephemeris source");
+    let jpl_ephem: JPLEphem = JPLEphem::from_builtin(source)
+        .expect("failed to load the DE440 ephemeris through the in-house Horizon reader");
 
     let mut full_orbit = obs_dataset
         .fit_full_iod(

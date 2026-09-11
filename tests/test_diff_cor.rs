@@ -28,10 +28,42 @@ fn build_test_fixtures() -> (
     IODParams,
     DifferentialCorrectionConfig,
 ) {
+    build_test_fixtures_with(common::load_ephem())
+}
+
+/// Load the DE440 in-house Horizon reader explicitly.
+///
+/// Unlike [`common::load_ephem`], this always resolves to the legacy DE
+/// binary reader (`ephem-builtin`'s [`horizon`](outfit::jpl_ephem::horizon)
+/// backend), regardless of whether `ephem-anise` is also enabled — `naif:`
+/// sources would instead be resolved by ANISE whenever it is compiled in
+/// (see [`outfit::JPLEphem::new`]'s backend precedence). The exact-oracle
+/// tests in this file need this: their reference values were captured
+/// against this specific reader, and only agree with it to `1e-10` — ANISE
+/// and the built-in reader agree with each other to `~1e-8` only.
+#[cfg(feature = "ephem-builtin")]
+fn load_horizon_ephem() -> JPLEphem {
+    let source: outfit::jpl_ephem::download_jpl_file::EphemFileSource = "horizon:DE440"
+        .try_into()
+        .expect("failed to parse the Horizon ephemeris source");
+    JPLEphem::from_builtin(source)
+        .expect("failed to load the DE440 ephemeris through the in-house Horizon reader")
+}
+
+/// Same as [`build_test_fixtures`], but with an explicitly provided
+/// ephemeris backend instead of [`common::load_ephem`]'s compile-time
+/// default.
+fn build_test_fixtures_with(
+    jpl_ephem: JPLEphem,
+) -> (
+    JPLEphem,
+    Ut1Provider,
+    ObsDataset,
+    IODParams,
+    DifferentialCorrectionConfig,
+) {
     let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
         .expect("Download of the JPL short time scale UT1 data failed");
-
-    let jpl_ephem: JPLEphem = common::load_ephem();
 
     let (obs_dataset, errors) = ObsDataset::from_mpc_80_col_files(&[
         "tests/data/2015AB.obs",
@@ -80,7 +112,8 @@ fn build_test_fixtures() -> (
 fn test_diff_cor() {
     let nr_tol = 1e-10;
 
-    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, diff_cor_config) = build_test_fixtures();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, diff_cor_config) =
+        build_test_fixtures_with(load_horizon_ephem());
 
     let full_orbit = obs_dataset
         .fit_lsq(
@@ -555,7 +588,8 @@ fn test_diff_cor_nbody() {
 #[test]
 #[ignore = "prints regenerated oracle literals for test_diff_cor_nbody_nonregression"]
 fn dump_nbody_nonregression_oracle() {
-    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) = build_test_fixtures();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) =
+        build_test_fixtures_with(load_horizon_ephem());
 
     let nbody_config = NBodyConfig {
         perturbing_bodies: vec![
@@ -671,7 +705,8 @@ fn dump_nbody_nonregression_oracle() {
 #[cfg(feature = "ephem-builtin")]
 #[test]
 fn test_diff_cor_nbody_nonregression() {
-    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) = build_test_fixtures();
+    let (jpl_ephem, ut1_provider, obs_dataset, iod_params, _) =
+        build_test_fixtures_with(load_horizon_ephem());
 
     let nbody_config = NBodyConfig {
         perturbing_bodies: vec![
