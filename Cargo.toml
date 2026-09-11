@@ -148,3 +148,12 @@ required-features = ["ephem-anise"]
 [[example]]
 name = "ephem_unified"
 path = "examples/ephem_unified.rs"
+
+[[example]]
+name = "fit_orbit_iod_then_diffcor"
+path = "examples/fit_orbit_iod_then_diffcor.rs"
+
+[[example]]
+name = "fit_iod_parallel"
+path = "examples/fit_iod_parallel.rs"
+required-features = ["parallel"]
