@@ -2076,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "outfit"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "aberth",
  "ahash",
@@ -2179,9 +2179,9 @@ dependencies = [
 
 [[package]]
 name = "photom"
-version = "0.4.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1da7b297d3d9ca6122953f2aa6528f66cbc49960825bd018388d9d1115c4422"
+checksum = "11e9c7c14b9c9aa4cc7cc7c649a1f5d431efc8b154a03ddc0a8c4c0a1a4138eb"
 dependencies = [
  "ahash",
  "camino",
