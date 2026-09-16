@@ -1,6 +1,6 @@
 [package]
 name = "outfit"
-version = "5.0.0"
+version = "5.0.1"
 edition = "2021"
 license-file = "LICENSE"
 rust-version = "1.94.0"
@@ -22,7 +22,7 @@ exclude = [".github/", "examples/", "tests/", ".opencode/", ".husky/"]
 
 [dependencies]
 
-photom = { version = "0.4.0", default-features = false }
+photom = { version = "1.0.0", default-features = false }
 
 aberth = { version = "0.4.1", default-features = false }
 ahash = { version = "0.8.11", default-features = false }
@@ -73,7 +73,7 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 husky-rs = "0.1.5"
 proptest = "1.7.0"
 
-photom = { version = "0.4.0", default-features = false, features = [
+photom = { version = "1.0.0", default-features = false, features = [
     "mpc_80_col",
     "polars",
 ] }
