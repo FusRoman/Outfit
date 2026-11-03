@@ -1,6 +1,6 @@
 [package]
 name = "outfit"
-version = "5.0.1"
+version = "5.0.2"
 edition = "2021"
 license-file = "LICENSE"
 rust-version = "1.94.0"
