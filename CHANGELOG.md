@@ -31,6 +31,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Golden values (orbital elements, RMS, observer positions) in the unit and
     integration tests were regenerated against this snapshot.
 
+- **Tests use a frozen MPC observatory list**
+  - photom downloads the MPC `ObsCodes.html` list once into the user cache and
+    never refreshes it, so local runs and CI used different observatory
+    coordinates. The MPC revised the position of M22 (ATLAS South Africa,
+    Sutherland), which broke the `test_diff_cor` oracles for 33803 and 8467 on
+    CI only.
+  - The list is now frozen in `tests/data/mpc/mpc_obs.html`, and
+    `.cargo/config.toml` points photom to it via `PHOTOM_MPC_CACHE_DIR`.
+
 ## [5.0.1] - 2026-09-16
 
 ### Changed

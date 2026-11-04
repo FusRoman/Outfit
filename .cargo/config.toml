@@ -1,0 +1,6 @@
+[env]
+# Frozen MPC observatory list (ObsCodes.html) used by photom, for reproducible
+# tests: the MPC revises observatory coordinates over time (e.g. M22), which
+# shifts golden results. Without this, photom fetches the live list into the
+# user cache directory and never refreshes it.
+PHOTOM_MPC_CACHE_DIR = { value = "tests/data/mpc", relative = true }
