@@ -444,9 +444,15 @@ pub(crate) mod test_fixture {
 
     use crate::{jpl_ephem::download_jpl_file::EphemFileSource, JPLEphem};
 
+    /// Frozen JPL EOP2 snapshot. JPL regenerates `latest_eop2.long` daily and
+    /// revises past values, which shifts golden results at the 1e-14 level.
+    const EOP_FILE: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/latest_eop2_2026-11-02.long"
+    );
+
     pub(crate) static UT1_PROVIDER: LazyLock<Ut1Provider> = LazyLock::new(|| {
-        Ut1Provider::download_from_jpl("latest_eop2.long")
-            .expect("Download of the JPL short time scale UT1 data failed")
+        Ut1Provider::from_eop_file(EOP_FILE).expect("Failed to load the frozen EOP file")
     });
 
     /// Load a DE440 ephemeris with the in-house reader from a source spec.

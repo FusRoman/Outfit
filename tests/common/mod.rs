@@ -1,4 +1,5 @@
 use approx::abs_diff_eq;
+use hifitime::ut1::Ut1Provider;
 use outfit::{orbit_type::uncertainty::OrbitalCovariance, JPLEphem, OrbitalElements};
 
 /// Ephemeris source string for the planetary backend [`JPLEphem::new`] picks
@@ -239,4 +240,25 @@ fn approx_equal_covariance(
             .all(|(a, b)| abs_diff_eq!(a, b, epsilon = tol)),
         _ => false,
     }
+}
+
+/// Path to the frozen JPL EOP2 file used by every test.
+///
+/// JPL regenerates `latest_eop2.long` daily and revises past values, which
+/// shifts golden results at the 1e-14 level. Tests load this snapshot
+/// instead of downloading the live file.
+#[allow(dead_code)]
+pub const EOP_FILE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/data/latest_eop2_2026-11-02.long"
+);
+
+/// Load the UT1 provider from the frozen EOP file [`EOP_FILE`].
+///
+/// # Panics
+///
+/// Panics if the EOP file cannot be read or parsed.
+#[allow(dead_code)]
+pub fn load_ut1() -> Ut1Provider {
+    Ut1Provider::from_eop_file(EOP_FILE).expect("failed to load the frozen EOP file")
 }

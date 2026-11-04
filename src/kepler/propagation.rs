@@ -845,6 +845,97 @@ mod tests_propagation_edge_cases {
         assert_vec_close(warm.v1, cold.v1, 1e-9, "velocity");
     }
 
+    /// Newton-only solver type, so that a Newton failure is not hidden by the
+    /// Brent fallback of `SolverKind::Auto`.
+    fn newton_solver_type(psi_guess: Option<f64>) -> SolverType {
+        let mut solver_type = default_solver_type();
+        solver_type.kind = SolverKind::NewtonRaphson;
+        solver_type.params.psi_guess = psi_guess;
+        solver_type
+    }
+
+    #[test]
+    fn test_backward_warm_started_with_forward_psi() {
+        let position = Vector3::new(
+            -8.264_959_160_036_185e-1,
+            3.919_660_608_486_096_3e-1,
+            2.229_919_607_182_842_5e-2,
+        );
+        let velocity = Vector3::new(
+            -5.447_367_111_934_2e-3,
+            -2.107_596_146_728_544e-2,
+            1.560_811_152_125_889_6e-3,
+        );
+
+        let forward = propagate_universal(
+            &position,
+            &velocity,
+            T0,
+            T0 + 10.0,
+            newton_solver_type(None),
+        )
+        .expect("forward propagation should converge");
+        assert!(forward.psy > 0.0);
+
+        let warm = propagate_universal(
+            &position,
+            &velocity,
+            T0,
+            T0 - 10.0,
+            newton_solver_type(Some(forward.psy)),
+        )
+        .expect("backward propagation seeded with a forward psi should converge");
+        let cold = propagate_universal(
+            &position,
+            &velocity,
+            T0,
+            T0 - 10.0,
+            newton_solver_type(None),
+        )
+        .expect("cold backward propagation should converge");
+
+        assert!(warm.psy < 0.0);
+        assert_vec_close(warm.r1, cold.r1, 1e-9, "position");
+        assert_vec_close(warm.v1, cold.v1, 1e-9, "velocity");
+    }
+
+    #[test]
+    fn test_round_trip_with_warm_start() {
+        let position = Vector3::new(
+            -8.264_959_160_036_185e-1,
+            3.919_660_608_486_096_3e-1,
+            2.229_919_607_182_842_5e-2,
+        );
+        let velocity = Vector3::new(
+            -5.447_367_111_934_2e-3,
+            -2.107_596_146_728_544e-2,
+            1.560_811_152_125_889_6e-3,
+        );
+
+        let out = propagate_universal(
+            &position,
+            &velocity,
+            T0,
+            T0 + 10.0,
+            newton_solver_type(None),
+        )
+        .expect("outbound propagation should converge");
+
+        // The return leg is seeded with the outbound psi, which always has the
+        // wrong sign for it.
+        let back = propagate_universal(
+            &out.r1,
+            &out.v1,
+            T0 + 10.0,
+            T0,
+            newton_solver_type(Some(out.psy)),
+        )
+        .expect("return propagation should converge");
+
+        assert_vec_close(back.r1, position, 1e-9, "position");
+        assert_vec_close(back.v1, velocity, 1e-9, "velocity");
+    }
+
     #[test]
     fn test_solver_kind_agreement() {
         let position = Vector3::new(

@@ -696,7 +696,7 @@ mod test_obs_ext {
             )
             .unwrap();
 
-        assert_eq!(rms, 153.84607281520138);
+        assert_eq!(rms, 153.84607281721313);
     }
 
     mod proptests_extract_errors {
@@ -834,12 +834,12 @@ mod test_obs_ext {
         let expected_orbit = OrbitalElements::Keplerian {
             elements: KeplerianElements {
                 reference_epoch: 57049.22904475403,
-                semi_major_axis: 1.8017609974509807,
-                eccentricity: 0.2835733667643381,
-                inclination: 0.20267686119302475,
-                ascending_node_longitude: 0.00799201841873464,
-                periapsis_argument: 1.245034216916367,
-                mean_anomaly: 0.4405089048961484,
+                semi_major_axis: 1.8017609974508968,
+                eccentricity: 0.2835733667643018,
+                inclination: 0.20267686119301795,
+                ascending_node_longitude: 0.007992018418716315,
+                periapsis_argument: 1.2450342169165167,
+                mean_anomaly: 0.44050890489611066,
             },
             uncertainty: None,
             covariance: None,
@@ -848,7 +848,7 @@ mod test_obs_ext {
         assert!(approx_equal(orbit, &expected_orbit, 1e-14));
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            222.16583195747745,
+            222.16583126868989,
             epsilon = 1e-14
         );
     }

@@ -9,7 +9,6 @@
 mod common;
 
 use approx::assert_relative_eq;
-use hifitime::ut1::Ut1Provider;
 use outfit::jpl_ephem::download_jpl_file::EphemFileSource;
 use outfit::orbit_type::{keplerian_element::KeplerianElements, OrbitalElements};
 use outfit::{FitIOD, IODParams, JPLEphem};
@@ -65,8 +64,7 @@ fn test_iod_from_polars() {
         .build()
         .unwrap();
 
-    let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
-        .expect("Download of the JPL short time scale UT1 data failed");
+    let ut1_provider = common::load_ut1();
 
     let source: EphemFileSource = "horizon:DE440"
         .try_into()
@@ -91,12 +89,12 @@ fn test_iod_from_polars() {
     let expected_orbit = OrbitalElements::Keplerian {
         elements: KeplerianElements {
             reference_epoch: 60894.372896385554,
-            semi_major_axis: 0.5415009930884174,
-            eccentricity: 0.9027228307040831,
-            inclination: 0.31200939353818746,
-            ascending_node_longitude: 5.550735343593096,
-            periapsis_argument: 3.1638244350882596,
-            mean_anomaly: 2.7888128618151495,
+            semi_major_axis: 0.541500993374083,
+            eccentricity: 0.9027228296226688,
+            inclination: 0.3120093908106981,
+            ascending_node_longitude: 5.550735343624791,
+            periapsis_argument: 3.163824435180773,
+            mean_anomaly: 2.788812862316506,
         },
         uncertainty: None,
         covariance: None,
@@ -105,7 +103,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.03824310513373042,
+        0.038243152464060015,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
@@ -117,12 +115,12 @@ fn test_iod_from_polars() {
     let expected_orbit = OrbitalElements::Keplerian {
         elements: KeplerianElements {
             reference_epoch: 60835.25573266984,
-            semi_major_axis: 0.635955220245824,
-            eccentricity: 0.5904849550180079,
-            inclination: 0.2263529126300279,
-            ascending_node_longitude: 4.366539949885583,
-            periapsis_argument: 3.3107966723035602,
-            mean_anomaly: 3.0157533331616966,
+            semi_major_axis: 0.6359552205081981,
+            eccentricity: 0.5904849543618848,
+            inclination: 0.22635291292788373,
+            ascending_node_longitude: 4.366539950357365,
+            periapsis_argument: 3.3107966717676875,
+            mean_anomaly: 3.0157533336404514,
         },
         uncertainty: None,
         covariance: None,
@@ -131,7 +129,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.025397381294328548,
+        0.025397386915472865,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
@@ -143,12 +141,12 @@ fn test_iod_from_polars() {
     let expected_orbit = OrbitalElements::Keplerian {
         elements: KeplerianElements {
             reference_epoch: 60894.252965553926,
-            semi_major_axis: 1.2470198995234851,
-            eccentricity: 0.20820694222020417,
-            inclination: 0.08116316040090545,
-            ascending_node_longitude: 2.4955492264777863,
-            periapsis_argument: 2.5470318525400066,
-            mean_anomaly: 0.2983936748196788,
+            semi_major_axis: 1.247019899458668,
+            eccentricity: 0.20820694219067884,
+            inclination: 0.08116316043057617,
+            ascending_node_longitude: 2.4955492264292034,
+            periapsis_argument: 2.547031852373195,
+            mean_anomaly: 0.29839367498266756,
         },
         uncertainty: None,
         covariance: None,
@@ -157,7 +155,7 @@ fn test_iod_from_polars() {
     assert!(approx_equal(&expected_orbit, orbit, test_epsilon));
     assert_relative_eq!(
         best_orbit.orbit_quality(),
-        0.014544374305309268,
+        0.014544406342677106,
         epsilon = test_epsilon,
         max_relative = test_max_relative
     );
