@@ -189,6 +189,40 @@ impl UniversalKeplerParams {
             OrbitType::Parabolic => Some(prelim_parabolic(self)),
         }
     }
+
+    /// Select the starting value $\psi_0$ for the Kepler solvers.
+    ///
+    /// # Goal
+    ///
+    /// Use the caller-supplied warm start
+    /// [`psi_guess`](crate::kepler::SolverParams::psi_guess) when it is usable,
+    /// and fall back to [`prelim_kepuni`](UniversalKeplerParams::prelim_kepuni)
+    /// otherwise.
+    ///
+    /// # Sign rule
+    ///
+    /// The universal anomaly always has the sign of $\Delta t$: since
+    /// $\mathrm{d}t / \mathrm{d}\psi = r / \sqrt{\mu} > 0$ and $\psi(0) = 0$,
+    /// $\Delta t$ grows monotonically with $\psi$. A guess of the opposite sign
+    /// (typically the $\psi$ of a forward step reused for a backward one) is
+    /// therefore on the wrong side of zero and is dropped.
+    ///
+    /// # Return
+    ///
+    /// * `Some(psi_guess)` — if the guess is finite and `psi_guess * dt > 0`.
+    /// * Otherwise the result of [`prelim_kepuni`](UniversalKeplerParams::prelim_kepuni)
+    ///   (also used when `dt == 0` or `psi_guess == 0`).
+    ///
+    /// # See also
+    ///
+    /// * [`solve_kepuni_with_guess`] — Newton–Raphson solver.
+    /// * [`UniversalKeplerParams::solve`] — dispatch to the configured solver.
+    pub fn initial_psi(&self) -> Option<f64> {
+        match self.solver_type.params.psi_guess {
+            Some(psi) if psi.is_finite() && psi * self.dt > 0.0 => Some(psi),
+            _ => self.prelim_kepuni(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -345,6 +379,110 @@ mod kepler_params_tests {
             sol_warm.universal_anomaly,
             epsilon = 1e-10
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression tests — warm start with a psi of the wrong sign
+    // -----------------------------------------------------------------------
+
+    /// Return a copy of `params` warm-started with `psi_guess`.
+    fn with_guess(params: UniversalKeplerParams, psi_guess: f64) -> UniversalKeplerParams {
+        let mut warm = params;
+        warm.solver_type.params.psi_guess = Some(psi_guess);
+        warm
+    }
+
+    /// Solve `params` cold, then warm-started with the psi of the opposite
+    /// time of flight (always of the wrong sign), and check both agree.
+    fn assert_wrong_sign_warm_start_converges(params: UniversalKeplerParams) {
+        let mut opposite = params;
+        opposite.dt = -params.dt;
+        let wrong_sign_guess = opposite
+            .solve()
+            .expect("opposite-direction solve should converge")
+            .universal_anomaly;
+        assert!(wrong_sign_guess * params.dt < 0.0);
+
+        let sol_cold = params.solve().expect("cold start should converge");
+        let warm = with_guess(params, wrong_sign_guess);
+        let sol_warm = warm
+            .solve()
+            .expect("warm start with a wrong-sign psi should converge");
+
+        assert!(
+            kepler_residual(&sol_warm, &warm) < 1e-10,
+            "residual too large: {}",
+            kepler_residual(&sol_warm, &warm)
+        );
+        assert!(sol_warm.universal_anomaly * params.dt > 0.0);
+        assert_abs_diff_eq!(
+            sol_cold.universal_anomaly,
+            sol_warm.universal_anomaly,
+            epsilon = 1e-10
+        );
+    }
+
+    #[test]
+    fn newton_warm_start_wrong_sign_backward() {
+        // Minimal case shrunk by proptest in fink-fat: a = 0.3, e ~ 0, ±1 day.
+        assert_wrong_sign_warm_start_converges(elliptic_params(
+            -1.0,
+            0.3,
+            SolverKind::NewtonRaphson,
+        ));
+    }
+
+    #[test]
+    fn newton_warm_start_wrong_sign_forward() {
+        assert_wrong_sign_warm_start_converges(elliptic_params(
+            1.0,
+            0.3,
+            SolverKind::NewtonRaphson,
+        ));
+    }
+
+    #[test]
+    fn newton_warm_start_wrong_sign_hyperbolic() {
+        assert_wrong_sign_warm_start_converges(hyperbolic_params(
+            -5.0,
+            1e-5,
+            SolverKind::NewtonRaphson,
+        ));
+    }
+
+    #[test]
+    fn brent_warm_start_wrong_sign_backward() {
+        assert_wrong_sign_warm_start_converges(elliptic_params(-1.0, 0.3, SolverKind::BrentDecker));
+    }
+
+    #[test]
+    fn auto_warm_start_wrong_sign_backward() {
+        assert_wrong_sign_warm_start_converges(elliptic_params(-1.0, 0.3, SolverKind::Auto));
+    }
+
+    #[test]
+    fn initial_psi_keeps_valid_guess() {
+        let params = with_guess(elliptic_params(-10.0, 1.0, SolverKind::NewtonRaphson), -0.2);
+        assert_eq!(params.initial_psi(), Some(-0.2));
+    }
+
+    #[test]
+    fn initial_psi_drops_unusable_guess() {
+        let base = elliptic_params(-10.0, 1.0, SolverKind::NewtonRaphson);
+        let prelim = base.prelim_kepuni();
+        for guess in [0.2, 0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                with_guess(base, guess).initial_psi(),
+                prelim,
+                "guess {guess} should fall back to prelim_kepuni"
+            );
+        }
+    }
+
+    #[test]
+    fn initial_psi_ignores_guess_for_zero_dt() {
+        let base = elliptic_params(0.0, 1.0, SolverKind::NewtonRaphson);
+        assert_eq!(with_guess(base, 0.2).initial_psi(), base.prelim_kepuni());
     }
 
     // -----------------------------------------------------------------------
@@ -558,6 +696,31 @@ mod kepler_params_tests {
                     sol_b.universal_anomaly
                 );
              }
+        }
+
+        /// Whatever the sign of the warm-start guess, Newton must converge to
+        /// the cold-start root, whose sign is the sign of `dt`.
+        #[test]
+        fn proptest_newton_warm_start_any_sign(
+            (a, dt) in elliptic_strategy(),
+            backward in any::<bool>(),
+            guess in prop_oneof![(-50.0_f64..-1e-3_f64), (1e-3_f64..50.0_f64)],
+        ) {
+            let dt = if backward { -dt } else { dt };
+            let cold = elliptic_params(dt, a, SolverKind::NewtonRaphson);
+            let warm = with_guess(cold, guess);
+
+            let sol_cold = cold.solve().expect("cold start should converge");
+            let sol_warm = warm.solve().expect("warm start should converge");
+
+            prop_assert!(sol_warm.universal_anomaly * dt > 0.0);
+            prop_assert!(
+                (sol_cold.universal_anomaly - sol_warm.universal_anomaly).abs()
+                    < 1e-9 * (1.0 + sol_cold.universal_anomaly.abs()),
+                "psi mismatch: cold={}, warm={}",
+                sol_cold.universal_anomaly,
+                sol_warm.universal_anomaly
+            );
         }
 
         /// The `orbit_type` method must return a regime consistent with the

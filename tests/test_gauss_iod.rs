@@ -32,49 +32,49 @@ fn expected_results() -> Vec<ExpectedResult> {
             orbit: OrbitalElements::Keplerian {
                 elements: KeplerianElements {
                     reference_epoch: 57049.2684537375,
-                    semi_major_axis: 1.801740835743616,
-                    eccentricity: 0.28356259478492557,
-                    inclination: 0.2026828189979528,
-                    ascending_node_longitude: 0.007951791820548622,
-                    periapsis_argument: 1.2450647642587158,
-                    mean_anomaly: 0.4408048786626789,
+                    semi_major_axis: 1.8017408357435853,
+                    eccentricity: 0.2835625947849,
+                    inclination: 0.20268281899795498,
+                    ascending_node_longitude: 0.007951791820480579,
+                    periapsis_argument: 1.2450647642589465,
+                    mean_anomaly: 0.44080487866260754,
                 },
                 uncertainty: None,
                 covariance: None,
             },
-            rms: 66.97479288637471,
+            rms: 66.97479294218962,
         },
         ExpectedResult {
             orbit: OrbitalElements::Keplerian {
                 elements: KeplerianElements {
                     reference_epoch: 60672.2443617134,
-                    semi_major_axis: 3.2199380906809876,
-                    eccentricity: 0.0624192099888107,
-                    inclination: 0.1829771029880289,
-                    ascending_node_longitude: 0.030775930195064964,
-                    periapsis_argument: 1.9053705720223801,
-                    mean_anomaly: 4.980622835177979,
+                    semi_major_axis: 3.2199380906766213,
+                    eccentricity: 0.062419209987893194,
+                    inclination: 0.1829771029880662,
+                    ascending_node_longitude: 0.030775930195269436,
+                    periapsis_argument: 1.9053705720361855,
+                    mean_anomaly: 4.980622835162594,
                 },
                 uncertainty: None,
                 covariance: None,
             },
-            rms: 0.5739558189489471,
+            rms: 0.5739558188544629,
         },
         ExpectedResult {
             orbit: OrbitalElements::Keplerian {
                 elements: KeplerianElements {
                     reference_epoch: 60465.26777915681,
-                    semi_major_axis: 2.1874983804796972,
-                    eccentricity: 0.20256414489486008,
-                    inclination: 0.11906245183260411,
-                    ascending_node_longitude: 3.0918063960305293,
-                    periapsis_argument: 2.4793248309745692,
-                    mean_anomaly: 4.934465465531324,
+                    semi_major_axis: 2.1874983806597665,
+                    eccentricity: 0.2025641449546787,
+                    inclination: 0.11906245182869549,
+                    ascending_node_longitude: 3.091806395999626,
+                    periapsis_argument: 2.479324830682491,
+                    mean_anomaly: 4.934465465979427,
                 },
                 uncertainty: None,
                 covariance: None,
             },
-            rms: 18.963755533886232,
+            rms: 18.96375448637929,
         },
     ]
 }
@@ -97,8 +97,7 @@ fn load_horizon_ephem() -> JPLEphem {
 }
 
 fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
-    let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
-        .expect("Download of the JPL short time scale UT1 data failed");
+    let ut1_provider = common::load_ut1();
 
     let jpl_ephem: JPLEphem = load_horizon_ephem();
 

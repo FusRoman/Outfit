@@ -20,8 +20,7 @@ struct CacheFixture {
 
 impl CacheFixture {
     fn new() -> Self {
-        let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
-            .expect("Download of the JPL short time scale UT1 data failed");
+        let ut1_provider = common::load_ut1();
 
         let jpl_ephem = common::load_ephem();
 

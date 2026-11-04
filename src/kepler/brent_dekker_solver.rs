@@ -407,7 +407,9 @@ fn update_bracket(state: &mut BrentState, next_psi: f64, f_next: f64) {
 /// 2. **Orbit-type guard** — parabolic orbits ($\alpha = 0$) are rejected
 ///    immediately.
 /// 3. **Bracket construction** ([`bracket_kepler_root`]) — starting from the
-///    heuristic guess $\psi_0$ returned by [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni), the search
+///    initial guess $\psi_0$ returned by [`initial_psi`](crate::kepler::UniversalKeplerParams::initial_psi)
+///    (the warm start if it has the sign of $\Delta t$, otherwise
+///    [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni)), the search
 ///    interval is expanded geometrically (by factor $\phi$, the golden ratio)
 ///    until a sign change is detected:
 ///    $$f(\psi_\text{lo}) \cdot f(\psi_\text{hi}) \leq 0$$
@@ -469,11 +471,7 @@ fn update_bracket(state: &mut BrentState, next_psi: f64, f_next: f64) {
 pub fn solve_kepuni_brent_dekker(
     params: &UniversalKeplerParams,
 ) -> Option<UniversalKeplerSolution> {
-    let psi_initial_guess = params
-        .solver_type
-        .params
-        .psi_guess
-        .map_or_else(|| params.prelim_kepuni(), Some)?;
+    let psi_initial_guess = params.initial_psi()?;
 
     let (psi_lo, psi_hi) = bracket_kepler_root(psi_initial_guess, params)?;
 

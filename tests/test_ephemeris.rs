@@ -47,7 +47,7 @@ fn build_fixtures() -> (
     IODParams,
     DifferentialCorrectionConfig,
 ) {
-    let ut1 = Ut1Provider::download_from_jpl("latest_eop2.long").expect("UT1 download failed");
+    let ut1 = common::load_ut1();
 
     let jpl: JPLEphem = common::load_ephem();
 

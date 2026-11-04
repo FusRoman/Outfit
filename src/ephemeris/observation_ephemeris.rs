@@ -1042,7 +1042,7 @@ mod test_observations_ephemeris {
 
             let obs = obs_dataset.get_observation(0).unwrap();
             let rms_error = obs.ephemeris_error(&cache, &JPL_EPHEM_HORIZON, &equinoctial_element);
-            assert_eq!(rms_error.unwrap(), 75.00445641224026);
+            assert_eq!(rms_error.unwrap(), 75.0044563889242);
         }
 
         #[test]

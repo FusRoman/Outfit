@@ -2,6 +2,35 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.2] - 2026-11-03
+
+### Fixed
+
+- **Newton–Raphson Kepler solver failed on a warm start of the wrong sign**
+  - The universal anomaly ψ always has the sign of Δt. Warm-starting a backward
+    propagation with the ψ of a forward step (or vice versa) made the
+    sign-change damping halve ψ at every iteration without ever crossing zero,
+    so the solver returned `OutfitError::NewtonRaphsonKeplerConvergence`. This
+    broke round trips and backward propagations seeded with the previous ψ.
+  - New `UniversalKeplerParams::initial_psi`, shared by the Newton and
+    Brent–Dekker solvers: a `psi_guess` that is non-finite, zero, or of the
+    opposite sign to Δt is dropped in favour of `prelim_kepuni`.
+  - The sign-change damping now only applies while ψ has the sign of Δt, and
+    the non-finite restart value takes the sign of Δt.
+
+### Changed
+
+- **Tests use a frozen JPL EOP snapshot instead of downloading `latest_eop2.long`**
+  - JPL regenerates `latest_eop2.long` daily and revises past UT1−UTC values. A
+    recent revision (around the UTC/UT1 leap second handling) shifted golden
+    results at the 1e-14 level and broke exact-equality tests.
+  - The tests (unit test fixture in `src/lib.rs` and integration tests through
+    `tests/common::load_ut1`) now load the UT1 provider from the snapshot
+    `tests/data/latest_eop2_2026-11-02.long` with `Ut1Provider::from_eop_file`,
+    so results are reproducible and no network access is needed for EOP data.
+  - Golden values (orbital elements, RMS, observer positions) in the unit and
+    integration tests were regenerated against this snapshot.
+
 ## [5.0.1] - 2026-09-16
 
 ### Changed

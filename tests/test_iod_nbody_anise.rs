@@ -67,8 +67,7 @@ fn load_anise_ephem() -> JPLEphem {
 }
 
 fn build_test_fixtures() -> (JPLEphem, Ut1Provider, ObsDataset, IODParams) {
-    let ut1_provider = Ut1Provider::download_from_jpl("latest_eop2.long")
-        .expect("Download of the JPL short time scale UT1 data failed");
+    let ut1_provider = common::load_ut1();
 
     let jpl_ephem = load_anise_ephem();
 
@@ -138,12 +137,12 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = KeplerianElements {
             reference_epoch: 57049.268453737495,
-            semi_major_axis: 1.8017408423118684,
-            eccentricity: 0.2835625965507337,
-            inclination: 0.20268281960978812,
-            ascending_node_longitude: 0.007951790269288736,
-            periapsis_argument: 1.2450647682681684,
-            mean_anomaly: 0.44080487509602306,
+            semi_major_axis: 1.8017408423118564,
+            eccentricity: 0.283562596550713,
+            inclination: 0.20268281960979226,
+            ascending_node_longitude: 0.007951790269219904,
+            periapsis_argument: 1.2450647682683995,
+            mean_anomaly: 0.4408048750959458,
         };
         assert!(
             keplerian_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -151,18 +150,18 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            66.95944968679994,
+            66.95944969907143,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = KeplerianElements {
             reference_epoch: 57049.2684537375,
-            semi_major_axis: 1.801740835743616,
-            eccentricity: 0.28356259478492557,
-            inclination: 0.2026828189979528,
-            ascending_node_longitude: 0.007951791820548622,
-            periapsis_argument: 1.2450647642587158,
-            mean_anomaly: 0.4408048786626789,
+            semi_major_axis: 1.8017408357435853,
+            eccentricity: 0.2835625947849,
+            inclination: 0.20268281899795498,
+            ascending_node_longitude: 0.007951791820480579,
+            periapsis_argument: 1.2450647642589465,
+            mean_anomaly: 0.44080487866260754,
         };
         assert!(
             keplerian_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -172,7 +171,7 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            66.97479288637471,
+            66.97479294218962,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }
@@ -189,12 +188,12 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = KeplerianElements {
             reference_epoch: 60672.24436171338,
-            semi_major_axis: 3.219938101498167,
-            eccentricity: 0.06241921076952775,
-            inclination: 0.1829771029369076,
-            ascending_node_longitude: 0.030775929741449645,
-            periapsis_argument: 1.9053705337352118,
-            mean_anomaly: 4.980622874270296,
+            semi_major_axis: 3.2199381014940345,
+            eccentricity: 0.06241921076866068,
+            inclination: 0.18297710293694305,
+            ascending_node_longitude: 0.030775929741641336,
+            periapsis_argument: 1.9053705337483742,
+            mean_anomaly: 4.980622874255642,
         };
         assert!(
             keplerian_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -202,18 +201,18 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            0.5739558168478603,
+            0.5739558166838535,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = KeplerianElements {
             reference_epoch: 60672.2443617134,
-            semi_major_axis: 3.2199380906809876,
-            eccentricity: 0.0624192099888107,
-            inclination: 0.1829771029880289,
-            ascending_node_longitude: 0.030775930195064964,
-            periapsis_argument: 1.9053705720223801,
-            mean_anomaly: 4.980622835177979,
+            semi_major_axis: 3.2199380906766213,
+            eccentricity: 0.062419209987893194,
+            inclination: 0.1829771029880662,
+            ascending_node_longitude: 0.030775930195269436,
+            periapsis_argument: 1.9053705720361855,
+            mean_anomaly: 4.980622835162594,
         };
         assert!(
             keplerian_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -223,7 +222,7 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            0.5739558189489471,
+            0.5739558188544629,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }
@@ -240,12 +239,12 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = KeplerianElements {
             reference_epoch: 60465.26777915684,
-            semi_major_axis: 2.187498244628872,
-            eccentricity: 0.20256410084480792,
-            inclination: 0.1190624547048666,
-            ascending_node_longitude: 3.0918064191610055,
-            periapsis_argument: 2.4793250509385394,
-            mean_anomaly: 4.93446513046927,
+            semi_major_axis: 2.1874982448104126,
+            eccentricity: 0.2025641009051343,
+            inclination: 0.11906245470092386,
+            ascending_node_longitude: 3.091806419129847,
+            periapsis_argument: 2.4793250506440367,
+            mean_anomaly: 4.9344651309211205,
         };
         assert!(
             keplerian_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -253,18 +252,18 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            18.964548754974384,
+            18.96454770398426,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = KeplerianElements {
             reference_epoch: 60465.26777915681,
-            semi_major_axis: 2.1874983804796972,
-            eccentricity: 0.20256414489486008,
-            inclination: 0.11906245183260411,
-            ascending_node_longitude: 3.0918063960305293,
-            periapsis_argument: 2.4793248309745692,
-            mean_anomaly: 4.934465465531324,
+            semi_major_axis: 2.1874983806597665,
+            eccentricity: 0.2025641449546787,
+            inclination: 0.11906245182869549,
+            ascending_node_longitude: 3.091806395999626,
+            periapsis_argument: 2.479324830682491,
+            mean_anomaly: 4.934465465979427,
         };
         assert!(
             keplerian_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -274,7 +273,7 @@ fn gauss_iod_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             best_orbit.orbit_quality(),
-            18.963755533886232,
+            18.96375448637929,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }
@@ -327,12 +326,12 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = EquinoctialElements {
             reference_epoch: 60672.24436171338,
-            semi_major_axis: 3.20757096833667,
-            eccentricity_sin_lon: 0.053581766032698624,
-            eccentricity_cos_lon: -0.023173717298280883,
-            tan_half_incl_sin_node: 0.002888164539997416,
-            tan_half_incl_cos_node: 0.0917950842859397,
-            mean_longitude: 0.6266478295821134,
+            semi_major_axis: 3.207570968343197,
+            eccentricity_sin_lon: 0.053581766035026554,
+            eccentricity_cos_lon: -0.023173717297720883,
+            tan_half_incl_sin_node: 0.002888164539958646,
+            tan_half_incl_cos_node: 0.09179508428588358,
+            mean_longitude: 0.6266478295853958,
         };
         assert!(
             equinoctial_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -340,18 +339,18 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.34506775153708685,
+            0.34506775156504055,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = EquinoctialElements {
             reference_epoch: 60672.2443617134,
-            semi_major_axis: 3.2075709628598497,
-            eccentricity_sin_lon: 0.05358176605531737,
-            eccentricity_cos_lon: -0.023173718721778213,
-            tan_half_incl_sin_node: 0.0028881645534556155,
-            tan_half_incl_cos_node: 0.09179508427378168,
-            mean_longitude: 0.6266478312914119,
+            semi_major_axis: 3.207570962866833,
+            eccentricity_sin_lon: 0.05358176605779368,
+            eccentricity_cos_lon: -0.02317371872117522,
+            tan_half_incl_sin_node: 0.0028881645534142926,
+            tan_half_incl_cos_node: 0.09179508427372225,
+            mean_longitude: 0.6266478312948931,
         };
         assert!(
             equinoctial_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -361,7 +360,7 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.3450677500966914,
+            0.3450677501261278,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }
@@ -382,12 +381,12 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = EquinoctialElements {
             reference_epoch: 60465.26777915684,
-            semi_major_axis: 2.190700101846553,
-            eccentricity_sin_lon: -0.13400272345657308,
-            eccentricity_cos_lon: 0.1533800919526371,
-            tan_half_incl_sin_node: 0.0029985238516215817,
-            tan_half_incl_cos_node: -0.059485934741895334,
-            mean_longitude: 4.224751252995984,
+            semi_major_axis: 2.1907001018465175,
+            eccentricity_sin_lon: -0.1340027234565689,
+            eccentricity_cos_lon: 0.1533800919526236,
+            tan_half_incl_sin_node: 0.002998523851621838,
+            tan_half_incl_cos_node: -0.05948593474189358,
+            mean_longitude: 4.224751252995968,
         };
         assert!(
             equinoctial_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -395,18 +394,18 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.4087749464969875,
+            0.40877494651441326,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = EquinoctialElements {
             reference_epoch: 60465.26777915681,
-            semi_major_axis: 2.1907001009004063,
-            eccentricity_sin_lon: -0.13400272182063963,
-            eccentricity_cos_lon: 0.15338009135380934,
-            tan_half_incl_sin_node: 0.0029985238451201465,
-            tan_half_incl_cos_node: -0.05948593480260206,
-            mean_longitude: 4.224751249408142,
+            semi_major_axis: 2.1907001009003797,
+            eccentricity_sin_lon: -0.13400272182064238,
+            eccentricity_cos_lon: 0.1533800913537971,
+            tan_half_incl_sin_node: 0.002998523845120412,
+            tan_half_incl_cos_node: -0.05948593480260023,
+            mean_longitude: 4.224751249408136,
         };
         assert!(
             equinoctial_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -416,7 +415,7 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.40877453793803264,
+            0.4087745379548085,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }
@@ -437,12 +436,12 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
 
         let anise_oracle = EquinoctialElements {
             reference_epoch: 57049.268453737495,
-            semi_major_axis: 1.8017539669836347,
-            eccentricity_sin_lon: 0.2693970248928224,
-            eccentricity_cos_lon: 0.08869492333525088,
-            tan_half_incl_sin_node: 0.0008307916904965478,
-            tan_half_incl_cos_node: 0.1016705970804047,
-            mean_longitude: 1.6936595604040119,
+            semi_major_axis: 1.8017539669836284,
+            eccentricity_sin_lon: 0.269397024892828,
+            eccentricity_cos_lon: 0.0886949233352466,
+            tan_half_incl_sin_node: 0.0008307916904969703,
+            tan_half_incl_cos_node: 0.10167059708040241,
+            mean_longitude: 1.6936595604040174,
         };
         assert!(
             equinoctial_close(anise, &anise_oracle, ANISE_ORACLE_TOL),
@@ -450,18 +449,18 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.6128051637563992,
+            0.6128051633992085,
             epsilon = ANISE_ORACLE_TOL
         );
 
         let horizon_oracle = EquinoctialElements {
             reference_epoch: 57049.2684537375,
-            semi_major_axis: 1.8017539671066383,
-            eccentricity_sin_lon: 0.2693970247101432,
-            eccentricity_cos_lon: 0.08869492421101689,
-            tan_half_incl_sin_node: 0.0008307916711964613,
-            tan_half_incl_cos_node: 0.10167059716063825,
-            mean_longitude: 1.69365955893391,
+            semi_major_axis: 1.8017539671066376,
+            eccentricity_sin_lon: 0.26939702471014915,
+            eccentricity_cos_lon: 0.0886949242110166,
+            tan_half_incl_sin_node: 0.0008307916711973057,
+            tan_half_incl_cos_node: 0.1016705971606363,
+            mean_longitude: 1.6936595589339083,
         };
         assert!(
             equinoctial_close(anise, &horizon_oracle, CROSS_BACKEND_ELEMENT_TOL),
@@ -471,7 +470,7 @@ fn nbody_diff_cor_anise_matches_horizon_within_tolerance() {
         );
         assert_relative_eq!(
             orbit.orbit_quality(),
-            0.6128100691261191,
+            0.6128100688234707,
             max_relative = CROSS_BACKEND_RMS_MAX_RELATIVE
         );
     }

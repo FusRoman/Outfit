@@ -87,16 +87,19 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 ///      scale-aware to remain meaningful for both small and large flight times.
 /// 2. **Orbit-type guard** — parabolic orbits ( $ \alpha = 0 $ ) are rejected
 ///    immediately.
-/// 3. **Initial guess** — uses the caller-supplied `psi_guess` if provided
-///    (warm start), otherwise falls back to [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni).
+/// 3. **Initial guess** ([`initial_psi`](crate::kepler::UniversalKeplerParams::initial_psi))
+///    — uses the caller-supplied `psi_guess` (warm start) if it is finite and
+///    has the sign of  $ \Delta t $ , otherwise falls back to
+///    [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni).
 /// 4. **Newton–Raphson loop** with three safeguards applied at each step:
 ///    - **Derivative guard** — if  $ |f'(\psi)| $  is too small or non-finite,
 ///       $ \psi $  is halved to escape a flat region.
 ///    - **Step limiter** —  $ |\Delta\psi| $  is capped at
 ///       $ k \cdot (1 + |\psi|) $  with  $ k = 2 $ , preventing overshooting on
 ///      hyperbolic trajectories.
-///    - **Sign-change damping** — if the Newton step would cross zero,  $ \psi $
-///      is halved instead to avoid oscillations around  $ \psi = 0 $ .
+///    - **Sign-change damping** — if the Newton step would cross zero while
+///       $ \psi $  already has the sign of  $ \Delta t $ ,  $ \psi $  is halved
+///      instead to avoid oscillations around  $ \psi = 0 $ .
 ///
 /// # Convergence criteria
 ///
@@ -129,7 +132,8 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 ///   - `dt` — time of flight  $ \Delta t $ .
 /// * `convergency` – Optional absolute tolerance on  $ |\Delta\psi| $
 ///   (default:  $ 100\varepsilon \approx 2.2 \times 10^{-14} $ ).
-/// * `psi_guess` – Optional warm-start value for  $ \psi_0 $ . If `None`,
+/// * `psi_guess` – Optional warm-start value for  $ \psi_0 $ . If `None`, not
+///   finite, or of the opposite sign to  $ \Delta t $ ,
 ///   [`prelim_kepuni`](crate::kepler::UniversalKeplerParams::prelim_kepuni) is used to construct the initial guess.
 ///
 /// # Return
@@ -151,11 +155,7 @@ const MAX_RELATIVE_STEP_FACTOR: f64 = 2.0;
 pub fn solve_kepuni_with_guess(params: &UniversalKeplerParams) -> Option<UniversalKeplerSolution> {
     let residual_tolerance = compute_residual_tolerance(params.mu.sqrt() * params.dt);
 
-    let psi_initial = params
-        .solver_type
-        .params
-        .psi_guess
-        .map_or_else(|| params.prelim_kepuni(), Some)?;
+    let psi_initial = params.initial_psi()?;
 
     run_newton(psi_initial, params, residual_tolerance)
 }
@@ -246,7 +246,8 @@ fn run_newton(
 
     (0..MAX_NEWTON_ITERATIONS).find_map(|_| {
         if !psi.is_finite() {
-            psi = 0.5;
+            // Restart on the side of the root: psi has the sign of dt.
+            psi = 0.5 * params.dt.signum();
             return None;
         }
 
@@ -262,7 +263,7 @@ fn run_newton(
         }
 
         let newton_step = compute_safeguarded_step(psi, residual, derivative);
-        let psi_candidate = apply_sign_change_damping(psi, newton_step);
+        let psi_candidate = apply_sign_change_damping(psi, newton_step, params.dt);
 
         psi = psi_candidate;
 
@@ -304,10 +305,15 @@ fn compute_safeguarded_step(psi: f64, residual: f64, derivative: f64) -> f64 {
 /// If applying `step` to `psi` would flip the sign of $\psi$ (i.e., cross
 /// zero), halve $\psi$ instead. This prevents oscillations around $\psi = 0$
 /// that are a common instability pattern in the Newton iteration.
+///
+/// The damping only applies while $\psi$ is on the side of the root, i.e. has
+/// the sign of `dt`. When $\psi$ is on the wrong side, crossing zero is
+/// required to reach the root, so the step is applied as is; halving would
+/// only drive $\psi$ towards zero without ever changing its sign.
 #[inline]
-fn apply_sign_change_damping(psi: f64, step: f64) -> f64 {
+fn apply_sign_change_damping(psi: f64, step: f64, dt: f64) -> f64 {
     let psi_candidate = psi + step;
-    if psi_candidate * psi < 0.0 {
+    if psi_candidate * psi < 0.0 && psi * dt > 0.0 {
         0.5 * psi
     } else {
         psi_candidate
@@ -349,4 +355,29 @@ fn check_step_convergence(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests_sign_change_damping {
+    use super::apply_sign_change_damping;
+
+    #[test]
+    fn halves_psi_when_crossing_away_from_root_side() {
+        // psi already has the sign of dt: crossing zero is damped.
+        assert_eq!(apply_sign_change_damping(1.0, -3.0, 10.0), 0.5);
+        assert_eq!(apply_sign_change_damping(-1.0, 3.0, -10.0), -0.5);
+    }
+
+    #[test]
+    fn allows_crossing_when_psi_on_wrong_side() {
+        // psi has the opposite sign of dt: the step must cross zero.
+        assert_eq!(apply_sign_change_damping(1.0, -3.0, -10.0), -2.0);
+        assert_eq!(apply_sign_change_damping(-1.0, 3.0, 10.0), 2.0);
+    }
+
+    #[test]
+    fn keeps_step_without_sign_change() {
+        assert_eq!(apply_sign_change_damping(1.0, 0.5, 10.0), 1.5);
+        assert_eq!(apply_sign_change_damping(1.0, -0.5, -10.0), 0.5);
+    }
 }
